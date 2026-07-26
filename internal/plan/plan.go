@@ -85,6 +85,39 @@ func (e Entry) Key() string {
 // IsEpic reports whether the entry declares a parent issue.
 func (e Entry) IsEpic() bool { return e.Type == TypeEpic }
 
+// EdgeKind names the two dependency edges an entry can declare. The strings
+// are the words the wiring step reports edges by, and — once resolved to
+// issue numbers — part of the checkpoint key that keeps a resume from
+// re-attempting an edge it already wired.
+type EdgeKind string
+
+const (
+	ParentEdge    EdgeKind = "parent"
+	BlockedByEdge EdgeKind = "blocked-by"
+)
+
+// Edge is one dependency the entry declares, still unresolved: the caller
+// maps the reference to an issue number.
+type Edge struct {
+	Kind EdgeKind
+	To   Ref
+}
+
+// Edges returns the entry's dependency edges in wiring order — parent
+// first, then blockers. Both are the same operation apart from the API call
+// they make, so stating them as one list lets the wiring step treat them
+// alike: resolve, skip if already wired, warn on failure.
+func (e Entry) Edges() []Edge {
+	var out []Edge
+	if e.Parent != nil {
+		out = append(out, Edge{Kind: ParentEdge, To: *e.Parent})
+	}
+	for _, b := range e.BlockedBy {
+		out = append(out, Edge{Kind: BlockedByEdge, To: b})
+	}
+	return out
+}
+
 // rawEntry is the wire shape of one line; field names match the create
 // command's flags.
 type rawEntry struct {

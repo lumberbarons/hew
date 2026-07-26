@@ -126,8 +126,9 @@ issue number. `discovered-from` adds the same origin link the create flag
 does. Bodies come from the same section fields the create flags use —
 `where`, `problem` or `goal`, `fix` or `approach`, `done-when` (a list, one
 checklist item each) — composed into the body template; `body` carries raw
-long-form text instead (mutually exclusive with the section fields). Creation is checkpointed to the `--state` file after every write, so a
-failed run resumes without creating duplicates; unknown fields, dangling
+long-form text instead (mutually exclusive with the section fields). Creation and dependency wiring are both checkpointed to the `--state` file as
+they happen, so a failed run resumes without creating duplicates or
+re-attempting edges that already landed; unknown fields, dangling
 references, and dependency cycles between entries are all rejected before
 anything is written.
 

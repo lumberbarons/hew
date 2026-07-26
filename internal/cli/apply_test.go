@@ -30,6 +30,17 @@ func applySetup(t *testing.T, fixture string) (*fakeClient, *App, ApplyOpts) {
 	return f, app, ApplyOpts{File: file, StatePath: filepath.Join(dir, "state.json")}
 }
 
+// readState reads a checkpoint file the way a resume does, so a test that
+// asserts on it fails when the on-disk shape drifts from what load expects.
+func readState(t *testing.T, path string) *batchState {
+	t.Helper()
+	state, err := loadBatchState(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	return state
+}
+
 func TestApplyCreatesAndWires(t *testing.T) {
 	f, app, opts := applySetup(t, applyFixture)
 	if err := app.Apply(ctx, opts); err != nil {
@@ -68,11 +79,7 @@ func TestApplyCreatesAndWires(t *testing.T) {
 		t.Errorf("collector body = %q", collector.Body)
 	}
 	// The id-less entry is checkpointed under its line key.
-	data, _ := os.ReadFile(opts.StatePath)
-	var state map[string]int
-	if err := json.Unmarshal(data, &state); err != nil {
-		t.Fatal(err)
-	}
+	state := readState(t, opts.StatePath).Mapping
 	if state["epic1"] != 101 || state["scaffold"] != 102 || state["line:3"] != 103 {
 		t.Errorf("state = %v", state)
 	}
@@ -147,14 +154,10 @@ func TestApplyResumesAfterCreateFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "rerun to resume") {
 		t.Fatalf("err = %v", err)
 	}
-	data, readErr := os.ReadFile(opts.StatePath)
-	if readErr != nil {
-		t.Fatalf("no state persisted before the crash: %v", readErr)
+	if _, err := os.Stat(opts.StatePath); err != nil {
+		t.Fatalf("no state persisted before the crash: %v", err)
 	}
-	var state map[string]int
-	if err := json.Unmarshal(data, &state); err != nil {
-		t.Fatal(err)
-	}
+	state := readState(t, opts.StatePath).Mapping
 	if len(state) != 1 || state["epic1"] != 101 {
 		t.Fatalf("state after crash = %v", state)
 	}
@@ -166,10 +169,7 @@ func TestApplyResumesAfterCreateFailure(t *testing.T) {
 	if len(f.issues) != 4 { // #42 plus the three plan entries
 		t.Errorf("resume duplicated issues: %d total", len(f.issues))
 	}
-	data, _ = os.ReadFile(opts.StatePath)
-	if err := json.Unmarshal(data, &state); err != nil {
-		t.Fatal(err)
-	}
+	state = readState(t, opts.StatePath).Mapping
 	if len(state) != 3 || state["epic1"] != 101 {
 		t.Errorf("state after resume = %v", state)
 	}
@@ -269,6 +269,121 @@ func TestApplyFailedEdgeWarns(t *testing.T) {
 	errOut := app.ErrOut.(interface{ String() string }).String()
 	if !strings.Contains(errOut, "blocked-by edge") {
 		t.Errorf("no edge warning: %q", errOut)
+	}
+}
+
+// #46: re-running a finished plan created nothing but re-attempted every
+// edge, and GitHub answers a duplicate edge with an error — so a clean
+// resume printed a warning per edge under a "0 created, 0 wired" summary,
+// burying any warning that meant something.
+func TestApplyResumeSkipsWiredEdges(t *testing.T) {
+	f, app, opts := applySetup(t, applyFixture)
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	// Every edge the plan declares is on disk, keyed by resolved endpoints.
+	edges := readState(t, opts.StatePath).Edges
+	for _, want := range []string{"parent:102->101", "parent:103->101", "blocked-by:103->102", "blocked-by:103->42"} {
+		if !edges[want] {
+			t.Errorf("edge %q not checkpointed: %v", want, edges)
+		}
+	}
+
+	f.calls = nil
+	app2, out, errOut := newApp(f)
+	if err := app2.Apply(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "AddSubIssue") || strings.HasPrefix(c, "AddBlockedBy") {
+			t.Errorf("resume re-attempted an edge: %v", f.calls)
+			break
+		}
+	}
+	if errOut.String() != "" {
+		t.Errorf("resume warned: %q", errOut.String())
+	}
+	if !strings.Contains(out.String(), "0 created, 0 dependencies wired") {
+		t.Errorf("resume summary = %q", out.String())
+	}
+}
+
+// An edge that never landed is not checkpointed, so the next run retries it
+// and warns again — the whole point of recording the successful ones is
+// that the remaining warnings are real.
+func TestApplyResumeRetriesAFailedEdge(t *testing.T) {
+	f, app, opts := applySetup(t, `{"title":"x","type":"task","blocked-by":[999]}`+"\n")
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	if edges := readState(t, opts.StatePath).Edges; len(edges) != 0 {
+		t.Errorf("failed edge was checkpointed: %v", edges)
+	}
+
+	app2, _, errOut := newApp(f)
+	if err := app2.Apply(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errOut.String(), "blocked-by edge") {
+		t.Errorf("resume did not retry the failed edge: %q", errOut.String())
+	}
+}
+
+// State files written before edges were checkpointed are a bare key→number
+// map. A batch mid-flight across an upgrade must resume from one, not read
+// it as "nothing created yet" and duplicate everything.
+func TestApplyReadsALegacyStateFile(t *testing.T) {
+	f, app, opts := applySetup(t, applyFixture)
+	legacy := `{"epic1":101,"scaffold":102,"line:3":103}` + "\n"
+	if err := os.WriteFile(opts.StatePath, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "CreateIssue") {
+			t.Errorf("legacy state ignored, issues recreated: %v", f.calls)
+			break
+		}
+	}
+	if got := readState(t, opts.StatePath).Mapping["epic1"]; got != 101 {
+		t.Errorf("legacy mapping lost: %v", got)
+	}
+}
+
+// A state file need not carry both halves, and JSON has two ways to say so:
+// omit the key, or write null — and null is the one that reaches through
+// into the decoded struct and leaves a nil map behind, which the next create
+// would panic assigning into. Both shapes must load as an empty map.
+func TestApplyReadsAPartialStateFile(t *testing.T) {
+	// The recorded edge is between issues this plan never names, so nothing
+	// is skipped for the wrong reason.
+	cases := map[string]string{
+		"mapping key omitted": `{"edges":{"parent:998->999":true}}`,
+		"mapping is null":     `{"mapping":null,"edges":{"parent:998->999":true}}`,
+		"edges is null":       `{"mapping":{},"edges":null}`,
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			f, app, opts := applySetup(t, applyFixture)
+			if err := os.WriteFile(opts.StatePath, []byte(content+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := app.Apply(ctx, opts); err != nil {
+				t.Fatal(err)
+			}
+			if f.byNumber(101) == nil {
+				t.Fatal("nothing created from a partial state file")
+			}
+			state := readState(t, opts.StatePath)
+			if len(state.Mapping) != 3 {
+				t.Errorf("mapping after apply = %v, want the three plan entries", state.Mapping)
+			}
+			if len(state.Edges) < 4 {
+				t.Errorf("edges after apply = %v, want the plan's four", state.Edges)
+			}
+		})
 	}
 }
 

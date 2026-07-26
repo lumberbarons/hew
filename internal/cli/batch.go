@@ -13,6 +13,7 @@ import (
 
 	"github.com/lumberbarons/issues/internal/conventions"
 	"github.com/lumberbarons/issues/internal/gh"
+	"github.com/lumberbarons/issues/internal/plan"
 )
 
 // ensureLabels creates any missing convention labels plus the given extras.
@@ -41,25 +42,55 @@ func (a *App) ensureLabels(ctx context.Context, extras []gh.Label) error {
 	return nil
 }
 
+// batchState is what a batch write resumes from: which source keys became
+// which issues, and which dependency edges were already wired. Edges are
+// checkpointed because re-attempting one is not free — GitHub answers a
+// duplicate edge with an error the tool has to report, so a clean resume of
+// a finished plan buried its "0 created" summary in warnings (#46).
+type batchState struct {
+	Mapping map[string]int  `json:"mapping"`
+	Edges   map[string]bool `json:"edges,omitempty"`
+}
+
+// edgeKey identifies a wired edge by kind and resolved endpoints, so the
+// record survives a plan whose local ids or line numbers moved.
+func edgeKey(kind plan.EdgeKind, from, to int) string {
+	return fmt.Sprintf("%s:%d->%d", kind, from, to)
+}
+
 // loadBatchState reads a checkpoint file. A missing file is a fresh start; a
 // corrupt one aborts — treating it as empty would duplicate every
 // already-created issue.
-func loadBatchState(path string) (map[string]int, error) {
+func loadBatchState(path string) (*batchState, error) {
+	state := &batchState{Mapping: map[string]int{}, Edges: map[string]bool{}}
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return map[string]int{}, nil
+		return state, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	var state map[string]int
-	if err := json.Unmarshal(data, &state); err != nil {
+	// State files written before edges were checkpointed are a bare
+	// key→number map. Reading them keeps a batch that is mid-flight across
+	// an upgrade resumable instead of duplicating everything it created.
+	var legacy map[string]int
+	if err := json.Unmarshal(data, &legacy); err == nil {
+		state.Mapping = legacy
+		return state, nil
+	}
+	if err := json.Unmarshal(data, state); err != nil {
 		return nil, fmt.Errorf("%s is not a valid resume-state file: %w", path, err)
+	}
+	if state.Mapping == nil {
+		state.Mapping = map[string]int{}
+	}
+	if state.Edges == nil {
+		state.Edges = map[string]bool{}
 	}
 	return state, nil
 }
 
-func saveBatchState(path string, state map[string]int) error {
+func saveBatchState(path string, state *batchState) error {
 	data, err := json.MarshalIndent(state, "", "  ") // map keys marshal sorted
 	if err != nil {
 		return err

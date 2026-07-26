@@ -16,8 +16,9 @@ import (
 type ApplyOpts struct {
 	// File is the JSONL plan.
 	File string
-	// StatePath is where the entry-key→issue-number mapping is persisted
-	// after every create, making a failed run resumable. Empty means
+	// StatePath is where the entry-key→issue-number mapping and the edges
+	// already wired are persisted after every write, making a failed run
+	// resumable and a finished one a quiet no-op. Empty means
 	// File + ".state.json".
 	StatePath string
 	// DryRun prints the plan without touching GitHub.
@@ -74,7 +75,7 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 
 	return a.emitResult(map[string]any{
 		"created": created, "wired": wired, "warnings": warned,
-		"mapping": state,
+		"mapping": state.Mapping,
 	}, func() {
 		a.printf("applied %s: %d created, %d dependencies wired\n", opts.File, created, wired)
 		a.printf("mapping saved to %s\n", opts.StatePath)
@@ -82,10 +83,10 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 }
 
 // applyPlan prints what a real run would do.
-func (a *App) applyPlan(entries []plan.Entry, state map[string]int) {
+func (a *App) applyPlan(entries []plan.Entry, state *batchState) {
 	toCreate := 0
 	for _, e := range entries {
-		if n, ok := state[e.Key()]; ok {
+		if n, ok := state.Mapping[e.Key()]; ok {
 			a.printf("already created: %s → #%d\n", e.Key(), n)
 			continue
 		}
@@ -113,10 +114,10 @@ func (a *App) applyPlan(entries []plan.Entry, state map[string]int) {
 	a.printf("dry run: %d issues would be created\n", toCreate)
 }
 
-func (a *App) applyCreate(ctx context.Context, entries []plan.Entry, state map[string]int, opts ApplyOpts) (int, error) {
+func (a *App) applyCreate(ctx context.Context, entries []plan.Entry, state *batchState, opts ApplyOpts) (int, error) {
 	created := 0
 	for _, e := range entries {
-		if n, ok := state[e.Key()]; ok {
+		if n, ok := state.Mapping[e.Key()]; ok {
 			a.progressf("already created: %s → #%d\n", e.Key(), n)
 			continue
 		}
@@ -129,7 +130,7 @@ func (a *App) applyCreate(ctx context.Context, entries []plan.Entry, state map[s
 		if err != nil {
 			return created, fmt.Errorf("creating %s (rerun to resume): %w", e.Key(), err)
 		}
-		state[e.Key()] = issue.Number
+		state.Mapping[e.Key()] = issue.Number
 		if err := saveBatchState(opts.StatePath, state); err != nil {
 			return created, err
 		}
@@ -140,11 +141,14 @@ func (a *App) applyCreate(ctx context.Context, entries []plan.Entry, state map[s
 	return created, nil
 }
 
-// applyWire connects parents and blockers. Failures warn and continue — on
-// resume the edges are retried, and a duplicate edge is harmless. Local
-// references need no cycle check here: plan.Parse already rejected cycles,
-// and existing issues cannot depend on issues that didn't exist yet.
-func (a *App) applyWire(ctx context.Context, entries []plan.Entry, state map[string]int, opts ApplyOpts) (wired int, warnings []string) {
+// applyWire connects parents and blockers, checkpointing each edge as it
+// lands so a resume skips it. Failures warn and continue, and are retried on
+// the next run — but a *successful* edge is never re-attempted, because
+// GitHub rejects the duplicate and the warning it produces would drown the
+// ones that mean something. Local references need no cycle check here:
+// plan.Parse already rejected cycles, and existing issues cannot depend on
+// issues that didn't exist yet.
+func (a *App) applyWire(ctx context.Context, entries []plan.Entry, state *batchState, opts ApplyOpts) (wired int, warnings []string) {
 	warn := func(format string, args ...any) {
 		msg := fmt.Sprintf(format, args...)
 		warnings = append(warnings, msg)
@@ -156,33 +160,40 @@ func (a *App) applyWire(ctx context.Context, entries []plan.Entry, state map[str
 		if r.ID == "" {
 			return r.Number, true
 		}
-		n, ok := state[r.ID]
+		n, ok := state.Mapping[r.ID]
 		return n, ok
 	}
 	for _, e := range entries {
-		from, ok := state[e.Key()]
+		from, ok := state.Mapping[e.Key()]
 		if !ok {
 			continue
 		}
-		if e.Parent != nil {
-			if to, ok := resolve(*e.Parent); !ok {
-				warn("parent %s of %s not created, edge dropped", e.Parent, e.Key())
-			} else if err := a.Client.AddSubIssue(ctx, to, from, true); err != nil {
-				warn("parent edge #%d→#%d: %v", from, to, err)
-			} else {
-				wired++
-				sleep(opts.Throttle)
+		for _, edge := range e.Edges() {
+			to, ok := resolve(edge.To)
+			if !ok {
+				warn("%s %s of %s not created, edge dropped", edge.Kind, edge.To, e.Key())
+				continue
 			}
-		}
-		for _, b := range e.BlockedBy {
-			if to, ok := resolve(b); !ok {
-				warn("blocker %s of %s not created, edge dropped", b, e.Key())
-			} else if err := a.Client.AddBlockedBy(ctx, from, to); err != nil {
-				warn("blocked-by edge #%d→#%d: %v", from, to, err)
-			} else {
-				wired++
-				sleep(opts.Throttle)
+			key := edgeKey(edge.Kind, from, to)
+			if state.Edges[key] {
+				continue // wired by an earlier run
 			}
+			var err error
+			if edge.Kind == plan.ParentEdge {
+				err = a.Client.AddSubIssue(ctx, to, from, true)
+			} else {
+				err = a.Client.AddBlockedBy(ctx, from, to)
+			}
+			if err != nil {
+				warn("%s edge #%d→#%d: %v", edge.Kind, from, to, err)
+				continue
+			}
+			state.Edges[key] = true
+			if err := saveBatchState(opts.StatePath, state); err != nil {
+				warn("%v", err)
+			}
+			wired++
+			sleep(opts.Throttle)
 		}
 	}
 	return wired, warnings

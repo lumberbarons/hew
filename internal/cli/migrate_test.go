@@ -125,11 +125,7 @@ func TestMigrateBeadsResume(t *testing.T) {
 		t.Errorf("no issue wired to resumed parent #55: %+v", one)
 	}
 	// State file now holds all migrated beads.
-	data, _ := os.ReadFile(opts.StatePath)
-	var state map[string]int
-	if err := json.Unmarshal(data, &state); err != nil {
-		t.Fatal(err)
-	}
+	state := readState(t, opts.StatePath).Mapping
 	if state["sc-epic"] != 55 || state["sc-1"] == 0 || state["sc-2"] == 0 {
 		t.Errorf("state = %v", state)
 	}
@@ -145,14 +141,10 @@ func TestMigrateBeadsResumesAfterCreateFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "rerun to resume") {
 		t.Fatalf("err = %v", err)
 	}
-	data, readErr := os.ReadFile(opts.StatePath)
-	if readErr != nil {
-		t.Fatalf("no state persisted before the crash: %v", readErr)
+	if _, err := os.Stat(opts.StatePath); err != nil {
+		t.Fatalf("no state persisted before the crash: %v", err)
 	}
-	var state map[string]int
-	if err := json.Unmarshal(data, &state); err != nil {
-		t.Fatal(err)
-	}
+	state := readState(t, opts.StatePath).Mapping
 	if len(state) != 1 || state["sc-epic"] != 101 {
 		t.Fatalf("state after crash = %v", state)
 	}
@@ -173,10 +165,7 @@ func TestMigrateBeadsResumesAfterCreateFailure(t *testing.T) {
 	if epics != 1 {
 		t.Errorf("epic recreated on resume: %d copies", epics)
 	}
-	data, _ = os.ReadFile(opts.StatePath)
-	if err := json.Unmarshal(data, &state); err != nil {
-		t.Fatal(err)
-	}
+	state = readState(t, opts.StatePath).Mapping
 	if len(state) != 3 || state["sc-epic"] != 101 {
 		t.Errorf("state after resume = %v", state)
 	}

@@ -152,8 +152,10 @@ issues apply <plan.jsonl>         # batch-create from a JSONL plan: one entry pe
                                   # reference earlier ones before numbers exist, the
                                   # way migrate resolves bead IDs; "type":"epic" makes
                                   # a parent issue, so epics with bodies work too.
-                                  # Checkpointed after every create → resumable
-                                  # without duplicates; --dry-run plans. Plan-internal
+                                  # Checkpointed after every create and every edge
+                                  # wired → resumable without duplicates, and re-running
+                                  # a finished plan is a quiet no-op; --dry-run plans.
+                                  # Plan-internal
                                   # dependency cycles are rejected up front — a
                                   # complete check, since pre-existing issues can't
                                   # reference entries that don't exist yet.

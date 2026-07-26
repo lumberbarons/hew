@@ -82,7 +82,7 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 	}
 
 	if opts.DryRun {
-		a.migrationPlan(selected, state, skippedClosed)
+		a.migrationPlan(selected, state.Mapping, skippedClosed)
 		return nil
 	}
 
@@ -95,13 +95,13 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 	if err != nil {
 		return err
 	}
-	wired, warned := a.migrateWire(ctx, selected, state, opts)
-	closed := a.migrateClose(ctx, selected, state, opts)
+	wired, warned := a.migrateWire(ctx, selected, state.Mapping, opts)
+	closed := a.migrateClose(ctx, selected, state.Mapping, opts)
 
 	return a.emitResult(map[string]any{
 		"created": created, "wired": wired, "closed": closed,
 		"skippedClosed": skippedClosed, "warnings": warned,
-		"mapping": state,
+		"mapping": state.Mapping,
 	}, func() {
 		a.printf("migrated %d beads: %d created, %d dependencies wired, %d closed", len(selected), created, wired, closed)
 		if skippedClosed > 0 {
@@ -166,10 +166,10 @@ func beadAreaLabels(selected []beads.Bead) []gh.Label {
 	return out
 }
 
-func (a *App) migrateCreate(ctx context.Context, selected []beads.Bead, state map[string]int, opts MigrateOpts, viewer *string) (int, error) {
+func (a *App) migrateCreate(ctx context.Context, selected []beads.Bead, state *batchState, opts MigrateOpts, viewer *string) (int, error) {
 	created := 0
 	for _, b := range selected {
-		if n, ok := state[b.ID]; ok {
+		if n, ok := state.Mapping[b.ID]; ok {
 			a.progressf("already migrated: %s → #%d\n", b.ID, n)
 			continue
 		}
@@ -191,7 +191,7 @@ func (a *App) migrateCreate(ctx context.Context, selected []beads.Bead, state ma
 		if err != nil {
 			return created, fmt.Errorf("creating %s (rerun to resume): %w", b.ID, err)
 		}
-		state[b.ID] = issue.Number
+		state.Mapping[b.ID] = issue.Number
 		if err := saveBatchState(opts.StatePath, state); err != nil {
 			return created, err
 		}
