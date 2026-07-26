@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	appcli "github.com/lumberbarons/issues/internal/cli"
 	"github.com/lumberbarons/issues/internal/conventions"
 	"github.com/lumberbarons/issues/internal/model"
+	"github.com/lumberbarons/issues/internal/plan"
 )
 
 // setupCommands are one-time/setup verbs the agent-facing primer deliberately
@@ -224,6 +226,83 @@ func TestJSONFlagReachesCommand(t *testing.T) {
 				t.Errorf("run %v: json = false, want true", tc.args)
 			}
 		})
+	}
+}
+
+// TestDoneWhenTakesItemsVerbatim covers #47: --done-when values are prose, so
+// a comma inside one is punctuation, not a separator. urfave's default slice
+// splitting turned a single item into several, silently corrupting the
+// checklist. The list flags whose values really are lists of tokens must keep
+// splitting, so the two behaviors are asserted together.
+func TestDoneWhenTakesItemsVerbatim(t *testing.T) {
+	app := root()
+	var doneWhen, areas []string
+	var children []int
+	findCommand(t, app, "create").Action = func(_ context.Context, cmd *ucli.Command) error {
+		doneWhen = cmd.StringSlice("done-when")
+		areas = cmd.StringSlice("area")
+		return nil
+	}
+	findCommand(t, app, "epic", "create").Action = func(_ context.Context, cmd *ucli.Command) error {
+		doneWhen = cmd.StringSlice("done-when")
+		children = cmd.IntSlice("children")
+		return nil
+	}
+
+	want := []string{"alpha, beta", "gamma"}
+	args := []string{"issues", "create", "--type", "task", "--title", "t",
+		"--done-when", "alpha, beta", "--done-when", "gamma", "--area", "cli,render"}
+	if err := app.Run(context.Background(), args); err != nil {
+		t.Fatalf("run %v: %v", args, err)
+	}
+	if !slices.Equal(doneWhen, want) {
+		t.Errorf("create done-when = %q, want %q", doneWhen, want)
+	}
+	if want := []string{"cli", "render"}; !slices.Equal(areas, want) {
+		t.Errorf("create area = %q, want %q (comma lists must still split)", areas, want)
+	}
+
+	// epic create shares bodyFlags with create, so it must behave the same.
+	args = []string{"issues", "epic", "create", "--title", "t",
+		"--done-when", "alpha, beta", "--done-when", "gamma", "--children", "1,2"}
+	if err := app.Run(context.Background(), args); err != nil {
+		t.Fatalf("run %v: %v", args, err)
+	}
+	if !slices.Equal(doneWhen, want) {
+		t.Errorf("epic create done-when = %q, want %q", doneWhen, want)
+	}
+	if want := []int{1, 2}; !slices.Equal(children, want) {
+		t.Errorf("epic create children = %v, want %v (comma lists must still split)", children, want)
+	}
+}
+
+// TestCreateAndApplyComposeIdenticalBodies pins the other half of #47: the
+// same checklist input must produce the same body whichever path files the
+// issue. done-when is a JSON array in a plan, so apply never split it; create
+// did, and the mismatch was invisible until a later `issues show`.
+func TestCreateAndApplyComposeIdenticalBodies(t *testing.T) {
+	app := root()
+	var fromFlags conventions.Sections
+	findCommand(t, app, "create").Action = func(_ context.Context, cmd *ucli.Command) error {
+		fromFlags = sectionsFromFlags(cmd)
+		return nil
+	}
+	args := []string{"issues", "create", "--type", "task", "--title", "t",
+		"--done-when", "alpha, beta", "--done-when", "gamma"}
+	if err := app.Run(context.Background(), args); err != nil {
+		t.Fatalf("run %v: %v", args, err)
+	}
+
+	planLine := `{"id":"a","title":"t","type":"task","done-when":["alpha, beta","gamma"]}`
+	entries, err := plan.Parse(strings.NewReader(planLine))
+	if err != nil {
+		t.Fatalf("parse plan: %v", err)
+	}
+	if got, want := fromFlags.Compose(), entries[0].Sections.Compose(); got != want {
+		t.Errorf("create composed:\n%s\n\napply composed:\n%s", got, want)
+	}
+	if n := strings.Count(fromFlags.Compose(), "- [ ] "); n != 2 {
+		t.Errorf("composed body has %d checklist items, want 2:\n%s", n, fromFlags.Compose())
 	}
 }
 

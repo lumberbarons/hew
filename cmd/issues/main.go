@@ -192,7 +192,7 @@ func bodyFlags() []ucli.Flag {
 		&ucli.StringFlag{Name: "goal", Usage: "body section: the goal (or use --problem)"},
 		&ucli.StringFlag{Name: "fix", Usage: "body section: the fix (or use --approach)"},
 		&ucli.StringFlag{Name: "approach", Usage: "body section: the approach (or use --fix)"},
-		&ucli.StringSliceFlag{Name: "done-when", Usage: "acceptance checklist item (repeatable)"},
+		&proseSliceFlag{Name: "done-when", Usage: "acceptance checklist item (repeatable)"},
 		&ucli.StringFlag{Name: "body-file", Usage: "read the whole body from `FILE` (for long-form bodies)"},
 		&ucli.BoolFlag{Name: "edit", Usage: "open $EDITOR seeded with the body template"},
 	}
