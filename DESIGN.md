@@ -189,7 +189,10 @@ merges, checks and PR listing stay where they are.
   naming guess: exactly one open non-epic issue assigned to you is the answer.
   A number in the branch name (`feat/30-pr-command`) breaks ties when several
   are claimed and stands in when none is, but only as a whole `-`/`/`-delimited
-  segment, so `fix/http500-retries` doesn't link `#500`. Anything still
+  segment, so `fix/http500-retries` doesn't link `#500`. It also vetoes a lone
+  claim it contradicts: a branch naming a *different* open issue is two signals
+  disagreeing, and preferring the claim would close the other issue on merge
+  with nothing in the output saying so. Anything still
   ambiguous is a usage error naming the candidates; `--for <n>` settles it. The
   cost of guessing wrong is closing the wrong issue on merge, so guessing is
   not on the menu.

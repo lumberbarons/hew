@@ -130,9 +130,9 @@ type prJSON struct {
 
 // linkedIssue decides which issue the PR closes. The claim is the primary
 // signal — it's tracker state, not a naming guess — and a number in the
-// branch name only breaks ties or covers the unclaimed case. Ambiguity is
-// an error naming the candidates rather than a coin flip: a wrong Fixes
-// line closes the wrong issue on merge.
+// branch name breaks ties, covers the unclaimed case, and vetoes a lone
+// claim it contradicts. Ambiguity is an error naming the candidates rather
+// than a coin flip: a wrong Fixes line closes the wrong issue on merge.
 func (a *App) linkedIssue(issues []model.Issue, branch, viewer string, forNumber int) (model.Issue, error) {
 	byNum := model.ByNumber(issues)
 	if forNumber > 0 {
@@ -155,6 +155,17 @@ func (a *App) linkedIssue(issues []model.Issue, branch, viewer string, forNumber
 	branchNum, hasBranchNum := branchIssueNumber(branch)
 	switch {
 	case len(claimed) == 1:
+		// The claim is the stronger signal, but when the branch name points
+		// at a different open issue the two disagree and one of them is
+		// wrong. Preferring the claim silently writes a Fixes line that
+		// closes the other issue on merge, and nothing in the output says so
+		// (#45), so make the disagreement the user's to resolve.
+		if other, ok := byNum[branchNum]; hasBranchNum && ok &&
+			other.Number != claimed[0].Number && !other.IsEpic() {
+			return model.Issue{}, usageErr(
+				"branch %s names #%d but you have #%d claimed; say which with --for <n>",
+				branch, other.Number, claimed[0].Number)
+		}
 		return claimed[0], nil
 	case len(claimed) > 1:
 		if hasBranchNum {

@@ -217,6 +217,79 @@ func TestPRBranchNumberBreaksTheTie(t *testing.T) {
 	}
 }
 
+// #45: with one claim, a branch naming a different open issue is a
+// disagreement between two signals, not a tie the claim wins. Resolving it
+// silently composed a PR carrying the claimed issue's sections and its
+// Fixes line, closing the wrong issue on merge.
+func TestPRRefusesWhenTheBranchNamesADifferentOpenIssue(t *testing.T) {
+	f := newFake(claimed(30, "the claim"), issue(2, "pagination"))
+	app, _, _ := newApp(f)
+	onBranch(app, "fix/pagination-2")
+
+	err := app.PR(context.Background(), PROpts{})
+	requireExit(t, err, ExitUsage, "--for")
+	if !strings.Contains(err.Error(), "#2") || !strings.Contains(err.Error(), "#30") {
+		t.Errorf("error does not name both candidates: %v", err)
+	}
+	assertNoPR(t, f)
+}
+
+// The refusal is a last resort: --for is what resolves it, and it must
+// still be able to pick either candidate.
+func TestPRForResolvesABranchClaimMismatch(t *testing.T) {
+	f := newFake(claimed(30, "the claim"), issue(2, "pagination"))
+	app, _, _ := newApp(f)
+	onBranch(app, "fix/pagination-2")
+
+	if err := app.PR(context.Background(), PROpts{For: 2, Sections: sections("", "", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	if body := prBody(t, createdPR(t, f)); !strings.Contains(body, "Fixes #2") {
+		t.Errorf("--for did not link #2:\n%s", body)
+	}
+}
+
+// A branch number matching the claim is agreement, not a mismatch, and a
+// number naming nothing open is not a second candidate to disambiguate
+// against — neither may block the ordinary path.
+func TestPRAcceptsABranchNumberThatDoesNotContradictTheClaim(t *testing.T) {
+	cases := map[string]string{
+		"names the claimed issue": "fix/30-the-claim",
+		"names no open issue":     "fix/pagination-77",
+	}
+	for name, branch := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newFake(claimed(30, "the claim"))
+			app, _, _ := newApp(f)
+			onBranch(app, branch)
+
+			if err := app.PR(context.Background(), PROpts{Sections: sections("", "", "t")}); err != nil {
+				t.Fatal(err)
+			}
+			if body := prBody(t, createdPR(t, f)); !strings.Contains(body, "Fixes #30") {
+				t.Errorf("branch %s did not link the claim:\n%s", branch, body)
+			}
+		})
+	}
+}
+
+// An epic can never be a PR target, so a branch naming one is not a
+// candidate worth refusing over — the claim stands.
+func TestPRBranchNamingAnEpicDoesNotBlockTheClaim(t *testing.T) {
+	epic := issue(33, "Epic: the tree")
+	epic.SubIssues = []model.Ref{{Number: 30, State: "OPEN"}}
+	f := newFake(epic, claimed(30, "the claim"))
+	app, _, _ := newApp(f)
+	onBranch(app, "feat/33-the-tree")
+
+	if err := app.PR(context.Background(), PROpts{Sections: sections("", "", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	if body := prBody(t, createdPR(t, f)); !strings.Contains(body, "Fixes #30") {
+		t.Errorf("epic-named branch should not have blocked the claim:\n%s", body)
+	}
+}
+
 // A branch number that matches nothing claimed is not a tie-break, so the
 // ambiguity stands rather than resolving to an unclaimed issue.
 func TestPRBranchNumberDoesNotOverrideAmbiguityWhenUnclaimed(t *testing.T) {
