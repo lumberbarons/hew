@@ -65,18 +65,78 @@ func TestPRCreatesDraftForTheClaimedIssue(t *testing.T) {
 	if !strings.Contains(call, "draft=true") {
 		t.Errorf("PR was not opened as a draft: %s", call)
 	}
-	if !strings.Contains(call, `"PR creation command"`) {
-		t.Errorf("PR title did not default to the issue title: %s", call)
+	if !strings.Contains(call, `"feat: PR creation command"`) {
+		t.Errorf("PR title did not default to the prefixed issue title: %s", call)
 	}
 	if !strings.Contains(call, "Fixes #30") {
 		t.Errorf("PR body has no Fixes trailer: %s", call)
 	}
 	// Both lines, exactly: the summary an agent branches on and the URL a
 	// human clicks. Asserted whole so dropping either one fails here.
-	want := "created draft PR #501 for #30: PR creation command\n" +
+	want := "created draft PR #501 for #30: feat: PR creation command\n" +
 		"https://github.com/o/r/pull/501\n"
 	if got := out.String(); got != want {
 		t.Errorf("output = %q, want %q", got, want)
+	}
+}
+
+// #44: a squash merge makes the PR title the commit subject, and the
+// changelog is grouped by conventional-commit prefix, so the default title
+// derives its prefix from the type label the issue already carries.
+func TestPRTitleDerivesThePrefixFromTheIssueType(t *testing.T) {
+	cases := map[string]string{
+		"enhancement": "feat: the work",
+		"bug":         "fix: the work",
+		"task":        "chore: the work",
+	}
+	for typ, want := range cases {
+		t.Run(typ, func(t *testing.T) {
+			f := newFake(claimed(30, "the work", "P2", typ))
+			app, _, _ := newApp(f)
+			onBranch(app, "feat/x")
+
+			if err := app.PR(context.Background(), PROpts{Sections: sections("", "", "t")}); err != nil {
+				t.Fatal(err)
+			}
+			if call := createdPR(t, f); !strings.Contains(call, `"`+want+`"`) {
+				t.Errorf("title for a %s: %s, want %q", typ, call, want)
+			}
+		})
+	}
+}
+
+// An untyped issue — anything filed outside the tool — has nothing to derive
+// a prefix from, and inventing one would file the work under the wrong
+// changelog heading. The title goes through as-is.
+func TestPRTitleOfAnUntypedIssueIsUnprefixed(t *testing.T) {
+	f := newFake(claimed(30, "drive-by report", "P2"))
+	app, _, _ := newApp(f)
+	onBranch(app, "fix/x")
+
+	if err := app.PR(context.Background(), PROpts{Sections: sections("", "", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	if call := createdPR(t, f); !strings.Contains(call, `"drive-by report"`) {
+		t.Errorf("untyped issue got an invented prefix: %s", call)
+	}
+}
+
+// --title is the author's word, prefixed or not: doubling a prefix onto it
+// would corrupt the subject just as surely as omitting one.
+func TestPRTitleFlagIsPassedThroughUnchanged(t *testing.T) {
+	for _, want := range []string{"feat: hand-written", "hand-written, unprefixed"} {
+		t.Run(want, func(t *testing.T) {
+			f := newFake(claimed(30, "the work", "P2", "enhancement"))
+			app, _, _ := newApp(f)
+			onBranch(app, "feat/x")
+
+			if err := app.PR(context.Background(), PROpts{Title: want, Sections: sections("", "", "t")}); err != nil {
+				t.Fatal(err)
+			}
+			if call := createdPR(t, f); !strings.Contains(call, `"`+want+`"`) {
+				t.Errorf("--title %q was rewritten: %s", want, call)
+			}
+		})
 	}
 }
 

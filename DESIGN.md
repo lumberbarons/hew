@@ -207,6 +207,15 @@ merges, checks and PR listing stay where they are.
   to the issue's own `Fix`/`Approach` and `Problem`/`Goal` sections — the issue
   already says this — so in the common case only `--testing` is worth typing.
   Empty sections are omitted, never left as bare headers.
+- **Title convention.** A squash merge makes the PR title the commit subject,
+  and the release changelog is grouped by conventional-commit prefix, so the
+  default title is `<prefix>: <issue title>` with the prefix derived from the
+  type label: `bug` → `fix`, `enhancement` → `feat`, `task` → `chore`. Issue
+  titles carry no prefix by convention (the label holds that), which is exactly
+  why the type is the right thing to derive it from. An untyped issue gets no
+  prefix — there is nothing to derive one from, and an invented one files the
+  work under the wrong heading. `--title` is passed through untouched, prefixed
+  or not, and a title that already carries one is never given a second.
 - **Guards.** Draft by default (`--ready` opens for review). Refuses an
   unpushed branch (GitHub can only open a PR for a ref it can see), the default
   branch itself, a branch that already has an open PR (named, rather than

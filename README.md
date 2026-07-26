@@ -72,7 +72,9 @@ issues pr [--for N] [--title "..."]
                                   # draft PR for the claimed issue: body composed from
                                   # the issue (What/Why default to its Fix/Approach and
                                   # Problem/Goal), exactly one "Fixes #n", base is the
-                                  # repo default. Push the branch first.
+                                  # repo default. The title defaults to the issue title
+                                  # under the type's commit prefix (bug → "fix: ...");
+                                  # --title is passed through. Push the branch first.
           [--body-file F]         # long-form escape hatch (missing Fixes/Part of
                                   # trailers are appended, never duplicated)
           [--base BRANCH] [--ready]

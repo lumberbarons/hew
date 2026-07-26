@@ -89,9 +89,12 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 	if err != nil {
 		return err
 	}
+	// An explicit --title is the author's, prefix or not; only the derived
+	// default carries the type's conventional-commit prefix.
 	title := opts.Title
 	if title == "" {
-		title = issue.Title
+		issueType, _ := issue.Type()
+		title = conventions.PRTitle(issueType, issue.Title)
 	}
 
 	created, err := a.Client.CreatePullRequest(ctx, gh.NewPullRequest{

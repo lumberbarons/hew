@@ -168,3 +168,57 @@ func TestIsConventionalBranch(t *testing.T) {
 		}
 	}
 }
+
+// PRTitle is where the changelog convention is enforced (#44), and every
+// wrong answer either mis-files a release note or corrupts the subject a
+// squash merge writes, so its rules are pinned directly.
+func TestPRTitle(t *testing.T) {
+	tests := []struct {
+		name      string
+		issueType string
+		title     string
+		want      string
+	}{
+		{"bug", "bug", "pr links the wrong issue", "fix: pr links the wrong issue"},
+		{"enhancement", "enhancement", "reopen command", "feat: reopen command"},
+		{"task", "task", "token-efficiency comparison", "chore: token-efficiency comparison"},
+		{"untyped", "", "drive-by report", "drive-by report"},
+		{"unknown type", "question", "from a label set we do not own", "from a label set we do not own"},
+		{"already prefixed", "bug", "fix: filed with a prefix", "fix: filed with a prefix"},
+		{"prefixed with a different type", "bug", "chore: filed with a prefix", "chore: filed with a prefix"},
+		{"prefixed with a scope", "enhancement", "feat(cli): scoped", "feat(cli): scoped"},
+		{"prefixed as breaking", "enhancement", "feat!: breaking", "feat!: breaking"},
+		{"prefixed in mixed case", "bug", "Fix: crash on startup", "Fix: crash on startup"},
+		{"colon that is not a prefix", "bug", "ready: sorts epics last", "fix: ready: sorts epics last"},
+		{"prose containing a colon", "task", "document the rule: it is subtle", "chore: document the rule: it is subtle"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := PRTitle(tc.issueType, tc.title); got != tc.want {
+				t.Errorf("PRTitle(%q, %q) = %q, want %q", tc.issueType, tc.title, got, tc.want)
+			}
+		})
+	}
+}
+
+// PRTitle only derives three prefixes, but HasCommitPrefix must recognize
+// every one it knows: a "docs:" title on an enhancement issue would
+// otherwise be double-prefixed to "feat: docs: …", corrupting the very
+// squash-merge subject the convention protects. Looping the list keeps a
+// prefix from being added without its recognition being covered.
+func TestPRTitleLeavesEveryKnownPrefixAlone(t *testing.T) {
+	// Spelled out rather than ranged over CommitPrefixes: a loop over the
+	// list under test drops the case along with the entry, so removing a
+	// prefix would still pass. Pinning it also means adding a prefix fails
+	// here until it is covered.
+	want := []string{"feat", "fix", "chore", "docs", "refactor", "test", "perf", "build", "ci", "style", "revert"}
+	if !reflect.DeepEqual(CommitPrefixes, want) {
+		t.Fatalf("CommitPrefixes = %v, want %v", CommitPrefixes, want)
+	}
+	for _, prefix := range want {
+		title := prefix + ": already prefixed"
+		if got := PRTitle("enhancement", title); got != title {
+			t.Errorf("PRTitle(enhancement, %q) = %q, want it unchanged", title, got)
+		}
+	}
+}

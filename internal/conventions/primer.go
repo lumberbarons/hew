@@ -22,7 +22,8 @@ create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --do
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
 start <n> [--priority Pn] | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..."] |
 pr [--for N --testing "..." --what "..." --why "..." --title "..." --ready] (draft PR for the claimed issue; body
-  composed from the issue, exactly one "Fixes #n" — push the branch first) |
+  composed from the issue, exactly one "Fixes #n"; title defaults to feat:|fix:|chore: from the type —
+  push the branch first) |
 close <n> --reason "..." [--completed | --duplicate-of M] | block <n> --on <m> | unblock <n> --from <m> |
 epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n>] |
 apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: issues apply --help). All take --json.`

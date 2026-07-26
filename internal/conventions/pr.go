@@ -2,6 +2,7 @@ package conventions
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -20,6 +21,44 @@ func IsConventionalBranch(branch string) bool {
 		}
 	}
 	return false
+}
+
+// CommitPrefixes are the conventional-commit prefixes a PR title may carry.
+// The release changelog is grouped by them, so they are the reason the tool
+// has an opinion about titles at all.
+var CommitPrefixes = []string{"feat", "fix", "chore", "docs", "refactor", "test", "perf", "build", "ci", "style", "revert"}
+
+// prefixForType maps a type label to the prefix that says the same thing.
+// The write path guarantees exactly one type label, so the mapping is total
+// for anything this tool filed.
+var prefixForType = map[string]string{
+	"bug":         "fix",
+	"enhancement": "feat",
+	"task":        "chore",
+}
+
+// commitPrefix matches a leading conventional-commit prefix, with its
+// optional scope and breaking-change marker: "feat: ", "fix(cli)!: ".
+var commitPrefix = regexp.MustCompile(`^(` + strings.Join(CommitPrefixes, "|") + `)(\([^)]*\))?!?: `)
+
+// HasCommitPrefix reports whether a title already carries a prefix.
+func HasCommitPrefix(title string) bool {
+	return commitPrefix.MatchString(strings.ToLower(title))
+}
+
+// PRTitle derives a PR title from the issue's type and title. A squash merge
+// makes the PR title the commit subject, and the changelog is grouped by
+// conventional-commit prefix — so a PR titled with the issue's own words
+// lands the work under "Other" (#44). Issue titles deliberately carry no
+// prefix (the type label holds that), which makes the type exactly the
+// information the prefix encodes. An untyped issue gets no prefix: there is
+// nothing to derive one from, and inventing one is worse than none.
+func PRTitle(issueType, title string) string {
+	prefix, ok := prefixForType[issueType]
+	if !ok || HasCommitPrefix(title) {
+		return title
+	}
+	return prefix + ": " + title
 }
 
 // PRSections are the pull-request body fields, mirroring the issue body
