@@ -92,6 +92,7 @@ type Client interface {
 	SearchIssues(ctx context.Context, terms string) (issues []model.Issue, total int, err error)
 	CreateIssue(ctx context.Context, title, body string, labels []string) (model.Issue, error)
 	EditTitle(ctx context.Context, number int, title string) error
+	EditBody(ctx context.Context, number int, body string) error
 	AddLabels(ctx context.Context, number int, labels []string) error
 	RemoveLabel(ctx context.Context, number int, label string) error
 	AddAssignee(ctx context.Context, number int, login string) error

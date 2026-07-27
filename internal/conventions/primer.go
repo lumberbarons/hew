@@ -20,7 +20,7 @@ list sorts ready work first, then claimed, blocked, epics. Prefer text output; -
 Commands: ready | list [--label X --epic N --closed --bodies (with --json)] | show <n> | search <terms> | triage |
 create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
-start <n> [--priority Pn] | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..."] |
+start <n> [--priority Pn] | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |
 pr [--for N --testing "..." --what "..." --why "..." --title "..." --ready] (draft PR for the claimed issue; body
   composed from the issue, exactly one "Fixes #n"; title defaults to feat:|fix:|chore: from the type —
   push the branch first) |

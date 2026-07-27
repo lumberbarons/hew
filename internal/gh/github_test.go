@@ -371,6 +371,9 @@ func TestSimpleRESTMutations(t *testing.T) {
 	if err := c.EditTitle(ctx, 5, "Renamed"); err != nil {
 		t.Error(err)
 	}
+	if err := c.EditBody(ctx, 5, "### Goal\n\nrewritten\n"); err != nil {
+		t.Error(err)
+	}
 	if err := c.AddLabels(ctx, 5, []string{"P1"}); err != nil {
 		t.Error(err)
 	}
@@ -387,6 +390,7 @@ func TestSimpleRESTMutations(t *testing.T) {
 	// back whatever we send, so compare each request body exactly.
 	wantBodies := []map[string]any{
 		{"title": "Renamed"},
+		{"body": "### Goal\n\nrewritten\n"},
 		{"labels": []any{"P1"}},
 		{"assignees": []any{"me"}},
 		{"assignees": []any{"other"}},

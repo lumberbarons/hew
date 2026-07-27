@@ -212,6 +212,18 @@ func (f *fakeClient) EditTitle(ctx context.Context, number int, title string) er
 	return nil
 }
 
+func (f *fakeClient) EditBody(ctx context.Context, number int, body string) error {
+	if err := f.record(fmt.Sprintf("EditBody %d %q", number, body)); err != nil {
+		return err
+	}
+	i, err := f.requireIssue(number)
+	if err != nil {
+		return err
+	}
+	i.Body = body
+	return nil
+}
+
 func (f *fakeClient) AddLabels(ctx context.Context, number int, labels []string) error {
 	if err := f.record(fmt.Sprintf("AddLabels %d %s", number, strings.Join(labels, ","))); err != nil {
 		return err

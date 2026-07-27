@@ -426,6 +426,72 @@ func TestSetNoParentNoop(t *testing.T) {
 	}
 }
 
+func TestSetBodyFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(path, []byte("### Goal\n\nrewritten\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := newFake(issue(1, "Work", "P3", "bug"))
+	f.byNumber(1).Body = "### Goal\n\nstale\n"
+	app, out, _ := newApp(f)
+	// Body edits combine with the label/title edits in one call.
+	if err := app.Set(ctx, 1, SetOpts{Priority: "P1", Title: "Renamed", BodyFile: path}); err != nil {
+		t.Fatal(err)
+	}
+	i := f.byNumber(1)
+	if i.Body != "### Goal\n\nrewritten\n" {
+		t.Errorf("body = %q", i.Body)
+	}
+	if i.Title != "Renamed" || !slices.Contains(i.Labels, "P1") {
+		t.Errorf("title = %q labels = %v", i.Title, i.Labels)
+	}
+	if !strings.Contains(out.String(), "updated #1") {
+		t.Errorf("output = %q", out.String())
+	}
+}
+
+func TestSetBodyFileRefusesBlanking(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty.md")
+	if err := os.WriteFile(path, []byte("  \n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := newFake(issue(1, "Work", "P2", "bug"))
+	f.byNumber(1).Body = "### Goal\n\nkeep me\n"
+	app, _, _ := newApp(f)
+	exitCode(t, app.Set(ctx, 1, SetOpts{Priority: "P0", BodyFile: path}), ExitUsage)
+	if f.byNumber(1).Body != "### Goal\n\nkeep me\n" {
+		t.Errorf("body was blanked: %q", f.byNumber(1).Body)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("refused set still called the API: %v", f.calls)
+	}
+}
+
+func TestSetBodyFileMissingIsCheckedBeforeMutating(t *testing.T) {
+	f := newFake(issue(1, "Work", "P2", "bug"))
+	app, _, _ := newApp(f)
+	// The unreadable file must be caught before --priority lands, so the
+	// failure isn't a half-applied edit.
+	exitCode(t, app.Set(ctx, 1, SetOpts{Priority: "P0", BodyFile: "/nonexistent"}), ExitGeneric)
+	if len(f.calls) != 0 {
+		t.Errorf("refused set still called the API: %v", f.calls)
+	}
+}
+
+func TestSetBodyFailurePropagates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(path, []byte("### Goal\n\nnew\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := newFake(issue(1, "Work", "P2", "bug"))
+	f.failOn["EditBody"] = errors.New("boom")
+	app, _, _ := newApp(f)
+	err := app.Set(ctx, 1, SetOpts{BodyFile: path})
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("err = %v", err)
+	}
+}
+
 func TestCloseNotPlanned(t *testing.T) {
 	f := newFake(issue(1, "Work", "P2", "bug"))
 	app, out, _ := newApp(f)

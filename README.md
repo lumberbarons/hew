@@ -67,6 +67,7 @@ issues start <n> [--priority P0..P4] [--force]
 issues triage                     # issues missing priority/type labels
 issues set <n> [--priority ..] [--type ..] [--add-area X] [--remove-area X]
            [--parent N | --no-parent] [--title "..."]
+           [--body-file F]        # replace the body (an empty file is refused)
 issues pr [--for N] [--title "..."]
           [--what "..."] [--why "..."] [--testing "..."]
                                   # draft PR for the claimed issue: body composed from
