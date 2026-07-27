@@ -3,9 +3,6 @@ name: review-tests
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
-    paths:
-      - "**/*_test.go"
-      - "internal/render/testdata/**"
 
 permissions:
   contents: read
@@ -25,7 +22,26 @@ jobs:
         with:
           fetch-depth: 1
 
+      # The workflow always runs so it reports a status on every PR, but the
+      # review itself only has anything to do when the PR touches test files.
+      # Gate the expensive step here rather than with an on.paths filter, which
+      # would leave the check permanently pending on PRs that touch no tests.
+      - name: detect scoped test changes
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          changed=$(gh pr diff "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" --name-only)
+          if printf '%s\n' "$changed" | grep -qE '(_test\.go$|^internal/render/testdata/)'; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No test files in scope — skipping review."
+          fi
+
       - name: review test quality
+        if: steps.scope.outputs.has_tests == 'true'
         uses: anthropics/claude-code-action@af0559ee4f514d1ef21826982bed13f7edc3c35e # v1.0.178
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}

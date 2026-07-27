@@ -132,6 +132,34 @@ re-attempting edges that already landed; unknown fields, dangling
 references, and dependency cycles between entries are all rejected before
 anything is written.
 
+## Auto-triage in CI
+
+[`examples/auto-triage.yml`](examples/auto-triage.yml) is a copy-pasteable GitHub
+Actions workflow that runs Claude with this CLI on every newly filed issue, so
+drive-by reports get deduped and labelled without a human sweep and `ready` stays
+truthful. To enable it:
+
+```sh
+issues init                                    # once: create the convention labels
+cp examples/auto-triage.yml .github/workflows/ # then add an ANTHROPIC_API_KEY secret
+```
+
+The agent reads the new issue, searches open and closed issues for a duplicate,
+and either closes it as one or applies a type and priority label plus a short
+rationale comment. What it deliberately cannot do is the interesting part:
+
+- `permissions: issues: write` is the only grant — no code, no PRs, no other repos.
+- The tool allowlist is a handful of `issues` subcommands plus `gh issue comment`
+  and `gh label list`. No `create`, no `start`, no shell beyond that.
+- It assigns P2–P4 only; anything it thinks is P0/P1 it labels P2 and flags for a
+  human to upgrade. Reports too vague to classify are left untriaged (`issues
+  triage` still lists them) rather than mislabelled.
+- Bot-filed issues and issues from anyone with write access are skipped, so
+  `issues create` output and the workflow's own writes can't feed it back.
+
+Issue bodies are untrusted input; the permission scope and the allowlist are the
+mitigation, not the prompt's instructions.
+
 ## Design
 
 See [DESIGN.md](DESIGN.md) for the conventions the tool enforces, the read-path
