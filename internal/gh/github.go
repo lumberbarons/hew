@@ -332,6 +332,10 @@ func (g *GitHub) EditTitle(ctx context.Context, number int, title string) error 
 	return g.restDo(ctx, "PATCH", g.issuePath(number, ""), map[string]any{"title": title}, nil)
 }
 
+func (g *GitHub) EditBody(ctx context.Context, number int, body string) error {
+	return g.restDo(ctx, "PATCH", g.issuePath(number, ""), map[string]any{"body": body}, nil)
+}
+
 func (g *GitHub) AddLabels(ctx context.Context, number int, labels []string) error {
 	return g.restDo(ctx, "POST", g.issuePath(number, "/labels"), map[string]any{"labels": labels}, nil)
 }

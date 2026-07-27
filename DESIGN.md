@@ -129,8 +129,11 @@ issues triage                     # untriaged issues (missing priority/type), ol
                                   # first — work through them with `set`
 issues set <n> [--priority P0..P4] [--type bug|enhancement|task] [--add-area X]
            [--remove-area X] [--parent N | --no-parent] [--title "..."]
+           [--body-file F]
                                   # retriage/edit within conventions (swaps the old
-                                  # priority/type label, never stacks a second one)
+                                  # priority/type label, never stacks a second one);
+                                  # --body-file replaces the whole body — an empty
+                                  # file is refused rather than blanking it
 issues pr [--for N] [--title "..."] [--what|--why|--testing "..."]
           [--body-file F] [--base BRANCH] [--ready]
                                   # the PR step of the workflow, composed rather than

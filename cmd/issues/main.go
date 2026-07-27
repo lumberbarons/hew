@@ -293,6 +293,7 @@ func setCmd() *ucli.Command {
 			&ucli.IntFlag{Name: "parent", Usage: "move under epic `N`"},
 			&ucli.BoolFlag{Name: "no-parent", Usage: "detach from its epic"},
 			&ucli.StringFlag{Name: "title", Usage: "new title"},
+			&ucli.StringFlag{Name: "body-file", Usage: "replace the body with the contents of `FILE`"},
 		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			n, err := numberArg(cmd, "issues set <n>")
@@ -311,6 +312,7 @@ func setCmd() *ucli.Command {
 				Parent:      cmd.Int("parent"),
 				NoParent:    cmd.Bool("no-parent"),
 				Title:       cmd.String("title"),
+				BodyFile:    cmd.String("body-file"),
 			})
 		},
 	}

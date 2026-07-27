@@ -222,18 +222,20 @@ type SetOpts struct {
 	Parent      int
 	NoParent    bool
 	Title       string
+	BodyFile    string
 }
 
 func (o SetOpts) empty() bool {
 	return o.Priority == "" && o.Type == "" && len(o.AddAreas) == 0 &&
-		len(o.RemoveAreas) == 0 && o.Parent == 0 && !o.NoParent && o.Title == ""
+		len(o.RemoveAreas) == 0 && o.Parent == 0 && !o.NoParent && o.Title == "" &&
+		o.BodyFile == ""
 }
 
 // Set retriages or edits within the conventions, swapping the old
 // priority/type label rather than stacking a second one.
 func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 	if opts.empty() {
-		return usageErr("nothing to change; pass --priority, --type, --add-area, --remove-area, --parent, --no-parent, or --title")
+		return usageErr("nothing to change; pass --priority, --type, --add-area, --remove-area, --parent, --no-parent, --title, or --body-file")
 	}
 	if opts.Parent > 0 && opts.NoParent {
 		return usageErr("--parent and --no-parent are mutually exclusive")
@@ -257,6 +259,19 @@ func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 	}
 	if err := validateAreas("--remove-area", opts.RemoveAreas); err != nil {
 		return err
+	}
+	// Read the replacement body before any mutation: a --body-file typo
+	// would otherwise surface after the label swaps had already landed.
+	var body string
+	if opts.BodyFile != "" {
+		b, err := a.composeBody(bodySource{bodyFile: opts.BodyFile})
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(b) == "" {
+			return usageErr("--body-file %s is empty; set does not blank an issue body", opts.BodyFile)
+		}
+		body = b
 	}
 	issue, err := a.Client.GetIssue(ctx, number)
 	if err != nil {
@@ -300,6 +315,11 @@ func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 	}
 	if opts.Title != "" {
 		if err := step("title", a.Client.EditTitle(ctx, number, opts.Title)); err != nil {
+			return err
+		}
+	}
+	if opts.BodyFile != "" {
+		if err := step("body", a.Client.EditBody(ctx, number, body)); err != nil {
 			return err
 		}
 	}
