@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lumberbarons/issues/internal/model"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
@@ -185,7 +185,7 @@ func TestPrime(t *testing.T) {
 		Untriaged:  7,
 	}
 	var buf bytes.Buffer
-	Prime(&buf, "Workflow: issues ready → issues start <n>.", d)
+	Prime(&buf, "Workflow: hew ready → hew start <n>.", d)
 	checkGolden(t, "prime", buf.Bytes())
 }
 
@@ -208,7 +208,7 @@ func TestPrimeMoreLine(t *testing.T) {
 	d := PrimeData{Repo: "o/r", Ready: model.Ready(issues)[:1], ReadyTotal: 3, OpenTotal: 5}
 	var buf bytes.Buffer
 	Prime(&buf, "static", d)
-	if !strings.Contains(buf.String(), "… 2 more: issues ready") {
+	if !strings.Contains(buf.String(), "… 2 more: hew ready") {
 		t.Errorf("missing more line:\n%s", buf.String())
 	}
 }

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`issues` is an opinionated, agentic-first CLI for tracking work in GitHub Issues — beads-inspired ready-work detection, priority/type/area label conventions, native sub-issues and dependencies, and an `issues prime` command that injects tracker state into an agent session. [DESIGN.md](DESIGN.md) is the authoritative design document: conventions, read-path normalization rules, API strategy, and spike results. Read it before changing behavior.
+`hew` is an opinionated, agentic-first CLI for tracking work in GitHub Issues — beads-inspired ready-work detection, priority/type/area label conventions, native sub-issues and dependencies, and a `hew prime` command that injects tracker state into an agent session. [DESIGN.md](DESIGN.md) is the authoritative design document: conventions, read-path normalization rules, API strategy, and spike results. Read it before changing behavior.
 
 ## Commands
 
@@ -27,7 +27,7 @@ The layering exists so everything with behavior is testable without hitting GitH
 
 | Directory | What | When to read |
 |---|---|---|
-| `cmd/issues/` | main + urfave/cli v3 flag wiring only — no behavior, excluded from coverage | Adding a command or flag |
+| `cmd/hew/` | main + urfave/cli v3 flag wiring only — no behavior, excluded from coverage | Adding a command or flag |
 | `internal/cli/` | The commands, written against the `gh.Client` interface — see [internal/cli/CLAUDE.md](internal/cli/CLAUDE.md) | Changing command behavior or guarded flows |
 | `internal/gh/` | Thin API layer: the `Client` interface and its go-gh-backed implementation; auth reuses the `gh` CLI's stored credentials (no auth flow of our own), repo detection comes from the git remote | Changing queries, auth, or API calls |
 | `internal/model/` | Pure domain logic: readiness, label normalization, cycle detection — no I/O, plain unit tests | Changing readiness or label semantics |

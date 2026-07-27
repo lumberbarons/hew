@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/lumberbarons/issues/internal/conventions"
-	"github.com/lumberbarons/issues/internal/gh"
-	"github.com/lumberbarons/issues/internal/model"
-	"github.com/lumberbarons/issues/internal/render"
+	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/model"
+	"github.com/lumberbarons/hew/internal/render"
 )
 
 // CreateOpts are the create command's inputs.
@@ -538,7 +538,7 @@ func (a *App) Init(ctx context.Context) error {
 			a.printf("created labels: %s\n", strings.Join(created, ", "))
 		}
 		a.printf("\nAdd to CLAUDE.md:\n\n%s\n", conventions.ClaudeSnippet)
-		a.printf("\nOr let a hook inject the primer automatically: issues hooks install\n")
+		a.printf("\nOr let a hook inject the primer automatically: hew hooks install\n")
 	})
 }
 

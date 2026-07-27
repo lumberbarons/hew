@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lumberbarons/issues/internal/conventions"
-	"github.com/lumberbarons/issues/internal/gh"
-	"github.com/lumberbarons/issues/internal/model"
+	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 func exitCode(t *testing.T, err error, want int) {
@@ -890,7 +890,7 @@ func TestInit(t *testing.T) {
 	if len(f.labels) != len(conventions.Labels) {
 		t.Errorf("created %d labels, want %d", len(f.labels), len(conventions.Labels))
 	}
-	for _, want := range []string{"created labels: P0", "issues prime", "CLAUDE.md"} {
+	for _, want := range []string{"created labels: P0", "hew prime", "CLAUDE.md"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, out.String())
 		}

@@ -1,4 +1,4 @@
-module github.com/lumberbarons/issues
+module github.com/lumberbarons/hew
 
 go 1.25.0
 

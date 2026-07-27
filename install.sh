@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Installs the latest issues release binary to $HOME/.local/bin (override
+# Installs the latest hew release binary to $HOME/.local/bin (override
 # with INSTALL_DIR). Never uses sudo.
 #
-#   curl -fsSL https://raw.githubusercontent.com/lumberbarons/issues/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/lumberbarons/hew/main/install.sh | bash
 set -euo pipefail
 
-REPO="lumberbarons/issues"
+REPO="lumberbarons/hew"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$os" in
   linux | darwin) ;;
   *)
-    echo "unsupported OS: $os (use: go install github.com/$REPO/cmd/issues@latest)" >&2
+    echo "unsupported OS: $os (use: go install github.com/$REPO/cmd/hew@latest)" >&2
     exit 1
     ;;
 esac
@@ -22,7 +22,7 @@ case "$arch" in
   x86_64) arch=amd64 ;;
   aarch64 | arm64) arch=arm64 ;;
   *)
-    echo "unsupported architecture: $arch (use: go install github.com/$REPO/cmd/issues@latest)" >&2
+    echo "unsupported architecture: $arch (use: go install github.com/$REPO/cmd/hew@latest)" >&2
     exit 1
     ;;
 esac
@@ -35,13 +35,13 @@ if [ -z "$tag" ]; then
 fi
 version="${tag#v}"
 
-archive="issues_${version}_${os}_${arch}.tar.gz"
+archive="hew_${version}_${os}_${arch}.tar.gz"
 base="https://github.com/$REPO/releases/download/$tag"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-echo "downloading issues $tag ($os/$arch)..."
+echo "downloading hew $tag ($os/$arch)..."
 curl -fsSL -o "$tmp/$archive" "$base/$archive"
 curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt"
 
@@ -63,10 +63,10 @@ curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt"
   fi
 )
 
-tar -xzf "$tmp/$archive" -C "$tmp" issues
+tar -xzf "$tmp/$archive" -C "$tmp" hew
 mkdir -p "$INSTALL_DIR"
-install -m 0755 "$tmp/issues" "$INSTALL_DIR/issues"
-echo "installed $("$INSTALL_DIR/issues" --version) to $INSTALL_DIR/issues"
+install -m 0755 "$tmp/hew" "$INSTALL_DIR/hew"
+echo "installed $("$INSTALL_DIR/hew" --version) to $INSTALL_DIR/hew"
 
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;

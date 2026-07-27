@@ -1,4 +1,4 @@
-// Command issues is an agentic-first CLI for GitHub Issues. All behavior
+// Command hew is an agentic-first CLI for GitHub Issues. All behavior
 // lives in internal/; this file is flag wiring — parsing, exit-code mapping,
 // and editor invocation are delegated to internal packages so they can be
 // tested.
@@ -14,11 +14,11 @@ import (
 
 	ucli "github.com/urfave/cli/v3"
 
-	appcli "github.com/lumberbarons/issues/internal/cli"
-	"github.com/lumberbarons/issues/internal/conventions"
-	"github.com/lumberbarons/issues/internal/editor"
-	"github.com/lumberbarons/issues/internal/gh"
-	"github.com/lumberbarons/issues/internal/git"
+	appcli "github.com/lumberbarons/hew/internal/cli"
+	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/editor"
+	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/git"
 
 	"github.com/cli/go-gh/v2/pkg/repository"
 )
@@ -34,8 +34,8 @@ func main() {
 }
 
 // globalFlags are declared on the root command only. urfave/cli v3 flags
-// are persistent by default, so they parse in either position (`issues
-// --json ready` and `issues ready --json`) and leaf actions resolve them
+// are persistent by default, so they parse in either position (`hew
+// --json ready` and `hew ready --json`) and leaf actions resolve them
 // via lineage lookup. Re-declaring them on a leaf would shadow the root's
 // parsed value with an empty one (#25), so leaves must not repeat them.
 func globalFlags() []ucli.Flag {
@@ -82,7 +82,7 @@ func numberArg(cmd *ucli.Command, usage string) (int, error) {
 
 func root() *ucli.Command {
 	return &ucli.Command{
-		Name:    "issues",
+		Name:    "hew",
 		Usage:   "agentic-first CLI for GitHub Issues",
 		Version: version,
 		Flags:   globalFlags(),
@@ -154,7 +154,7 @@ func showCmd() *ucli.Command {
 		Usage:     "issue detail: body, deps, parent, children, recent comments",
 		ArgsUsage: "<n>",
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
-			n, err := numberArg(cmd, "issues show <n>")
+			n, err := numberArg(cmd, "hew show <n>")
 			if err != nil {
 				return err
 			}
@@ -253,7 +253,7 @@ func startCmd() *ucli.Command {
 			&ucli.BoolFlag{Name: "force", Usage: "steal an already-claimed issue"},
 		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
-			n, err := numberArg(cmd, "issues start <n>")
+			n, err := numberArg(cmd, "hew start <n>")
 			if err != nil {
 				return err
 			}
@@ -296,7 +296,7 @@ func setCmd() *ucli.Command {
 			&ucli.StringFlag{Name: "body-file", Usage: "replace the body with the contents of `FILE`"},
 		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
-			n, err := numberArg(cmd, "issues set <n>")
+			n, err := numberArg(cmd, "hew set <n>")
 			if err != nil {
 				return err
 			}
@@ -371,7 +371,7 @@ func closeCmd() *ucli.Command {
 			&ucli.IntFlag{Name: "duplicate-of", Usage: "close as duplicate of issue `N`"},
 		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
-			n, err := numberArg(cmd, "issues close <n> --reason \"...\"")
+			n, err := numberArg(cmd, "hew close <n> --reason \"...\"")
 			if err != nil {
 				return err
 			}
@@ -393,7 +393,7 @@ func blockCmd() *ucli.Command {
 			&ucli.IntFlag{Name: "on", Usage: "blocking issue `N` (required)", Required: true},
 		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
-			n, err := numberArg(cmd, "issues block <n> --on <m>")
+			n, err := numberArg(cmd, "hew block <n> --on <m>")
 			if err != nil {
 				return err
 			}
@@ -415,7 +415,7 @@ func unblockCmd() *ucli.Command {
 			&ucli.IntFlag{Name: "from", Usage: "blocking issue `N` (required)", Required: true},
 		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
-			n, err := numberArg(cmd, "issues unblock <n> --from <m>")
+			n, err := numberArg(cmd, "hew unblock <n> --from <m>")
 			if err != nil {
 				return err
 			}
@@ -462,7 +462,7 @@ func epicCmd() *ucli.Command {
 					n := 0
 					if cmd.Args().First() != "" {
 						var err error
-						if n, err = numberArg(cmd, "issues epic status [<n>]"); err != nil {
+						if n, err = numberArg(cmd, "hew epic status [<n>]"); err != nil {
 							return err
 						}
 					}
@@ -494,7 +494,7 @@ func hooksApp(cmd *ucli.Command) (*appcli.App, string, error) {
 func hooksCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:  "hooks",
-		Usage: "manage the Claude Code SessionStart hook that runs `issues prime`",
+		Usage: "manage the Claude Code SessionStart hook that runs `hew prime`",
 		Commands: []*ucli.Command{
 			{
 				Name:  "install",

@@ -36,7 +36,7 @@ func TestHooksInstallFresh(t *testing.T) {
 	settings := readSettingsFile(t, root)
 	entries := settings["hooks"].(map[string]any)["SessionStart"].([]any)
 	hook := entries[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)
-	if hook["command"] != "issues prime" || hook["type"] != "command" {
+	if hook["command"] != "hew prime" || hook["type"] != "command" {
 		t.Errorf("hook = %v", hook)
 	}
 	if !strings.Contains(out.String(), "installed") {
@@ -133,7 +133,7 @@ func TestHooksRemoveKeepsOtherHooks(t *testing.T) {
   "hooks": {
     "SessionStart": [
       {"hooks": [{"type": "command", "command": "echo hello"}]},
-      {"hooks": [{"type": "command", "command": "issues prime"}]}
+      {"hooks": [{"type": "command", "command": "hew prime"}]}
     ]
   }
 }`

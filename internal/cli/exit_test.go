@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/lumberbarons/issues/internal/gh"
+	"github.com/lumberbarons/hew/internal/gh"
 )
 
 func TestExitCode(t *testing.T) {

@@ -5,14 +5,14 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/lumberbarons/issues/internal/conventions"
-	"github.com/lumberbarons/issues/internal/gh"
-	"github.com/lumberbarons/issues/internal/model"
-	"github.com/lumberbarons/issues/internal/render"
+	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/model"
+	"github.com/lumberbarons/hew/internal/render"
 )
 
 // primeReadyCap keeps the primer's live half inside its token budget; the
-// full list is one `issues ready` away.
+// full list is one `hew ready` away.
 const primeReadyCap = 10
 
 var (
@@ -97,7 +97,7 @@ func (a *App) Show(ctx context.Context, number int) error {
 func (a *App) Search(ctx context.Context, terms string) error {
 	terms = strings.TrimSpace(terms)
 	if terms == "" {
-		return usageErr("usage: issues search <terms>")
+		return usageErr("usage: hew search <terms>")
 	}
 	issues, total, err := a.Client.SearchIssues(ctx, terms)
 	if err != nil {
@@ -110,7 +110,7 @@ func (a *App) Search(ctx context.Context, terms string) error {
 }
 
 // Triage lists open issues missing their priority or type label, oldest
-// first — work through them with `issues set`.
+// first — work through them with `hew set`.
 func (a *App) Triage(ctx context.Context) error {
 	issues, err := a.Client.ListIssues(ctx, openStates)
 	if err != nil {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lumberbarons/issues/internal/model"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 // IssueJSON is the stable flat schema for --json output: deps as number

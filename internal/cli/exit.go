@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lumberbarons/issues/internal/gh"
+	"github.com/lumberbarons/hew/internal/gh"
 )
 
 // ExitCode maps an error to the process exit code agent loops branch on: an

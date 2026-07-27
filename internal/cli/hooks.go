@@ -12,7 +12,7 @@ import (
 // primeHookCommand is what the SessionStart hook runs; its stdout is
 // injected into the agent's context at session start, which is the whole
 // point of prime.
-const primeHookCommand = "issues prime"
+const primeHookCommand = "hew prime"
 
 const hookEvent = "SessionStart"
 
@@ -36,7 +36,7 @@ func FindProjectRoot(start string) (string, error) {
 	}
 }
 
-// HooksInstall adds a SessionStart hook running `issues prime` to the
+// HooksInstall adds a SessionStart hook running `hew prime` to the
 // project's .claude/settings.json, creating the file if needed and leaving
 // everything else in it untouched. Idempotent.
 func (a *App) HooksInstall(projectRoot string) error {
@@ -60,7 +60,7 @@ func (a *App) HooksInstall(projectRoot string) error {
 	})
 }
 
-// HooksRemove strips the `issues prime` hook again, pruning any structures
+// HooksRemove strips the `hew prime` hook again, pruning any structures
 // it leaves empty.
 func (a *App) HooksRemove(projectRoot string) error {
 	path := settingsPath(projectRoot)
@@ -121,7 +121,7 @@ func writeSettings(path string, settings map[string]any) error {
 }
 
 // addPrimeHook appends the hook entry unless any SessionStart hook already
-// runs issues prime (however the user phrased its entry). Reports whether
+// runs hew prime (however the user phrased its entry). Reports whether
 // it changed anything.
 func addPrimeHook(settings map[string]any) bool {
 	if hasPrimeHook(settings) {

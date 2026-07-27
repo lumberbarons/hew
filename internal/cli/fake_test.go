@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lumberbarons/issues/internal/gh"
-	"github.com/lumberbarons/issues/internal/model"
+	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 // fakeClient is a stateful in-memory gh.Client: mutations really mutate,

@@ -1,5 +1,5 @@
 // Package cli implements the commands against the gh.Client interface, so
-// cmd/issues is pure wiring and everything with behavior is testable
+// cmd/hew is pure wiring and everything with behavior is testable
 // against a fake.
 package cli
 
@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/lumberbarons/issues/internal/gh"
-	"github.com/lumberbarons/issues/internal/git"
-	"github.com/lumberbarons/issues/internal/model"
-	"github.com/lumberbarons/issues/internal/render"
+	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/git"
+	"github.com/lumberbarons/hew/internal/model"
+	"github.com/lumberbarons/hew/internal/render"
 )
 
 // Exit codes, kept meaningful so agent loops can branch on them.

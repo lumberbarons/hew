@@ -1,9 +1,9 @@
 version: 2
 
-project_name: issues
+project_name: hew
 
 builds:
-  - main: ./cmd/issues
+  - main: ./cmd/hew
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin]

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lumberbarons/issues/internal/conventions"
-	"github.com/lumberbarons/issues/internal/git"
-	"github.com/lumberbarons/issues/internal/model"
+	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/git"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 // onBranch wires an App's Git hook to a fixed, pushed branch — the normal
@@ -177,12 +177,12 @@ func TestPRFlagsOverrideTheIssueSections(t *testing.T) {
 	onBranch(app, "feat/pr-command")
 
 	if err := app.PR(context.Background(), PROpts{
-		Title: "feat: issues pr", Sections: sections("hand-written what", "hand-written why", "go test"),
+		Title: "feat: hew pr", Sections: sections("hand-written what", "hand-written why", "go test"),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	call := createdPR(t, f)
-	if !strings.Contains(call, `"feat: issues pr"`) {
+	if !strings.Contains(call, `"feat: hew pr"`) {
 		t.Errorf("--title ignored: %s", call)
 	}
 	body := prBody(t, call)

@@ -1,9 +1,9 @@
-# issues
+# hew
 
 An opinionated, agentic-first CLI for tracking work in GitHub Issues. Inspired by
 [beads](https://github.com/steveyegge/beads), backed entirely by GitHub — native
-sub-issues and dependencies, priority/type/area labels, ready-work detection, and an
-`issues prime` command that injects tracker conventions and live state into a coding
+sub-issues and dependencies, priority/type/area labels, ready-work detection, and a
+`hew prime` command that injects tracker conventions and live state into a coding
 agent's context at session start.
 
 GitHub Issues stays the single source of truth: humans get the web UI, PRs auto-close
@@ -11,12 +11,12 @@ issues via `Fixes #n`, and nothing needs syncing.
 
 ## Install
 
-Needs `git` — the target repo is read from the local checkout, and `issues pr`
+Needs `git` — the target repo is read from the local checkout, and `hew pr`
 reads the current branch — plus the [`gh` CLI](https://cli.github.com/) for
 authentication. The install script also needs `curl` and `tar`.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/lumberbarons/issues/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/lumberbarons/hew/main/install.sh | bash
 ```
 
 Installs to `~/.local/bin` (override with `INSTALL_DIR`); never uses sudo.
@@ -25,26 +25,26 @@ Linux and macOS (x86_64 and arm64) only — elsewhere, use `go install` below.
 Or, with a Go toolchain (1.25+):
 
 ```sh
-go install github.com/lumberbarons/issues/cmd/issues@latest
+go install github.com/lumberbarons/hew/cmd/hew@latest
 ```
 
 Authentication comes from the [`gh` CLI](https://cli.github.com/) — run
-`gh auth login` once and `issues` reuses its stored credentials. The target
+`gh auth login` once and `hew` reuses its stored credentials. The target
 repository is detected from the git remote (`--repo owner/name` overrides).
 
 ## Quickstart
 
 ```sh
-issues init          # bootstrap the label set in a repo; prints a CLAUDE.md snippet
-issues hooks install # SessionStart hook (writes the project's .claude/settings.json)
-issues prime         # session-start context: conventions + ready work + live state
-issues ready         # what should I work on? (priority-sorted, zero open blockers)
-issues start 42      # claim it: assign @me + in-progress (refuses claimed work, exit 3)
+hew init          # bootstrap the label set in a repo; prints a CLAUDE.md snippet
+hew hooks install # SessionStart hook (writes the project's .claude/settings.json)
+hew prime         # session-start context: conventions + ready work + live state
+hew ready         # what should I work on? (priority-sorted, zero open blockers)
+hew start 42      # claim it: assign @me + in-progress (refuses claimed work, exit 3)
 # ...branch (feat/|fix/|chore/), commit, push...
-issues pr            # draft PR for the claimed issue, body composed, "Fixes #42" enforced
+hew pr            # draft PR for the claimed issue, body composed, "Fixes #42" enforced
 ```
 
-`issues ready` prints one line per issue, so you can tell it worked:
+`hew ready` prints one line per issue, so you can tell it worked:
 
 ```
 #42 P1 bug  Retry loop hammers the API when offline
@@ -55,25 +55,25 @@ If any command exits `4`, authenticate first with `gh auth login`.
 ## Commands
 
 ```
-issues prime                      # session-start context for agents
-issues ready                      # open, non-epic, zero open blockers; P0→P4 then P?
-issues list [--label X] [--epic N] [--closed]
+hew prime                      # session-start context for agents
+hew ready                      # open, non-epic, zero open blockers; P0→P4 then P?
+hew list [--label X] [--epic N] [--closed]
             [--bodies]           # with --json: body on every line, dedup in one call
-issues show <n>                   # body, deps, parent, children, recent comments
-issues search <terms>             # text search, open+closed, best-match order —
+hew show <n>                   # body, deps, parent, children, recent comments
+hew search <terms>             # text search, open+closed, best-match order —
                                   # check for an existing issue before filing one
-issues create --type bug|enhancement|task --title "..."
+hew create --type bug|enhancement|task --title "..."
               [--where X] [--problem|--goal "..."] [--fix|--approach "..."]
               [--done-when "..."]...   # section flags compose the body template
               [--priority P0..P4] [--area X] [--blocked-by N] [--parent N]
               [--discovered-from N]
               [--body-file F | --edit] # long-form escape hatch / $EDITOR
-issues start <n> [--priority P0..P4] [--force]
-issues triage                     # issues missing priority/type labels
-issues set <n> [--priority ..] [--type ..] [--add-area X] [--remove-area X]
+hew start <n> [--priority P0..P4] [--force]
+hew triage                     # issues missing priority/type labels
+hew set <n> [--priority ..] [--type ..] [--add-area X] [--remove-area X]
            [--parent N | --no-parent] [--title "..."]
            [--body-file F]        # replace the body (an empty file is refused)
-issues pr [--for N] [--title "..."]
+hew pr [--for N] [--title "..."]
           [--what "..."] [--why "..."] [--testing "..."]
                                   # draft PR for the claimed issue: body composed from
                                   # the issue (What/Why default to its Fix/Approach and
@@ -84,23 +84,23 @@ issues pr [--for N] [--title "..."]
           [--body-file F]         # long-form escape hatch (missing Fixes/Part of
                                   # trailers are appended, never duplicated)
           [--base BRANCH] [--ready]
-issues close <n> --reason "..." [--completed | --duplicate-of M]
-issues block <n> --on <m>         # native dependency, cycle-checked
-issues unblock <n> --from <m>
-issues epic create --title "..." [--children N,N]
+hew close <n> --reason "..." [--completed | --duplicate-of M]
+hew block <n> --on <m>         # native dependency, cycle-checked
+hew unblock <n> --from <m>
+hew epic create --title "..." [--children N,N]
                    [--goal "..." --done-when "..." | --body-file F | --edit]
-issues epic status [<n>]
-issues apply <plan.jsonl> [--dry-run] [--state F] [--throttle D]
+hew epic status [<n>]
+hew apply <plan.jsonl> [--dry-run] [--state F] [--throttle D]
                                  # batch-create a whole set of issues from a JSONL
                                  # plan — labels, bodies, parents, dependencies —
                                  # checkpointed and resumable (see "Plan files")
                                  # defaults: --state <plan>.state.json, --throttle 500ms
-issues init
-issues hooks install|remove      # add/remove a Claude Code SessionStart hook running
-                                 # `issues prime`. Edits the project's committed
+hew init
+hew hooks install|remove      # add/remove a Claude Code SessionStart hook running
+                                 # `hew prime`. Edits the project's committed
                                  # .claude/settings.json in place, preserving the rest
                                  # of the file; needs a git repo to find the root
-issues migrate beads [--file F] [--state F] [--throttle D]
+hew migrate beads [--file F] [--state F] [--throttle D]
                      [--dry-run] [--include-closed]
                                  # import a beads (bd) database: priorities, types,
                                  # deps, epics, in-progress state; resumable
@@ -118,7 +118,7 @@ means "already claimed, pick the next ready item", `4` means "run `gh auth login
 
 ### Plan files
 
-`issues apply` turns a multi-issue workflow — decomposing a spec into phase
+`hew apply` turns a multi-issue workflow — decomposing a spec into phase
 epics and tasks, filing a batch of review findings — into: write a plan,
 dry-run it, apply it. One JSON object per line:
 
@@ -152,9 +152,9 @@ drive-by reports get deduped and labelled without a human sweep and `ready` stay
 truthful. To enable it:
 
 ```sh
-issues init                        # once: create the convention labels
+hew init                        # once: create the convention labels
 mkdir -p .github/workflows
-curl -fsSL https://raw.githubusercontent.com/lumberbarons/issues/main/examples/auto-triage.yml \
+curl -fsSL https://raw.githubusercontent.com/lumberbarons/hew/main/examples/auto-triage.yml \
   -o .github/workflows/auto-triage.yml
 gh secret set ANTHROPIC_API_KEY    # paste a key from console.anthropic.com
 ```
@@ -164,13 +164,13 @@ and either closes it as one or applies a type and priority label plus a short
 rationale comment. What it deliberately cannot do is the interesting part:
 
 - `permissions: issues: write` is the only grant — no code, no PRs, no other repos.
-- The tool allowlist is a handful of `issues` subcommands plus `gh issue comment`
+- The tool allowlist is a handful of `hew` subcommands plus `gh issue comment`
   and `gh label list`. No `create`, no `start`, no shell beyond that.
 - It assigns P2–P4 only; anything it thinks is P0/P1 it labels P2 and flags for a
-  human to upgrade. Reports too vague to classify are left untriaged (`issues
-  triage` still lists them) rather than mislabelled.
+  human to upgrade. Reports too vague to classify are left untriaged
+  (`hew triage` still lists them) rather than mislabelled.
 - Bot-filed issues and issues from anyone with write access are skipped, so
-  `issues create` output and the workflow's own writes can't feed it back.
+  `hew create` output and the workflow's own writes can't feed it back.
 
 Issue bodies are untrusted input; the permission scope and the allowlist are the
 mitigation, not the prompt's instructions.
