@@ -11,11 +11,16 @@ issues via `Fixes #n`, and nothing needs syncing.
 
 ## Install
 
+Needs `git` — the target repo is read from the local checkout, and `issues pr`
+reads the current branch — plus the [`gh` CLI](https://cli.github.com/) for
+authentication. The install script also needs `curl` and `tar`.
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/lumberbarons/issues/main/install.sh | bash
 ```
 
 Installs to `~/.local/bin` (override with `INSTALL_DIR`); never uses sudo.
+Linux and macOS (x86_64 and arm64) only — elsewhere, use `go install` below.
 
 Or, with a Go toolchain (1.25+):
 
@@ -31,7 +36,7 @@ repository is detected from the git remote (`--repo owner/name` overrides).
 
 ```sh
 issues init          # bootstrap the label set in a repo; prints a CLAUDE.md snippet
-issues hooks install # Claude Code SessionStart hook: `issues prime` at session start
+issues hooks install # SessionStart hook (writes the project's .claude/settings.json)
 issues prime         # session-start context: conventions + ready work + live state
 issues ready         # what should I work on? (priority-sorted, zero open blockers)
 issues start 42      # claim it: assign @me + in-progress (refuses claimed work, exit 3)
@@ -89,8 +94,12 @@ issues apply <plan.jsonl> [--dry-run] [--state F] [--throttle D]
                                  # batch-create a whole set of issues from a JSONL
                                  # plan — labels, bodies, parents, dependencies —
                                  # checkpointed and resumable (see "Plan files")
+                                 # defaults: --state <plan>.state.json, --throttle 500ms
 issues init
-issues hooks install|remove      # Claude Code SessionStart hook running `issues prime`
+issues hooks install|remove      # add/remove a Claude Code SessionStart hook running
+                                 # `issues prime`. Edits the project's committed
+                                 # .claude/settings.json in place, preserving the rest
+                                 # of the file; needs a git repo to find the root
 issues migrate beads [--file F] [--state F] [--throttle D]
                      [--dry-run] [--include-closed]
                                  # import a beads (bd) database: priorities, types,
@@ -127,7 +136,9 @@ issue number. `discovered-from` adds the same origin link the create flag
 does. Bodies come from the same section fields the create flags use —
 `where`, `problem` or `goal`, `fix` or `approach`, `done-when` (a list, one
 checklist item each) — composed into the body template; `body` carries raw
-long-form text instead (mutually exclusive with the section fields). Creation and dependency wiring are both checkpointed to the `--state` file as
+long-form text instead (mutually exclusive with the section fields).
+
+Creation and dependency wiring are both checkpointed to the `--state` file as
 they happen, so a failed run resumes without creating duplicates or
 re-attempting edges that already landed; unknown fields, dangling
 references, and dependency cycles between entries are all rejected before
@@ -141,8 +152,11 @@ drive-by reports get deduped and labelled without a human sweep and `ready` stay
 truthful. To enable it:
 
 ```sh
-issues init                                    # once: create the convention labels
-cp examples/auto-triage.yml .github/workflows/ # then add an ANTHROPIC_API_KEY secret
+issues init                        # once: create the convention labels
+mkdir -p .github/workflows
+curl -fsSL https://raw.githubusercontent.com/lumberbarons/issues/main/examples/auto-triage.yml \
+  -o .github/workflows/auto-triage.yml
+gh secret set ANTHROPIC_API_KEY    # paste a key from console.anthropic.com
 ```
 
 The agent reads the new issue, searches open and closed issues for a duplicate,

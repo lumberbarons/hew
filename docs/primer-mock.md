@@ -1,24 +1,37 @@
 # issues primer — lumberbarons/solar-controller
 
+<!--
+The conventions and command sections below are `conventions.PrimerStatic`
+verbatim — keep them in sync when you change that constant. Only the state
+sections (Ready/In progress/Blocked/Epics) are invented, standing in for a
+repo with enough work in flight to show every section at once.
+-->
+
 Workflow: issues ready → issues start <n> → branch (feat/|fix/|chore/) → push → issues pr.
-PRs close issues; `issues close` is only for wontfix/duplicate.
-File discovered work as you go: issues create ... --discovered-from <n>.
-Never work an epic directly — work its children; `ready` already excludes epics.
+Close via PR; issues close is for wontfix/duplicate only. Never work an epic directly.
+File discovered work: issues search <terms> first (dupes), then issues create ... --discovered-from <n>.
 
-Conventions (enforced by the tool):
-- Every issue: one priority label P0(critical)–P4(backlog), one type label bug|enhancement|task, zero+ area labels.
-- Dependencies are native (--blocked-by), never body text. Cycles are refused.
-- Epics are sub-issue trees titled "Epic: ...".
-- Body sections: ### Where / ### Problem or ### Goal / ### Fix or ### Approach / ### Done when (checklist).
+Conventions (enforced by the tool's write path):
+- One priority label P0(critical)..P4(backlog), default P2; one type label bug|enhancement|task.
+- Area labels sparingly — only once several issues would share one. No title prefixes; labels carry the metadata.
+- Dependencies are native (--blocked-by), never body text. Epics are sub-issue trees.
+- Bodies: ### Where / ### Problem or ### Goal / ### Fix or ### Approach / ### Done when (checklist). Omit empty sections.
+- Missing priority renders P? and sorts last; issues missing priority/type are untriaged, not broken — triage them via issues set.
+- start refuses claimed issues (exit 3): pick the next ready item. Untriaged issues need start --priority.
 
-Commands:
-  issues ready | list [--label X --epic N --closed] | show <n>
-  issues create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
-                [--where X --priority P --area A --blocked-by N --parent N --discovered-from N]
-  issues start <n> | pr [--for N --testing "..."] | close <n> --reason "..."
-  issues block <n> --on <m> | unblock <n> --from <m>
-  issues epic create --title "..." [--children N,N] | epic status [<n>]
-  All commands: --json, --repo owner/name.
+Output: one line per issue — #n priority type (areas) title [blocked by #m; epic done/total; in progress @user].
+list sorts ready work first, then claimed, blocked, epics. Prefer text output; --json on list commands emits NDJSON.
+
+Commands: ready | list [--label X --epic N --closed --bodies (with --json)] | show <n> | search <terms> | triage |
+create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
+  [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
+start <n> [--priority Pn] | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |
+pr [--for N --testing "..." --what "..." --why "..." --title "..." --ready] (draft PR for the claimed issue; body
+  composed from the issue, exactly one "Fixes #n"; title defaults to feat:|fix:|chore: from the type —
+  push the branch first) |
+close <n> --reason "..." [--completed | --duplicate-of M] | block <n> --on <m> | unblock <n> --from <m> |
+epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n>] |
+apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: issues apply --help). All take --json.
 
 ## Ready (8 of 19 open)
 #117 P1 bug (tests)  Tautological assertions on state the code cannot modify
