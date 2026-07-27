@@ -11,9 +11,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/lumberbarons/issues/internal/conventions"
-	"github.com/lumberbarons/issues/internal/gh"
-	"github.com/lumberbarons/issues/internal/plan"
+	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/plan"
 )
 
 // ensureLabels creates any missing convention labels plus the given extras.

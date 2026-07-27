@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lumberbarons/issues/internal/conventions"
-	"github.com/lumberbarons/issues/internal/gh"
-	"github.com/lumberbarons/issues/internal/model"
+	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 // PROpts are the pr command's inputs. Every section is optional: the point

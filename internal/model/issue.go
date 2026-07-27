@@ -254,8 +254,8 @@ func listBucket(i Issue) int {
 	}
 }
 
-// SortForList orders issues ready-first (each bucket P0→P4 then P?, oldest
-// first), so one `issues list` answers both "what's actionable" and "what
+// SortForList orders hew ready-first (each bucket P0→P4 then P?, oldest
+// first), so one `hew list` answers both "what's actionable" and "what
 // exists but is stuck".
 func SortForList(issues []Issue) {
 	sort.SliceStable(issues, func(a, b int) bool {

@@ -16,7 +16,7 @@ import (
 
 	"github.com/cli/go-gh/v2/pkg/api"
 
-	"github.com/lumberbarons/issues/internal/model"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 // rewriteTransport sends every request to the test server, whatever host

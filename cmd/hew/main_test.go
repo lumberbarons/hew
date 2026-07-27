@@ -10,10 +10,10 @@ import (
 
 	ucli "github.com/urfave/cli/v3"
 
-	appcli "github.com/lumberbarons/issues/internal/cli"
-	"github.com/lumberbarons/issues/internal/conventions"
-	"github.com/lumberbarons/issues/internal/model"
-	"github.com/lumberbarons/issues/internal/plan"
+	appcli "github.com/lumberbarons/hew/internal/cli"
+	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/model"
+	"github.com/lumberbarons/hew/internal/plan"
 )
 
 // setupCommands are one-time/setup verbs the agent-facing primer deliberately
@@ -164,7 +164,7 @@ func findCommand(t *testing.T, cmd *ucli.Command, path ...string) *ucli.Command 
 }
 
 // TestRepoFlagReachesCommand covers #25: the global --repo must reach the
-// command in either position. Before the fix, `issues --repo owner/name <cmd>`
+// command in either position. Before the fix, `hew --repo owner/name <cmd>`
 // parsed without error but the leaf's own shadowing --repo flag stayed empty,
 // so writes silently went to the git-remote-detected repo. Actions are swapped
 // for capture functions so the real flag wiring is exercised without a GitHub
@@ -176,11 +176,11 @@ func TestRepoFlagReachesCommand(t *testing.T) {
 		path []string
 		args []string
 	}{
-		{"read before subcommand", []string{"list"}, []string{"issues", "--repo", want, "list"}},
-		{"read after subcommand", []string{"list"}, []string{"issues", "list", "--repo", want}},
-		{"write before subcommand", []string{"create"}, []string{"issues", "--repo", want, "create", "--type", "task", "--title", "t"}},
-		{"write after subcommand", []string{"create"}, []string{"issues", "create", "--repo", want, "--type", "task", "--title", "t"}},
-		{"nested subcommand", []string{"epic", "status"}, []string{"issues", "--repo", want, "epic", "status"}},
+		{"read before subcommand", []string{"list"}, []string{"hew", "--repo", want, "list"}},
+		{"read after subcommand", []string{"list"}, []string{"hew", "list", "--repo", want}},
+		{"write before subcommand", []string{"create"}, []string{"hew", "--repo", want, "create", "--type", "task", "--title", "t"}},
+		{"write after subcommand", []string{"create"}, []string{"hew", "create", "--repo", want, "--type", "task", "--title", "t"}},
+		{"nested subcommand", []string{"epic", "status"}, []string{"hew", "--repo", want, "epic", "status"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -208,8 +208,8 @@ func TestJSONFlagReachesCommand(t *testing.T) {
 		path []string
 		args []string
 	}{
-		{"before subcommand", []string{"ready"}, []string{"issues", "--json", "ready"}},
-		{"after subcommand", []string{"ready"}, []string{"issues", "ready", "--json"}},
+		{"before subcommand", []string{"ready"}, []string{"hew", "--json", "ready"}},
+		{"after subcommand", []string{"ready"}, []string{"hew", "ready", "--json"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -250,7 +250,7 @@ func TestDoneWhenTakesItemsVerbatim(t *testing.T) {
 	}
 
 	want := []string{"alpha, beta", "gamma"}
-	args := []string{"issues", "create", "--type", "task", "--title", "t",
+	args := []string{"hew", "create", "--type", "task", "--title", "t",
 		"--done-when", "alpha, beta", "--done-when", "gamma", "--area", "cli,render"}
 	if err := app.Run(context.Background(), args); err != nil {
 		t.Fatalf("run %v: %v", args, err)
@@ -263,7 +263,7 @@ func TestDoneWhenTakesItemsVerbatim(t *testing.T) {
 	}
 
 	// epic create shares bodyFlags with create, so it must behave the same.
-	args = []string{"issues", "epic", "create", "--title", "t",
+	args = []string{"hew", "epic", "create", "--title", "t",
 		"--done-when", "alpha, beta", "--done-when", "gamma", "--children", "1,2"}
 	if err := app.Run(context.Background(), args); err != nil {
 		t.Fatalf("run %v: %v", args, err)
@@ -279,7 +279,7 @@ func TestDoneWhenTakesItemsVerbatim(t *testing.T) {
 // TestCreateAndApplyComposeIdenticalBodies pins the other half of #47: the
 // same checklist input must produce the same body whichever path files the
 // issue. done-when is a JSON array in a plan, so apply never split it; create
-// did, and the mismatch was invisible until a later `issues show`.
+// did, and the mismatch was invisible until a later `hew show`.
 func TestCreateAndApplyComposeIdenticalBodies(t *testing.T) {
 	app := root()
 	var fromFlags conventions.Sections
@@ -287,7 +287,7 @@ func TestCreateAndApplyComposeIdenticalBodies(t *testing.T) {
 		fromFlags = sectionsFromFlags(cmd)
 		return nil
 	}
-	args := []string{"issues", "create", "--type", "task", "--title", "t",
+	args := []string{"hew", "create", "--type", "task", "--title", "t",
 		"--done-when", "alpha, beta", "--done-when", "gamma"}
 	if err := app.Run(context.Background(), args); err != nil {
 		t.Fatalf("run %v: %v", args, err)

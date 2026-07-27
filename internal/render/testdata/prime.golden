@@ -1,5 +1,5 @@
-# issues primer — lumberbarons/solar-controller
-Workflow: issues ready → issues start <n>.
+# hew primer — lumberbarons/solar-controller
+Workflow: hew ready → hew start <n>.
 
 ## Ready (3 of 14 open)
 #117 P1 bug (tests)  Tautological assertions on state the code cannot modify
@@ -12,7 +12,7 @@ Workflow: issues ready → issues start <n>.
 ## Epics
 #137 P2  Voltgo BLE battery controller support  0/6
 
-7 untriaged → issues triage
+7 untriaged → hew triage
 
 ## Warnings
 ⚠ #42 has multiple priority labels; highest wins

@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lumberbarons/issues/internal/beads"
-	"github.com/lumberbarons/issues/internal/conventions"
-	"github.com/lumberbarons/issues/internal/gh"
-	"github.com/lumberbarons/issues/internal/model"
+	"github.com/lumberbarons/hew/internal/beads"
+	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 // MigrateOpts configure the beads migration.

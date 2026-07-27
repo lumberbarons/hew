@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lumberbarons/issues/internal/model"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 func TestParse(t *testing.T) {

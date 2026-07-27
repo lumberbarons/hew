@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lumberbarons/issues/internal/model"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 var ctx = context.Background()
@@ -347,14 +347,14 @@ func TestPrime(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{
-		"# issues primer — o/r",
-		"Workflow: issues ready",
+		"# hew primer — o/r",
+		"Workflow: hew ready",
 		"## Ready (3 of 5 open)",
 		"## In progress (1)",
 		"@me",
 		"## Epics",
 		"#10 P2  Epic: big  0/1",
-		"1 untriaged → issues triage",
+		"1 untriaged → hew triage",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Prime missing %q:\n%s", want, got)
@@ -393,7 +393,7 @@ func TestPrimeCapsReady(t *testing.T) {
 	if err := app.Prime(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "… 5 more: issues ready") {
+	if !strings.Contains(out.String(), "… 5 more: hew ready") {
 		t.Errorf("Prime cap:\n%s", out.String())
 	}
 }

@@ -1,6 +1,6 @@
 # internal/cli
 
-The commands themselves, written against the `gh.Client` interface so `cmd/issues` stays pure wiring and every behavior is testable without hitting GitHub.
+The commands themselves, written against the `gh.Client` interface so `cmd/hew` stays pure wiring and every behavior is testable without hitting GitHub.
 
 | File | What | When to read |
 |---|---|---|

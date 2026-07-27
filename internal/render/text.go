@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lumberbarons/issues/internal/model"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 // meta is the "P2 enhancement (tests)" middle column of an issue line.
@@ -219,7 +219,7 @@ type PrimeData struct {
 // Prime renders the session-start primer: static conventions, live state,
 // contradictions. Sections are omitted when empty.
 func Prime(w io.Writer, static string, d PrimeData) {
-	fmt.Fprintf(w, "# issues primer — %s\n", d.Repo)
+	fmt.Fprintf(w, "# hew primer — %s\n", d.Repo)
 	fmt.Fprintln(w, static)
 	fmt.Fprintf(w, "\n## Ready (%d of %d open)\n", d.ReadyTotal, d.OpenTotal)
 	if len(d.Ready) == 0 {
@@ -227,7 +227,7 @@ func Prime(w io.Writer, static string, d PrimeData) {
 	} else {
 		lines(w, d.Ready, lineOpts{})
 		if d.ReadyTotal > len(d.Ready) {
-			fmt.Fprintf(w, "… %d more: issues ready\n", d.ReadyTotal-len(d.Ready))
+			fmt.Fprintf(w, "… %d more: hew ready\n", d.ReadyTotal-len(d.Ready))
 		}
 	}
 	if len(d.InProgress) > 0 {
@@ -239,7 +239,7 @@ func Prime(w io.Writer, static string, d PrimeData) {
 		lines(w, d.Epics, lineOpts{progress: true})
 	}
 	if d.Untriaged > 0 {
-		fmt.Fprintf(w, "\n%d untriaged → issues triage\n", d.Untriaged)
+		fmt.Fprintf(w, "\n%d untriaged → hew triage\n", d.Untriaged)
 	}
 	if len(d.Warnings) > 0 {
 		fmt.Fprintln(w, "\n## Warnings")

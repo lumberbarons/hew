@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lumberbarons/issues/internal/model"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 func TestLabelsCoverConventionSet(t *testing.T) {
@@ -167,7 +167,7 @@ func TestDiscoveredFrom(t *testing.T) {
 }
 
 func TestPrimerStaticMentionsCoreCommands(t *testing.T) {
-	for _, cmd := range []string{"issues ready", "start", "triage", "issues search", "--discovered-from", "Fixes #n", "P0", "P4", "exit 3",
+	for _, cmd := range []string{"hew ready", "start", "triage", "hew search", "--discovered-from", "Fixes #n", "P0", "P4", "exit 3",
 		"### Where", "### Done when", "Area labels sparingly", "No title prefixes",
 		"--goal|--problem", "--approach|--fix", "--done-when", "--body-file F for long bodies"} {
 		if !strings.Contains(PrimerStatic, cmd) {
@@ -177,10 +177,10 @@ func TestPrimerStaticMentionsCoreCommands(t *testing.T) {
 }
 
 func TestClaudeSnippet(t *testing.T) {
-	// Every load-bearing claim in the snippet issues init writes into user
+	// Every load-bearing claim in the snippet hew init writes into user
 	// repos: where work is tracked, the session-start command, and the
 	// fallback.
-	for _, want := range []string{"GitHub Issues", "`issues` CLI", "issues prime", "issues ready"} {
+	for _, want := range []string{"GitHub Issues", "`hew` CLI", "hew prime", "hew ready"} {
 		if !strings.Contains(ClaudeSnippet, want) {
 			t.Errorf("snippet missing %q:\n%s", want, ClaudeSnippet)
 		}

@@ -1,4 +1,4 @@
-# issues — an agentic-first CLI for GitHub Issues
+# hew — an agentic-first CLI for GitHub Issues
 
 ## Vision
 
@@ -24,10 +24,10 @@ session re-derives the same jq pipelines from scratch.
 
 | beads | this tool | GitHub mechanism |
 |-------|-----------|------------------|
-| `bd ready` — zero open blockers | `issues ready` | `blockedBy` (native dependencies), filtered + priority-sorted |
-| `bd prime` — session-start context injection | `issues prime` | generated from live repo state + built-in conventions |
-| hierarchical IDs (`bd-a3f8.1`) for epics | `issues epic` | native sub-issues (`parent` / `subIssues`) |
-| `bd update --claim` — claim: assign + in-progress | `issues start` | assign `@me` + `in-progress` label |
+| `bd ready` — zero open blockers | `hew ready` | `blockedBy` (native dependencies), filtered + priority-sorted |
+| `bd prime` — session-start context injection | `hew prime` | generated from live repo state + built-in conventions |
+| hierarchical IDs (`bd-a3f8.1`) for epics | `hew epic` | native sub-issues (`parent` / `subIssues`) |
+| `bd update --claim` — claim: assign + in-progress | `hew start` | assign `@me` + `in-progress` label |
 | priorities 0–4 | P0–P4 labels | labels (issue *types* are org-only; labels work on personal repos) |
 | token-lean, JSON-optional output | same | `--json` on every command, compact text default |
 | `bd remember` — persistent insights | deferred (open question) | overlaps with Claude Code's own memory system |
@@ -73,8 +73,8 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
   guard is check-then-act with a re-read after claiming — a small race window
   remains (see open questions).
 - **Untriaged, not broken**: an issue missing its priority or type label — typical
-  for anything filed outside the tool — is *untriaged*, a normal state. `issues
-  triage` lists them so a human or agent can label each via `set`; nothing is ever
+  for anything filed outside the tool — is *untriaged*, a normal state.
+  `hew triage` lists them so a human or agent can label each via `set`; nothing is ever
   stamped with defaults automatically, since auto-labeling someone else's report
   destroys information.
 - **Contradictions** (two priority labels, an in-progress epic, a dependency cycle)
@@ -102,52 +102,52 @@ primer so agents know what they're looking at:
 ## Command surface (v1)
 
 ```
-issues prime                      # session-start context (see below)
-issues ready                      # open, non-epic, zero *open* blockers; sorted
+hew prime                      # session-start context (see below)
+hew ready                      # open, non-epic, zero *open* blockers; sorted
                                   # P0→P4 then P?, oldest first within a priority
-issues list [--label X] [--epic N] [--closed]
+hew list [--label X] [--epic N] [--closed]
             [--bodies]           # with --json: body on every line — whole-tracker
                                   # dedup in a single call instead of a show per candidate
-issues show <n>                   # detail: body, deps, parent, children, recent comments
-issues search <terms>             # repo-scoped text search over open+closed issues in
+hew show <n>                   # detail: body, deps, parent, children, recent comments
+hew search <terms>             # repo-scoped text search over open+closed issues in
                                   # best-match order — the dedupe step before filing
                                   # discovered work ("already fixed" answers the question
                                   # as well as "already filed"); results capped, warns
                                   # on truncation instead of paging through
 
-issues create --type bug|enhancement|task [--priority P0..P4] [--area X]
+hew create --type bug|enhancement|task [--priority P0..P4] [--area X]
               [--blocked-by N...] [--parent N] [--discovered-from N]
               --title "..." [--where X] [--problem|--goal "..."]
               [--fix|--approach "..."] [--done-when "..."]...
               [--body-file F | --edit]
-issues start <n> [--priority P0..P4] [--force]
+hew start <n> [--priority P0..P4] [--force]
                                   # guarded claim: refuses if already assigned or
                                   # in-progress (distinct exit code — pick the next
                                   # ready item); --force steals; untriaged issues
                                   # require --priority (claim = triage)
-issues triage                     # untriaged issues (missing priority/type), oldest
+hew triage                     # untriaged issues (missing priority/type), oldest
                                   # first — work through them with `set`
-issues set <n> [--priority P0..P4] [--type bug|enhancement|task] [--add-area X]
+hew set <n> [--priority P0..P4] [--type bug|enhancement|task] [--add-area X]
            [--remove-area X] [--parent N | --no-parent] [--title "..."]
            [--body-file F]
                                   # retriage/edit within conventions (swaps the old
                                   # priority/type label, never stacks a second one);
                                   # --body-file replaces the whole body — an empty
                                   # file is refused rather than blanking it
-issues pr [--for N] [--title "..."] [--what|--why|--testing "..."]
+hew pr [--for N] [--title "..."] [--what|--why|--testing "..."]
           [--body-file F] [--base BRANCH] [--ready]
                                   # the PR step of the workflow, composed rather than
                                   # freeform: draft PR for the issue this branch is
                                   # for, body from the What/Why/Testing template with
                                   # exactly one "Fixes #n" (see below)
-issues close <n> --reason "..."   # comment + close (not-planned unless --completed
+hew close <n> --reason "..."   # comment + close (not-planned unless --completed
                                   # or --duplicate-of M)
-issues block <n> --on <m>         # add dependency (cycle-checked)
-issues unblock <n> --from <m>
-issues epic create --title "..." [--children N,N,N]
+hew block <n> --on <m>         # add dependency (cycle-checked)
+hew unblock <n> --from <m>
+hew epic create --title "..." [--children N,N,N]
                    [section flags | --body-file F | --edit]
-issues epic status [<n>]          # progress rollup per epic
-issues apply <plan.jsonl>         # batch-create from a JSONL plan: one entry per line
+hew epic status [<n>]          # progress rollup per epic
+hew apply <plan.jsonl>         # batch-create from a JSONL plan: one entry per line
                                   # (title/type/priority/areas, the same section
                                   # fields as the create flags or a raw body, parent
                                   # and blocked-by), the migrate machinery generalized.
@@ -162,11 +162,11 @@ issues apply <plan.jsonl>         # batch-create from a JSONL plan: one entry pe
                                   # dependency cycles are rejected up front — a
                                   # complete check, since pre-existing issues can't
                                   # reference entries that don't exist yet.
-issues init                       # bootstrap labels in a repo; print CLAUDE.md snippet
-issues hooks install|remove       # Claude Code SessionStart hook running `issues prime`
+hew init                       # bootstrap labels in a repo; print CLAUDE.md snippet
+hew hooks install|remove       # Claude Code SessionStart hook running `hew prime`
                                   # in the project's .claude/settings.json — the hook
                                   # variant of prime's "CLAUDE.md instruction or hook"
-issues migrate beads              # import a beads (bd) database from .beads/issues.jsonl
+hew migrate beads              # import a beads (bd) database from .beads/issues.jsonl
                                   # (parsed raw — no bd dependency): P0-P4 and types map
                                   # to labels, blocks→blocked-by, parent-child→sub-issues,
                                   # in_progress→claim, close_reason→closing comment, with
@@ -178,7 +178,7 @@ issues migrate beads              # import a beads (bd) database from .beads/iss
 Global flags: `--json` (structured output, stable schema), `--repo owner/name`
 (default: detect from git remote via go-gh).
 
-### `issues pr`
+### `hew pr`
 
 The last step of the claim lifecycle, and the only one the tool used not to
 cover: `ready → start → branch → PR` was enforced up to the branch, then handed
@@ -234,7 +234,7 @@ function the way `--edit`'s editor is, so the command stays testable without a
 checkout. Two API calls beyond the issue read: one query for the default branch
 and any existing PR on the head, one REST create.
 
-### `issues prime`
+### `hew prime`
 
 The session-start ritual, modeled on `bd prime`: one command whose output an agent
 injects at the top of a session (via CLAUDE.md instruction or hook) instead of
@@ -247,14 +247,14 @@ maintaining hand-written workflow prose. Three parts:
 3. **Warnings** — contradictions only (`⚠ #42 has two priority labels`,
    `⚠ dependency cycle #3 → #4 → #5 → #3: none will be ready`). Absences
    are not warnings: untriaged work rolls up to a single line (`7 untriaged →
-   issues triage`), so a public repo full of drive-by reports doesn't drown the
+   hew triage`), so a public repo full of drive-by reports doesn't drown the
    primer. Section omitted entirely when the repo is clean.
 
 Sketch:
 
 ```
-# issues primer — lumberbarons/solar-controller
-Workflow: issues ready → issues start <n> → branch (feat/|fix/|chore/) → PR "Fixes #n".
+# hew primer — lumberbarons/solar-controller
+Workflow: hew ready → hew start <n> → branch (feat/|fix/|chore/) → PR "Fixes #n".
 File discovered work with --discovered-from. Never work an epic directly.
 
 ## Ready (3 of 14 open)
@@ -304,7 +304,7 @@ typical repo.
   (`subIssuesSummary`, `issueDependenciesSummary`), prefer them over fetching nested
   nodes just to count.
 - **Layout**:
-  - `cmd/issues/` — main, urfave/cli command wiring
+  - `cmd/hew/` — main, urfave/cli command wiring
   - `internal/gh/` — thin API layer (interface, so commands are testable against a fake)
   - `internal/model/` — Issue/Epic domain types, ready/normalization/cycle logic
     (pure, unit-tested)
@@ -334,15 +334,15 @@ typical repo.
   we pick them up.
 - **Releases are tag-driven**: pushing a `vX.Y.Z` tag runs goreleaser, which builds
   static binaries for linux and macOS (amd64 + arm64, CGO off), stamps the version
-  into `issues --version` via ldflags, and publishes the archives plus a checksums
+  into `hew --version` via ldflags, and publishes the archives plus a checksums
   file as a GitHub Release. Release notes come from goreleaser's changelog grouping
   over commit prefixes (`feat:`/`fix:`/`docs:`/...), which we already write.
 - **install.sh** at the repo root, usable as
-  `curl -fsSL https://raw.githubusercontent.com/lumberbarons/issues/main/install.sh | bash`:
+  `curl -fsSL https://raw.githubusercontent.com/lumberbarons/hew/main/install.sh | bash`:
   detects OS/arch via `uname`, resolves the latest release through the GitHub API,
   downloads the matching archive, verifies it against the checksums file, and
   installs to `$HOME/.local/bin` (`INSTALL_DIR` overrides; never sudo), printing a
-  PATH hint when needed. `go install .../cmd/issues@latest` remains the
+  PATH hint when needed. `go install .../cmd/hew@latest` remains the
   toolchain-native alternative.
 
 ## Spike results (2026-07-10)
@@ -393,7 +393,7 @@ any product code.
 ## Milestones
 
 - **M0 — scaffold**: module, urfave/cli v3 skeleton, go-gh auth + repo detection,
-  `issues list` (proves the GraphQL query and renderer end-to-end). The query
+  `hew list` (proves the GraphQL query and renderer end-to-end). The query
   includes `parent`/`subIssues`/`blockedBy` from day one — field names, header
   requirements, nested-cap behavior, and cycle semantics are all verified (see
   spike results), so this milestone has no API unknowns left. CI (lint + full
@@ -406,24 +406,33 @@ any product code.
   the tool is what keeps the one-label invariants true), `triage`, `block`/`unblock`
   with cycle detection, `start`, `close`, `epic create`.
 - **M3 — bootstrap**: `init` (create label set in a fresh repo, emit the CLAUDE.md
-  snippet that says little more than "run `issues prime`"). Replace solar-controller's
+  snippet that says little more than "run `hew prime`"). Replace solar-controller's
   hand-written conventions section with it.
 - **M4 — polish**: `--json` everywhere, pagination hardening, maybe a read cache,
   maybe `remember`. Distribution is `go install` only — no `gh` extension; agents
-  invoke the bare `issues` binary and that's the whole interface.
+  invoke the bare `hew` binary and that's the whole interface.
 
 ## Open questions
 
-- **Name — resolved.** Binary and repo are `issues`. `is` was considered — no shell
-  builtin, POSIX utility, or popular tool conflicts with it — but rejected as
-  ungreppable and ambiguous in prose and transcripts (`is block 42 --on 7`). Anyone
-  who wants the terse form can `alias is=issues` locally; agents use the real name.
+- **Name — resolved.** Binary and repo are `hew`. The tool shipped through v0.6.0
+  as `issues`, which was renamed because the name was effectively unsearchable:
+  it competes with the literal English word in every query that matters, so the
+  project could never be found by anyone who did not already have the URL. `hew`
+  carries the two meanings the tool wants — to shape timber (matching the
+  `lumberbarons` namespace) and to *hew to* a standard, which is precisely the
+  write-path invariant. It was verified free of collisions on GitHub repo names,
+  Homebrew formulae and casks, and `$PATH` before adoption. `tally` and `adze`
+  were the runners-up, rejected for collisions (`uber-go/tally`, `davidfowl/tally`,
+  and an existing `adze` Homebrew cask). `is` was considered much earlier — no
+  shell builtin or POSIX utility conflicts with it — but rejected as ungreppable
+  and ambiguous in prose and transcripts (`is block 42 --on 7`). Anyone who wants
+  a terse form can alias it locally; agents use the real name.
 - **`remember`.** beads couples memory to the tracker; Claude Code has its own
   memory system. Skip, or implement as comments on a pinned "agent notes" issue?
   Deferred to M4 — need real usage first.
 - **in-progress signal.** Label (visible, filterable) vs assignee-only (no label
   churn). v1: both — assign is the claim, label is the visibility.
-- **Multi-repo prime.** Someday `issues prime --all-repos` for a workspace overview?
+- **Multi-repo prime.** Someday `hew prime --all-repos` for a workspace overview?
   Out of scope for v1.
 - **Branch coverage.** The Go toolchain only does statement coverage; `gobco` adds
   branch/condition coverage via source instrumentation but is niche and awkward in

@@ -1,4 +1,4 @@
-// Package plan parses the JSONL plan files consumed by `issues apply`: one
+// Package plan parses the JSONL plan files consumed by `hew apply`: one
 // entry per line, each describing an issue to create. Entries may carry a
 // local id so other lines can reference them (parent, blocked-by) before
 // issue numbers exist — the same way migrate resolves bead IDs. Parsing and
@@ -13,8 +13,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/lumberbarons/issues/internal/conventions"
-	"github.com/lumberbarons/issues/internal/model"
+	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 // TypeEpic is the plan-only type marking a parent issue: no type label, the

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lumberbarons/issues/internal/conventions"
-	"github.com/lumberbarons/issues/internal/gh"
-	"github.com/lumberbarons/issues/internal/plan"
+	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/plan"
 )
 
 // ApplyOpts configure a batch apply.
@@ -34,7 +34,7 @@ type ApplyOpts struct {
 // the role of bead IDs.
 func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	if opts.File == "" {
-		return usageErr("usage: issues apply <plan.jsonl>")
+		return usageErr("usage: hew apply <plan.jsonl>")
 	}
 	if opts.StatePath == "" {
 		opts.StatePath = opts.File + ".state.json"
@@ -234,7 +234,7 @@ func planAreaLabels(entries []plan.Entry) []gh.Label {
 		for _, area := range e.Areas {
 			if !seen[area] {
 				seen[area] = true
-				out = append(out, gh.Label{Name: area, Color: "ededed", Description: "created by issues apply"})
+				out = append(out, gh.Label{Name: area, Color: "ededed", Description: "created by hew apply"})
 			}
 		}
 	}

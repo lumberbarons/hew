@@ -2,9 +2,9 @@
 // body template, and the static primer text.
 package conventions
 
-import "github.com/lumberbarons/issues/internal/model"
+import "github.com/lumberbarons/hew/internal/model"
 
-// Label describes one label in the bootstrap set created by `issues init`.
+// Label describes one label in the bootstrap set created by `hew init`.
 type Label struct {
 	Name        string
 	Color       string // hex, no leading #
@@ -27,7 +27,7 @@ var labelStyle = map[string]struct{ Color, Description string }{
 	model.InProgressLabel: {"1d76db", "Actively being worked (claimed)"},
 }
 
-// Labels is the convention label set `issues init` bootstraps: model's
+// Labels is the convention label set `hew init` bootstraps: model's
 // vocabulary (names) plus the cosmetics above. init creates the missing ones;
 // color/description drift on labels that already exist is left alone — names
 // are the contract, cosmetics are the repo owner's.
