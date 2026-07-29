@@ -167,7 +167,7 @@ func TestDiscoveredFrom(t *testing.T) {
 }
 
 func TestPrimerStaticMentionsCoreCommands(t *testing.T) {
-	for _, cmd := range []string{"hew ready", "start", "triage", "hew search", "--discovered-from", "Fixes #n", "P0", "P4", "exit 3",
+	for _, cmd := range []string{"hew ready", "start", "triage", "hew search", "--discovered-from", "Fixes #n", "P0", "P4", "exit 3", "exit 5",
 		"### Where", "### Done when", "Area labels sparingly", "No title prefixes",
 		"--goal|--problem", "--approach|--fix", "--done-when", "--body-file F for long bodies"} {
 		if !strings.Contains(PrimerStatic, cmd) {

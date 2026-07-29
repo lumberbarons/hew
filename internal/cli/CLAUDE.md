@@ -12,7 +12,7 @@ The commands themselves, written against the `gh.Client` interface so `cmd/hew` 
 | `migrate.go` | `migrate beads`: maps a parsed beads snapshot onto the conventions — priorities, types, deps, epics, in-progress state | Changing the beads migration |
 | `batch.go` | Shared machinery for `apply` and `migrate`: the checkpoint state file, throttled writes, label bootstrapping | Changing resume behavior or write throttling |
 | `hooks.go` | `hooks install\|remove`: edits the project's `.claude/settings.json` in place, preserving unknown fields | Changing the SessionStart hook |
-| `exit.go` | Maps errors to the exit codes agent loops branch on (`2` usage, `3` already claimed, `4` auth), plus the `--repo` and issue-number argument parsers | Changing an exit code — it is contract |
+| `exit.go` | Maps errors to the exit codes agent loops branch on (`2` usage, `3` claimed by someone else, `4` auth, `5` claimed by you), plus the `--repo` and issue-number argument parsers | Changing an exit code — it is contract |
 
 Tests run against `fakeClient`, never the network. `batch.go` has no test file of its own — it is covered through `apply` and `migrate`.
 

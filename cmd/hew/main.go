@@ -246,7 +246,7 @@ func createCmd() *ucli.Command {
 func startCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:      "start",
-		Usage:     "claim an issue: assign @me + in-progress (refuses claimed issues, exit 3)",
+		Usage:     "claim an issue: assign @me + in-progress (refuses claimed issues: exit 3, or 5 when already yours)",
 		ArgsUsage: "<n>",
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{Name: "priority", Usage: "P0..P4; required when the issue is untriaged"},

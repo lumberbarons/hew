@@ -122,8 +122,9 @@ hew create --type bug|enhancement|task [--priority P0..P4] [--area X]
               [--body-file F | --edit]
 hew start <n> [--priority P0..P4] [--force]
                                   # guarded claim: refuses if already assigned or
-                                  # in-progress (distinct exit code — pick the next
-                                  # ready item); --force steals; untriaged issues
+                                  # in-progress (exit 3 — pick the next ready item;
+                                  # exit 5 when the claimant is you — resume that
+                                  # work); --force steals; untriaged issues
                                   # require --priority (claim = triage)
 hew triage                     # untriaged issues (missing priority/type), oldest
                                   # first — work through them with `set`
@@ -287,8 +288,11 @@ typical repo.
   unparseable garbage, a truncated NDJSON stream is just shorter (same feedback).
   The primer states both formats so agents reach for the cheap one.
 - Errors are one line, actionable, exit codes meaningful (`ready` with no results
-  exits 0 with `no ready work`; `start` on a claimed issue exits 3 with
-  `already claimed`; auth failure exits 4; etc.).
+  exits 0 with `no ready work`; `start` on an issue claimed by someone else exits 3
+  with `already claimed`; `start` on an issue you already claimed exits 5, because
+  the response is to resume that work rather than to pick a different item; auth
+  failure exits 4; etc.). The exit code is the signal agents branch on — a
+  distinction worth acting on gets a code, not a `--json`-only field.
 
 ## Architecture
 
@@ -441,4 +445,6 @@ any product code.
   sessions that race `start` inside the guard window are indistinguishable by
   assignee or label — both think they won. If this happens in practice, tie-break
   with a claim comment carrying a session nonce (earliest comment wins, loser backs
-  off). Deferred until actually observed.
+  off). Deferred until actually observed. Exit 5 does not address this: it tells a
+  caller the claim is `@me`'s, which is exactly the point at which one of *my* own
+  sessions cannot tell whether the claimant is itself or a sibling.

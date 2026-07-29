@@ -313,6 +313,9 @@ func TestPrimerFactsTrackCode(t *testing.T) {
 	if want := fmt.Sprintf("exit %d", appcli.ExitClaimed); !strings.Contains(primer, want) {
 		t.Errorf("primer must state the claimed exit code as %q", want)
 	}
+	if want := fmt.Sprintf("exit %d", appcli.ExitClaimedByYou); !strings.Contains(primer, want) {
+		t.Errorf("primer must state the claimed-by-you exit code as %q", want)
+	}
 	if want := "default " + model.DefaultPriority.String(); !strings.Contains(primer, want) {
 		t.Errorf("primer must state the default priority as %q", want)
 	}
