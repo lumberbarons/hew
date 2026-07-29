@@ -1,0 +1,40 @@
+# hew primer — lumberbarons/hew
+Workflow: hew ready → hew start <n> → branch (feat/|fix/|chore/) → push → hew pr.
+Close via PR; hew close is for wontfix/duplicate only. Never work an epic directly.
+File discovered work: hew search <terms> first (dupes), then hew create ... --discovered-from <n>.
+
+Conventions (enforced by the tool's write path):
+- One priority label P0(critical)..P4(backlog), default P2; one type label bug|enhancement|task.
+- Area labels sparingly — only once several issues would share one. No title prefixes; labels carry the metadata.
+- Dependencies are native (--blocked-by), never body text. Epics are sub-issue trees.
+- Bodies: ### Where / ### Problem or ### Goal / ### Fix or ### Approach / ### Done when (checklist). Omit empty sections.
+- Missing priority renders P? and sorts last; issues missing priority/type are untriaged, not broken — triage them via hew set.
+- start refuses claimed issues: exit 3 pick the next ready item, exit 5 the claim is yours — resume it. Untriaged issues need start --priority.
+
+Output: one line per issue — #n priority type (areas) title [blocked by #m; epic done/total; in progress @user].
+list sorts ready work first, then claimed, blocked, epics. Prefer text output; --json on list commands emits NDJSON.
+
+Commands: ready | list [--label X --epic N --closed --bodies (with --json)] | show <n> | search <terms> | triage |
+create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
+  [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
+start <n> [--priority Pn] | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |
+pr [--for N --testing "..." --what "..." --why "..." --title "..." --ready] (draft PR for the claimed issue; body
+  composed from the issue, exactly one "Fixes #n"; title defaults to feat:|fix:|chore: from the type —
+  push the branch first) |
+close <n> --reason "..." [--completed | --duplicate-of M] | block <n> --on <m> | unblock <n> --from <m> |
+epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n>] |
+apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew apply --help). All take --json.
+
+## Ready (9 of 10 open)
+#35 P2 task         Agentic accuracy eval: issues vs raw gh on a seeded fixture repo
+#60 P2 task         CI gates: formatting, govulncheck, release dry-run, actionlint
+#37 P3 enhancement  Canonical dedup guidance in the primer; closed-issue coverage for list --bodies
+#39 P3 enhancement  Write commands guard against closed targets
+#40 P3 enhancement  Reopen command symmetric with close
+#57 P3 enhancement  pr composes bullet lists from repeatable section flags
+#61 P3 task         Tighten test gates: per-package coverage floor and shuffled test order
+#62 P3 enhancement  list --json costs more tokens than the raw GraphQL it replaces
+#63 P3 enhancement  prime exceeds its ~600-token budget on real repos
+
+## In progress (1)
+#34 P2 task  Static token-efficiency comparison of issues vs raw gh output  @lumberbarons

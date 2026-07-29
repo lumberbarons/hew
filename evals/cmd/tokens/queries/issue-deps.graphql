@@ -1,0 +1,13 @@
+# The half of `hew show <n>` that `gh issue view` cannot answer: parent,
+# sub-issues, and blockers. Paired with a `gh issue view --json` call for the
+# body, labels, and comments, this is the information-equivalent baseline.
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      parent { number state title }
+      subIssues(first: 50) { totalCount nodes { number state } }
+      subIssuesSummary { total completed }
+      blockedBy(first: 20) { totalCount nodes { number state } }
+    }
+  }
+}

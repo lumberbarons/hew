@@ -14,6 +14,7 @@ go test -race ./...                       # full test suite (what CI runs)
 go test ./internal/cli -run TestStart     # single test
 go test ./internal/render -update         # rewrite golden files after renderer changes
 golangci-lint run                          # lint (CI-blocking)
+cd evals && go test ./...                  # the evals module has its own go.mod
 shellcheck install.sh                      # install.sh is linted in CI too
 ```
 
@@ -39,6 +40,7 @@ The layering exists so everything with behavior is testable without hitting GitH
 | `internal/editor/` | Launches `$EDITOR` seeded with the body template, for `--edit` on `create` and `epic create` | Changing the `--edit` flow |
 | `docs/` | Primer mock: `conventions.PrimerStatic` verbatim plus invented state sections — keep it in sync when the primer changes | Revising primer output |
 | `examples/` | Copy-pasteable GitHub Actions recipes (`auto-triage.yml`), documented in README | Changing the auto-triage workflow or its documented guarantees |
+| `evals/` | Separate module (keeps the tokenizer out of the CLI's dependency graph): the token-efficiency harness and its committed fixtures — see [evals/README.md](evals/README.md). A renderer change invalidates the fixtures' hew side; re-capture and re-publish the numbers in DESIGN.md | Changing renderer output, or the published token figures |
 | `.claude/skills/review-tests/` | Vendored copy of the critique plugin's review-tests skill, run by the `review-tests` workflow as an advisory PR check; its `discover-files.sh` is shellcheck-linted in CI | Changing the CI test-quality review |
 
 | File | What | When to read |

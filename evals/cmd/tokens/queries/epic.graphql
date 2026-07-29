@@ -1,0 +1,22 @@
+# `hew epic status <n>`: the rollup plus one line per child. Children carry
+# labels because the child lines render priority and type; bodies are omitted.
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      number
+      title
+      state
+      labels(first: 50) { nodes { name } }
+      subIssuesSummary { total completed }
+      subIssues(first: 50) {
+        totalCount
+        nodes {
+          number
+          title
+          state
+          labels(first: 50) { nodes { name } }
+        }
+      }
+    }
+  }
+}

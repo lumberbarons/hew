@@ -379,7 +379,9 @@ any product code.
   and command cheatsheet plus live Ready / In progress / Blocked / Epics sections —
   measures ~640 tokens (tiktoken `o200k_base`; Claude's tokenizer typically runs
   slightly higher). The split is roughly half static, half live, so the ~600 target
-  holds as long as live sections cap at top-N per section.
+  holds as long as live sections cap at top-N per section. Superseded in part by
+  the measurements below: live primers run 863–911 tokens, so the cap-at-top-N
+  assumption did not hold on its own.
 - **Cycle rejection — partial; client-side check confirmed necessary.** Tested live
   with throwaway issues (deleted afterwards). The API rejects self-blocks (`Target
   issue cannot be the same as the source issue`) and direct two-issue cycles (`this
@@ -393,6 +395,57 @@ any product code.
   raw API), the read path must detect them too: every member of a cycle has an open
   blocker, so a cycle silently excludes all its members from `ready` forever.
   `prime` and `ready` warn when they see one.
+
+## Token efficiency (measured 2026-07-29)
+
+The token-lean claim, measured rather than asserted. The harness lives in
+[evals/](evals/): `capture` records both sides' raw output from a live repo into
+a committed fixture, `report` tokenizes that fixture offline with tiktoken
+`o200k_base` — the same encoding as the `prime` spike above, so the figures are
+comparable. No model calls, no variance. Regenerate with:
+
+```sh
+cd evals && go run ./cmd/tokens report fixtures/solar-controller fixtures/hew
+```
+
+The baseline is deliberately charitable: the leanest hand-rolled GraphQL query
+that answers the same question, with no bodies, timestamps, or URLs the question
+doesn't need ([evals/cmd/tokens/queries/](evals/cmd/tokens/queries/)). `gh` has
+no native equivalent for readiness — `gh issue list` cannot return `blockedBy`,
+`parent`, or `subIssues` at all — so rows marked † are the cheaper output that
+cannot actually answer the question, priced for comparison.
+
+lumberbarons/solar-controller — 27 open issues:
+
+| command | hew | raw gh | ratio | baseline |
+|---|---|---|---|---|
+| `hew ready` | 538 | 2120 | 3.9x | gh api graphql (open issues) |
+| `hew ready` | 538 | 3621 | 6.7x | gh issue list --json † |
+| `hew list` | 606 | 2120 | 3.5x | gh api graphql (open issues) |
+| `hew list --json` | 3017 | 2120 | 0.7x | gh api graphql (open issues) |
+| `hew prime` | 911 | 2120 | 2.3x | gh api graphql (open issues) |
+| `hew show #123` | 175 | 341 | 1.9x | gh issue view --json + gh api graphql |
+| `hew epic status 137` | 130 | 308 | 2.4x | gh api graphql (epic + children) |
+
+Findings, including the ones that don't flatter the tool:
+
+- **The claim holds for the reads an agent actually loops on.** `ready` and
+  `list` cost 17–22 tokens per open issue against ~79 for the equivalent GraphQL
+  and 112–134 for `gh issue list --json` — 3.5x–4.7x and 5.7x–6.7x respectively
+  across both fixtures. This is the whole-tracker read that happens every
+  iteration, so it is where the saving compounds.
+- **`show` and `epic status` save less: 1.3x–2.4x.** Bodies dominate `show` and
+  both sides carry them verbatim; the value there is the deps line, not the
+  token count. Worth saying plainly rather than averaging into a headline.
+- **`list --json` currently costs *more* than the raw GraphQL it replaces
+  (0.7x on both fixtures).** The flat schema writes every key on every line —
+  empty arrays, derived booleans, `createdAt` — where the lean query writes seven
+  fields. The schema's stability is deliberate (agents parse it), but the token
+  cost is a real regression against the tool's own claim, filed as #62.
+- **`prime` measures 863–911 tokens against its ~600 target.** The spike's ~640
+  was a mock; live primers on real repos run 40–50% over. Not the static half
+  either: the smaller fixture, at 10 open issues, still lands at 863. Filed
+  as #63.
 
 ## Milestones
 

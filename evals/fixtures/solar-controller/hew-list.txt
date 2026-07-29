@@ -1,0 +1,27 @@
+#117 P1 bug (tests)            Tautological assertions on state the code under test cannot modify
+#166 P1 task (ci)              Release workflow publishes artifacts without running tests or lint
+#167 P1 task (ci)              No vulnerability or security scanning of Go code and dependencies
+#118 P2 enhancement (web-ui)   Support simple bearer-token auth in the web UI, prompting only when the backend requires it
+#119 P2 enhancement            Proper auth: login flow with sessions for the web UI, API keys for automation
+#123 P2 task                   Wire voltgo into config and app bootstrap
+#124 P2 bug (tests)            /api/info verified by substring matching with colliding fixtures
+#125 P2 bug (tests)            Data race on receivedAuth in TestPublishWithBearerToken
+#126 P2 bug (tests)            Tests claim scenarios never exercised (ControllerRegistration, factory RemoteWrite mislabel)
+#127 P2 bug (tests)            MQTT timeout and error tests verify nothing about those branches
+#128 P2 bug (tests)            Mock-recorded side effects never asserted (SetMetrics, register failures, lastStatus, SNS payloads)
+#129 P2 task (tests)           Cover publisher enabled paths (Solace publish/close, SNS NewPublisher, MQTT constructor)
+#130 P2 task (tests)           Add coverage for epever client, configurer handlers, and PrometheusCollector (zero-coverage files)
+#143 P2 task (tests,ci)        Raise backend coverage threshold to 90%
+#168 P2 task (ci)              Release images are published without scanning, SBOM, or provenance
+#169 P2 task (ci)              GitHub Actions are pinned to mutable major tags instead of commit SHAs
+#170 P2 task (frontend,tests)  Frontend has no tests and no test runner
+#171 P2 task (frontend)        Frontend has no type checking
+#172 P2 task (tests,ci)        Integration tests never run in CI
+#173 P2 task (tests,ci)        Coverage gate is total-only, so weak packages are masked by well-tested ones
+#174 P2 task (tests)           cmd/controller has zero test coverage, including controller wiring
+#133 P3 task (tests)           Epever decoding tested only with non-discriminating inputs
+#134 P3 task (tests)           Remote-write batch lifecycle untested (Close flush, timeout flush, buffer-clear-on-error)
+#175 P3 task (ci)              CI does not verify go.mod tidiness or module integrity
+#131 P3 task (web-ui)          Battery panel for voltgo metrics  [blocked by #123]
+#132 P3 task                   Voltgo docs, example config, packaging notes  [blocked by #123]
+#137 P2 enhancement            Epic: Voltgo BLE battery controller support  [epic 3/6]

@@ -1,4 +1,6 @@
-/issues
+/hew
 /dist/
 coverage.out
 .claude/worktrees
+# `go build ./...` in evals/ drops the harness binary here.
+/evals/tokens
