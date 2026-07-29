@@ -10,3 +10,4 @@ linters:
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
+        - (*text/tabwriter.Writer).Flush

@@ -1,0 +1,10 @@
+#35 P2 task         Agentic accuracy eval: issues vs raw gh on a seeded fixture repo
+#60 P2 task         CI gates: formatting, govulncheck, release dry-run, actionlint
+#37 P3 enhancement  Canonical dedup guidance in the primer; closed-issue coverage for list --bodies
+#39 P3 enhancement  Write commands guard against closed targets
+#40 P3 enhancement  Reopen command symmetric with close
+#57 P3 enhancement  pr composes bullet lists from repeatable section flags
+#61 P3 task         Tighten test gates: per-package coverage floor and shuffled test order
+#62 P3 enhancement  list --json costs more tokens than the raw GraphQL it replaces
+#63 P3 enhancement  prime exceeds its ~600-token budget on real repos
+#34 P2 task         Static token-efficiency comparison of issues vs raw gh output  [in progress @lumberbarons]

@@ -1,0 +1,295 @@
+{
+  "repo": "lumberbarons/hew",
+  "capturedAt": "2026-07-29T22:50:27Z",
+  "hewVersion": "hew version dev",
+  "openIssues": 10,
+  "truncated": false,
+  "entries": [
+    {
+      "command": "ready",
+      "perIssue": true,
+      "hew": {
+        "argv": [
+          "hew",
+          "ready",
+          "--repo",
+          "lumberbarons/hew"
+        ],
+        "file": "hew-ready.txt"
+      },
+      "baselines": [
+        {
+          "name": "gh api graphql (open issues)",
+          "partial": false,
+          "note": "",
+          "captures": [
+            {
+              "argv": [
+                "gh",
+                "api",
+                "graphql",
+                "-F",
+                "owner=lumberbarons",
+                "-F",
+                "name=hew",
+                "-F",
+                "query=@cmd/tokens/queries/issues-open.graphql"
+              ],
+              "file": "gh-graphql-open-issues.json"
+            }
+          ]
+        },
+        {
+          "name": "gh issue list --json",
+          "partial": true,
+          "note": "gh cannot return blockedBy, parent, or sub-issues, so readiness and epic-ness are unanswerable from this output alone",
+          "captures": [
+            {
+              "argv": [
+                "gh",
+                "issue",
+                "list",
+                "--repo",
+                "lumberbarons/hew",
+                "--state",
+                "open",
+                "--limit",
+                "200",
+                "--json",
+                "number,title,state,labels,assignees"
+              ],
+              "file": "gh-issue-list-open.json"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "command": "list",
+      "perIssue": true,
+      "hew": {
+        "argv": [
+          "hew",
+          "list",
+          "--repo",
+          "lumberbarons/hew"
+        ],
+        "file": "hew-list.txt"
+      },
+      "baselines": [
+        {
+          "name": "gh api graphql (open issues)",
+          "partial": false,
+          "note": "",
+          "captures": [
+            {
+              "argv": [
+                "gh",
+                "api",
+                "graphql",
+                "-F",
+                "owner=lumberbarons",
+                "-F",
+                "name=hew",
+                "-F",
+                "query=@cmd/tokens/queries/issues-open.graphql"
+              ],
+              "file": "gh-graphql-open-issues.json"
+            }
+          ]
+        },
+        {
+          "name": "gh issue list --json",
+          "partial": true,
+          "note": "gh cannot return blockedBy, parent, or sub-issues, so readiness and epic-ness are unanswerable from this output alone",
+          "captures": [
+            {
+              "argv": [
+                "gh",
+                "issue",
+                "list",
+                "--repo",
+                "lumberbarons/hew",
+                "--state",
+                "open",
+                "--limit",
+                "200",
+                "--json",
+                "number,title,state,labels,assignees"
+              ],
+              "file": "gh-issue-list-open.json"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "command": "list --json",
+      "perIssue": true,
+      "hew": {
+        "argv": [
+          "hew",
+          "list",
+          "--json",
+          "--repo",
+          "lumberbarons/hew"
+        ],
+        "file": "hew-list-json.ndjson"
+      },
+      "baselines": [
+        {
+          "name": "gh api graphql (open issues)",
+          "partial": false,
+          "note": "",
+          "captures": [
+            {
+              "argv": [
+                "gh",
+                "api",
+                "graphql",
+                "-F",
+                "owner=lumberbarons",
+                "-F",
+                "name=hew",
+                "-F",
+                "query=@cmd/tokens/queries/issues-open.graphql"
+              ],
+              "file": "gh-graphql-open-issues.json"
+            }
+          ]
+        },
+        {
+          "name": "gh issue list --json",
+          "partial": true,
+          "note": "gh cannot return blockedBy, parent, or sub-issues, so readiness and epic-ness are unanswerable from this output alone",
+          "captures": [
+            {
+              "argv": [
+                "gh",
+                "issue",
+                "list",
+                "--repo",
+                "lumberbarons/hew",
+                "--state",
+                "open",
+                "--limit",
+                "200",
+                "--json",
+                "number,title,state,labels,assignees"
+              ],
+              "file": "gh-issue-list-open.json"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "command": "prime",
+      "perIssue": false,
+      "hew": {
+        "argv": [
+          "hew",
+          "prime",
+          "--repo",
+          "lumberbarons/hew"
+        ],
+        "file": "hew-prime.txt"
+      },
+      "baselines": [
+        {
+          "name": "gh api graphql (open issues)",
+          "partial": false,
+          "note": "understates the gap: the primer also carries the conventions and command cheatsheet, which a raw-gh agent has to keep as hand-written prose in CLAUDE.md",
+          "captures": [
+            {
+              "argv": [
+                "gh",
+                "api",
+                "graphql",
+                "-F",
+                "owner=lumberbarons",
+                "-F",
+                "name=hew",
+                "-F",
+                "query=@cmd/tokens/queries/issues-open.graphql"
+              ],
+              "file": "gh-graphql-open-issues.json"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "command": "show #60",
+      "perIssue": false,
+      "hew": {
+        "argv": [
+          "hew",
+          "show",
+          "60",
+          "--repo",
+          "lumberbarons/hew"
+        ],
+        "file": "hew-show-60.txt"
+      },
+      "baselines": [
+        {
+          "name": "gh issue view --json + gh api graphql",
+          "partial": false,
+          "note": "",
+          "captures": [
+            {
+              "argv": [
+                "gh",
+                "issue",
+                "view",
+                "60",
+                "--repo",
+                "lumberbarons/hew",
+                "--json",
+                "number,title,body,state,stateReason,createdAt,labels,assignees,comments"
+              ],
+              "file": "gh-issue-view-60.json"
+            },
+            {
+              "argv": [
+                "gh",
+                "api",
+                "graphql",
+                "-F",
+                "owner=lumberbarons",
+                "-F",
+                "name=hew",
+                "-F",
+                "query=@cmd/tokens/queries/issue-deps.graphql",
+                "-F",
+                "number=60"
+              ],
+              "file": "gh-graphql-issue-deps-60.json"
+            }
+          ]
+        },
+        {
+          "name": "gh issue view --json",
+          "partial": true,
+          "note": "no parent, sub-issues, or blockers",
+          "captures": [
+            {
+              "argv": [
+                "gh",
+                "issue",
+                "view",
+                "60",
+                "--repo",
+                "lumberbarons/hew",
+                "--json",
+                "number,title,body,state,stateReason,createdAt,labels,assignees,comments"
+              ],
+              "file": "gh-issue-view-60.json"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

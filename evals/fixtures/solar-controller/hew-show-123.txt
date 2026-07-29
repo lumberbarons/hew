@@ -1,0 +1,17 @@
+#123 P2 task  Wire voltgo into config and app bootstrap
+state: open  created: 2026-07-10
+parent: #137 Epic: Voltgo BLE battery controller support
+blocked by: #122 (closed)
+
+### Goal
+
+Wire the voltgo controller into configuration and application bootstrap.
+
+### Approach
+
+- `internal/config/config.go`: add `Voltgo voltgo.Configuration` (yaml tag `voltgo`) to `SolarControllerConfiguration`, with validation (address required when enabled, `publishPeriod` > 0)
+- `internal/app/app.go` `buildControllers`: construct the voltgo controller from config, append when `Enabled()`
+- Extend `config_test.go` and `app_test.go` table cases (disabled, enabled-no-address, enabled valid)
+
+---
+_Migrated from bead `sctl-9nv`._

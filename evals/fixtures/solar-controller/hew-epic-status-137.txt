@@ -1,0 +1,7 @@
+#137 P2 enhancement  Epic: Voltgo BLE battery controller support  3/6
+  ✓ #120 P2 enhancement  Voltgo BLE battery controller: package scaffold, client abstraction, collector
+  ✓ #121 P2 task  Voltgo metrics conversion + PrometheusCollector
+  ✓ #122 P2 task  Voltgo controller orchestration + HTTP endpoints
+  ○ #123 P2 task  Wire voltgo into config and app bootstrap
+  ○ #131 P3 task (web-ui)  Battery panel for voltgo metrics
+  ○ #132 P3 task  Voltgo docs, example config, packaging notes
