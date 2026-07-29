@@ -148,9 +148,33 @@ func (a *App) composeBody(src bodySource) (string, error) {
 	return body, nil
 }
 
+// claimRefusal turns a tripped claim guard into the exit code that tells the
+// caller what to do about it: someone else's claim is exit 3 (pick the next
+// ready item), your own is exit 5 (resume the work you already claimed). The
+// viewer lookup lives here rather than in Start's happy path so the refusal,
+// not every claim, pays for the extra call.
+func (a *App) claimRefusal(ctx context.Context, issue model.Issue) error {
+	if len(issue.Assignees) == 0 {
+		// In-progress with nobody assigned: no claimant to attribute.
+		return &ExitError{Code: ExitClaimed, Message: fmt.Sprintf("#%d already claimed (in-progress); pick the next ready item or --force", issue.Number)}
+	}
+	who := "assigned to @" + strings.Join(issue.Assignees, " @")
+	viewer, err := a.Client.Viewer(ctx)
+	switch {
+	case err != nil:
+		// The refusal stands regardless of whose claim it is; only the
+		// refinement is lost, so degrade to the conservative signal.
+		a.warnf("cannot resolve the authenticated user (%v); reporting #%d as someone else's claim", err, issue.Number)
+	case slices.Contains(issue.Assignees, viewer):
+		return &ExitError{Code: ExitClaimedByYou, Message: fmt.Sprintf("#%d is already claimed by you (%s); resume that work or --force to re-claim", issue.Number, who)}
+	}
+	return &ExitError{Code: ExitClaimed, Message: fmt.Sprintf("#%d already claimed (%s); pick the next ready item or --force", issue.Number, who)}
+}
+
 // Start claims an issue: assign @me plus the in-progress label. The guard
-// refuses issues that are already assigned or in-progress (exit 3) so an
-// agent loop moves on to the next ready item; --force steals. Claiming an
+// refuses issues that are already assigned or in-progress — exit 3 for
+// someone else's claim so an agent loop moves on to the next ready item,
+// exit 5 when the claim is already yours; --force steals. Claiming an
 // untriaged issue requires --priority — claiming forces triage.
 func (a *App) Start(ctx context.Context, number int, priorityFlag string, force bool) error {
 	issue, err := a.Client.GetIssue(ctx, number)
@@ -164,11 +188,7 @@ func (a *App) Start(ctx context.Context, number int, priorityFlag string, force 
 		return genericErr("#%d is an epic; epics are never worked directly — start one of its sub-issues", number)
 	}
 	if (len(issue.Assignees) > 0 || issue.InProgress()) && !force {
-		who := "in-progress"
-		if len(issue.Assignees) > 0 {
-			who = "assigned to @" + strings.Join(issue.Assignees, " @")
-		}
-		return &ExitError{Code: ExitClaimed, Message: fmt.Sprintf("#%d already claimed (%s); pick the next ready item or --force", number, who)}
+		return a.claimRefusal(ctx, issue)
 	}
 	priority, _ := issue.Priority()
 	if priorityFlag != "" {

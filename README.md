@@ -39,7 +39,8 @@ hew init          # bootstrap the label set in a repo; prints a CLAUDE.md snippe
 hew hooks install # SessionStart hook (writes the project's .claude/settings.json)
 hew prime         # session-start context: conventions + ready work + live state
 hew ready         # what should I work on? (priority-sorted, zero open blockers)
-hew start 42      # claim it: assign @me + in-progress (refuses claimed work, exit 3)
+hew start 42      # claim it: assign @me + in-progress (refuses claimed work: exit 3,
+                  #   or exit 5 when the claim is already yours)
 # ...branch (feat/|fix/|chore/), commit, push...
 hew pr            # draft PR for the claimed issue, body composed, "Fixes #42" enforced
 ```
@@ -114,7 +115,8 @@ being plain ready work (`[blocked by #120]`, `[epic 2/6]`, `[in progress @you]`)
 takes `--json` (stable flat schema; list commands emit NDJSON so output survives
 truncation and grep); every GitHub-touching command also takes `--repo owner/name`
 (`hooks` is local-only). Exit codes are meaningful: `3`
-means "already claimed, pick the next ready item", `4` means "run `gh auth login`".
+means "already claimed by someone else, pick the next ready item", `5` means
+"already claimed by you, resume that work", `4` means "run `gh auth login`".
 
 ### Plan files
 

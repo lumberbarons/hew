@@ -12,7 +12,7 @@ Conventions (enforced by the tool's write path):
 - Dependencies are native (--blocked-by), never body text. Epics are sub-issue trees.
 - Bodies: ### Where / ### Problem or ### Goal / ### Fix or ### Approach / ### Done when (checklist). Omit empty sections.
 - Missing priority renders P? and sorts last; issues missing priority/type are untriaged, not broken — triage them via hew set.
-- start refuses claimed issues (exit 3): pick the next ready item. Untriaged issues need start --priority.
+- start refuses claimed issues: exit 3 pick the next ready item, exit 5 the claim is yours — resume it. Untriaged issues need start --priority.
 
 Output: one line per issue — #n priority type (areas) title [blocked by #m; epic done/total; in progress @user].
 list sorts ready work first, then claimed, blocked, epics. Prefer text output; --json on list commands emits NDJSON.

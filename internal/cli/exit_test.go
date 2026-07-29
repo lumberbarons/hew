@@ -18,6 +18,7 @@ func TestExitCode(t *testing.T) {
 		{"plain", errors.New("boom"), ExitGeneric},
 		{"usage", usageErr("bad"), ExitUsage},
 		{"claimed", &ExitError{Code: ExitClaimed, Message: "claimed"}, ExitClaimed},
+		{"claimed by you", &ExitError{Code: ExitClaimedByYou, Message: "yours"}, ExitClaimedByYou},
 		{"auth", &gh.AuthError{Err: errors.New("401")}, ExitAuth},
 		{"wrapped auth", fmt.Errorf("context: %w", &gh.AuthError{Err: errors.New("401")}), ExitAuth},
 		{"wrapped usage", fmt.Errorf("context: %w", usageErr("bad")), ExitUsage},

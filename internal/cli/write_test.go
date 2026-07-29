@@ -274,6 +274,60 @@ func TestStartRefusesClaimed(t *testing.T) {
 	}
 }
 
+// TestStartRefusesOwnClaim covers the split in the claim refusal: my own
+// claim is a distinct exit code from someone else's, because the correct
+// response differs (resume vs pick the next ready item).
+func TestStartRefusesOwnClaim(t *testing.T) {
+	mine := issue(1, "Mine", "P2", "bug", "in-progress")
+	mine.Assignees = []string{"me"}
+	shared := issue(2, "Shared", "P2", "bug")
+	shared.Assignees = []string{"other", "me"}
+	f := newFake(mine, shared)
+	app, _, errOut := newApp(f)
+
+	err := app.Start(ctx, 1, "", false)
+	exitCode(t, err, ExitClaimedByYou)
+	if ExitClaimedByYou == ExitClaimed {
+		t.Fatal("the two claim refusals must use different exit codes")
+	}
+	if !strings.Contains(err.Error(), "claimed by you") || !strings.Contains(err.Error(), "@me") {
+		t.Errorf("message should say the claim is yours and name the assignee: %v", err)
+	}
+	// A co-assignment still counts as mine: I am one of the claimants, so
+	// resuming — not skipping to the next item — is the right move.
+	exitCode(t, app.Start(ctx, 2, "", false), ExitClaimedByYou)
+	// Refusing reports; it must not mutate either issue.
+	if got := f.byNumber(2).Assignees; !reflect.DeepEqual(got, []string{"other", "me"}) {
+		t.Errorf("refused start mutated #2: %v", got)
+	}
+	if slices.Contains(f.byNumber(2).Labels, "in-progress") {
+		t.Errorf("refused start labeled #2: %v", f.byNumber(2).Labels)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("unexpected warnings: %q", errOut.String())
+	}
+}
+
+// TestStartClaimRefusalWithoutViewer covers the degraded path: the refusal
+// itself is not in doubt when the viewer lookup fails, so start keeps the
+// conservative exit 3 and says why it could not tell.
+func TestStartClaimRefusalWithoutViewer(t *testing.T) {
+	mine := issue(1, "Mine", "P2", "bug")
+	mine.Assignees = []string{"me"}
+	f := newFake(mine)
+	f.failOn["Viewer"] = errors.New("network down")
+	app, _, errOut := newApp(f)
+
+	err := app.Start(ctx, 1, "", false)
+	exitCode(t, err, ExitClaimed)
+	if !strings.Contains(errOut.String(), "network down") {
+		t.Errorf("degraded refusal should warn why: %q", errOut.String())
+	}
+	if got := f.byNumber(1).Assignees; !reflect.DeepEqual(got, []string{"me"}) {
+		t.Errorf("refused start mutated #1: %v", got)
+	}
+}
+
 func TestStartForceSteals(t *testing.T) {
 	assigned := issue(1, "Taken", "P2", "bug", "in-progress")
 	assigned.Assignees = []string{"other"}

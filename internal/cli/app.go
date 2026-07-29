@@ -21,6 +21,11 @@ const (
 	// ready item instead of doubling up.
 	ExitClaimed = 3
 	ExitAuth    = 4
+	// ExitClaimedByYou splits the claim refusal: the claimant is the
+	// authenticated user, so the work is already yours and the response is
+	// to resume it, not to pick a different item. The guard is unchanged —
+	// this only says whose claim blocked it.
+	ExitClaimedByYou = 5
 )
 
 // ExitError carries a specific exit code to main.
