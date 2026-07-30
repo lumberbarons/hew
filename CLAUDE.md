@@ -14,11 +14,18 @@ go test -race ./...                       # full test suite (what CI runs)
 go test ./internal/cli -run TestStart     # single test
 go test ./internal/render -update         # rewrite golden files after renderer changes
 golangci-lint run                          # lint (CI-blocking)
+golangci-lint fmt --diff                   # formatting gate (CI-blocking); drop --diff to fix in place
+govulncheck ./...                          # vulnerability scan (CI-blocking)
+goreleaser check && goreleaser build --snapshot --clean   # release config dry run (CI-blocking)
+actionlint                                 # workflow lint (CI-blocking); also covers examples/auto-triage.yml
 cd evals && go test ./...                  # the evals module has its own go.mod
+cd evals && golangci-lint run && golangci-lint fmt --diff  # ...and its own lint/format gates
 shellcheck install.sh                      # install.sh is linted in CI too
 ```
 
 Coverage is a blocking CI gate: 90% statement coverage over the `internal/` packages (`cmd/` is excluded as pure wiring — see `.testcoverage.yml`). New logic needs tests or CI fails.
+
+`govulncheck` reports stdlib advisories against the toolchain it runs under, and every CI job resolves its toolchain from the `go` directive in `go.mod`. That directive carries an explicit patch version, so setup-go installs it exactly — which is what makes the scan meaningful, and also means a new stdlib advisory turns the job red until the directive is bumped to the patch release that fixes it. Bumping it is the fix; it also raises the minimum toolchain for building from source. The scan covers the root module only — `evals/` is never shipped, so its dependencies carry no user-facing risk.
 
 Releases are tag-driven (`vX.Y.Z` → goreleaser). Commit messages use `feat:`/`fix:`/`chore:`/`docs:` prefixes — they feed the release changelog.
 
