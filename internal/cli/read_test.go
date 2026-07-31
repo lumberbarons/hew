@@ -157,6 +157,34 @@ func TestListFilters(t *testing.T) {
 	}
 }
 
+// Epic listing defaults to both states — progress means seeing what is done
+// — but an explicit --state still narrows it.
+func TestListEpicStateDefaultAndOverride(t *testing.T) {
+	epicIssue := issue(10, "Epic: big", "P2")
+	openChild := issue(11, "Open child", "P2", "task")
+	openChild.Parent = &model.Ref{Number: 10, State: "OPEN"}
+	doneChild := issue(12, "Done child", "P2", "task")
+	doneChild.Parent = &model.Ref{Number: 10, State: "OPEN"}
+	doneChild.State = "CLOSED"
+	epicIssue.SubIssues = []model.Ref{{Number: 11, State: "OPEN"}, {Number: 12, State: "CLOSED"}}
+
+	app, out, _ := newApp(newFake(epicIssue, openChild, doneChild))
+	if err := app.List(ctx, ListOpts{Epic: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "#11") || !strings.Contains(out.String(), "#12") {
+		t.Errorf("epic default should span both states:\n%s", out.String())
+	}
+
+	app, out, _ = newApp(newFake(epicIssue, openChild, doneChild))
+	if err := app.List(ctx, ListOpts{Epic: 10, State: stateOpen}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "#11") || strings.Contains(out.String(), "#12") {
+		t.Errorf("--state open should drop the closed child:\n%s", out.String())
+	}
+}
+
 func TestListGroupsReadyFirst(t *testing.T) {
 	epicIssue := issue(10, "Epic: big", "P0")
 	epicIssue.SubIssues = []model.Ref{{Number: 11, State: "OPEN"}}
@@ -194,6 +222,76 @@ func TestListClosed(t *testing.T) {
 	if !strings.Contains(out.String(), "#5") || strings.Contains(out.String(), "#1") {
 		t.Errorf("closed output:\n%s", out.String())
 	}
+}
+
+func TestListState(t *testing.T) {
+	closed := issue(5, "Done", "P2", "bug")
+	closed.State = "CLOSED"
+	open := issue(1, "Open", "P2", "bug")
+	tests := []struct {
+		state    string
+		wantSeen []string
+		wantGone []string
+	}{
+		{state: "", wantSeen: []string{"#1"}, wantGone: []string{"#5"}},
+		{state: stateOpen, wantSeen: []string{"#1"}, wantGone: []string{"#5"}},
+		{state: stateClosed, wantSeen: []string{"#5"}, wantGone: []string{"#1"}},
+		{state: stateAll, wantSeen: []string{"#1", "#5"}},
+	}
+	for _, tc := range tests {
+		t.Run("state="+tc.state, func(t *testing.T) {
+			app, out, _ := newApp(newFake(open, closed))
+			if err := app.List(ctx, ListOpts{State: tc.state}); err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range tc.wantSeen {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("--state %q missing %s:\n%s", tc.state, want, out.String())
+				}
+			}
+			for _, gone := range tc.wantGone {
+				if strings.Contains(out.String(), gone) {
+					t.Errorf("--state %q leaked %s:\n%s", tc.state, gone, out.String())
+				}
+			}
+		})
+	}
+}
+
+// The exhaustive dedup path #37 promises: one call carrying bodies for open
+// and closed issues alike.
+func TestListStateAllWithBodies(t *testing.T) {
+	open := issue(1, "Open", "P2", "bug")
+	open.Body = "### Problem\n\nopen body"
+	closed := issue(5, "Done", "P2", "bug")
+	closed.State = "CLOSED"
+	closed.Body = "### Problem\n\nclosed body"
+	app, out, _ := newApp(newFake(open, closed))
+	app.JSON = true
+	if err := app.List(ctx, ListOpts{State: stateAll, Bodies: true}); err != nil {
+		t.Fatal(err)
+	}
+	bodies := map[float64]any{}
+	for _, ln := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var got map[string]any
+		if err := json.Unmarshal([]byte(ln), &got); err != nil {
+			t.Fatalf("invalid NDJSON line: %v\n%s", err, ln)
+		}
+		bodies[got["number"].(float64)] = got["body"]
+	}
+	if bodies[1] != "### Problem\n\nopen body" || bodies[5] != "### Problem\n\nclosed body" {
+		t.Errorf("bodies = %v, want both states carrying bodies", bodies)
+	}
+}
+
+func TestListStateRejectsUnknownValue(t *testing.T) {
+	app, _, _ := newApp(newFake(issue(1, "Open", "P2", "bug")))
+	exitCode(t, app.List(ctx, ListOpts{State: "OPEN"}), ExitUsage)
+}
+
+func TestListStateAndClosedConflict(t *testing.T) {
+	app, _, _ := newApp(newFake(issue(1, "Open", "P2", "bug")))
+	exitCode(t, app.List(ctx, ListOpts{State: stateClosed, Closed: true}), ExitUsage)
 }
 
 func TestListBodiesJSON(t *testing.T) {

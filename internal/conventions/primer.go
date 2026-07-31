@@ -4,7 +4,9 @@ package conventions
 // kept deliberately terse: the whole primer targets ~600 tokens.
 const PrimerStatic = `Workflow: hew ready → hew start <n> → branch (feat/|fix/|chore/) → push → hew pr.
 Close via PR; hew close is for wontfix/duplicate only. Never work an epic directly.
-File discovered work: hew search <terms> first (dupes), then hew create ... --discovered-from <n>.
+Dedup before filing: hew search <terms> (open+closed) first; hew list --json --bodies --state all when
+exhaustiveness matters or search may be stale; show <n> only to read a specific candidate. Then
+hew create ... --discovered-from <n>.
 
 Conventions (enforced by the tool's write path):
 - One priority label P0(critical)..P4(backlog), default P2; one type label bug|enhancement|task.
@@ -17,7 +19,7 @@ Conventions (enforced by the tool's write path):
 Output: one line per issue — #n priority type (areas) title [blocked by #m; epic done/total; in progress @user].
 list sorts ready work first, then claimed, blocked, epics. Prefer text output; --json on list commands emits NDJSON.
 
-Commands: ready | list [--label X --epic N --closed --bodies (with --json)] | show <n> | search <terms> | triage |
+Commands: ready | list [--label X --epic N --state open/closed/all --bodies (with --json)] | show <n> | search <terms> | triage |
 create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
 start <n> [--priority Pn] | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |

@@ -59,8 +59,9 @@ If any command exits `4`, authenticate first with `gh auth login`.
 ```
 hew prime                      # session-start context for agents
 hew ready                      # open, non-epic, zero open blockers; P0→P4 then P?
-hew list [--label X] [--epic N] [--closed]
+hew list [--label X] [--epic N] [--state open|closed|all]
             [--bodies]           # with --json: body on every line, dedup in one call
+                                  # (--closed is an alias for --state closed)
 hew show <n>                   # body, deps, parent, children, recent comments
 hew search <terms>             # text search, open+closed, best-match order —
                                   # check for an existing issue before filing one
@@ -118,6 +119,21 @@ truncation and grep); every GitHub-touching command also takes `--repo owner/nam
 (`hooks` is local-only). Exit codes are meaningful: `3`
 means "already claimed by someone else, pick the next ready item", `5` means
 "already claimed by you, resume that work", `4` means "run `gh auth login`".
+
+### Checking for duplicates
+
+Three read paths can answer "does this already exist?", so the tool prescribes
+an order rather than leaving an agent to pick:
+
+1. `hew search <terms>` — the default. Server-side, cheap, and covers open and
+   closed issues, so "already fixed" answers the question as well as "already
+   filed". Results are capped; it warns rather than paging.
+2. `hew list --json --bodies --state all` — when exhaustiveness matters or the
+   search index may be stale. One call carries every issue's body in both
+   states; `--bodies` requires `--json`.
+3. `hew show <n>` — only to read a specific candidate the first two surfaced.
+
+Then file with `hew create ... --discovered-from <n>`.
 
 ### Plan files
 

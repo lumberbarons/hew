@@ -176,6 +176,27 @@ func TestPrimerStaticMentionsCoreCommands(t *testing.T) {
 	}
 }
 
+// The primer must prescribe one dedup sequence rather than leaving an agent
+// to choose between the three read paths that can answer "does this already
+// exist?" — search, list --bodies, and show.
+func TestPrimerStaticPrescribesDedupSequence(t *testing.T) {
+	_, rest, found := strings.Cut(PrimerStatic, "Dedup before filing:")
+	if !found {
+		t.Fatalf("primer has no dedup guidance:\n%s", PrimerStatic)
+	}
+	// Scope the assertions to that paragraph: a whole-primer search would
+	// pass on the command cheatsheet mentioning the same flags.
+	guidance, _, _ := strings.Cut(rest, "\n\n")
+	for _, want := range []string{"hew search", "open+closed", "--bodies", "--state all", "show <n>", "--discovered-from"} {
+		if !strings.Contains(guidance, want) {
+			t.Errorf("dedup guidance missing %q:\n%s", want, guidance)
+		}
+	}
+	if searchAt, listAt := strings.Index(guidance, "hew search"), strings.Index(guidance, "--bodies"); searchAt > listAt {
+		t.Errorf("dedup guidance must name search before list --bodies:\n%s", guidance)
+	}
+}
+
 func TestClaudeSnippet(t *testing.T) {
 	// Every load-bearing claim in the snippet hew init writes into user
 	// repos: where work is tracked, the session-start command, and the

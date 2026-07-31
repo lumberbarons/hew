@@ -16,8 +16,17 @@ import (
 const primeReadyCap = 10
 
 var (
-	openStates = []gh.IssueState{gh.StateOpen}
-	allStates  = []gh.IssueState{gh.StateOpen, gh.StateClosed}
+	openStates   = []gh.IssueState{gh.StateOpen}
+	closedStates = []gh.IssueState{gh.StateClosed}
+	allStates    = []gh.IssueState{gh.StateOpen, gh.StateClosed}
+)
+
+// The values --state accepts. "all" is what makes `list --json --bodies` an
+// exhaustive dedup path: one call covering open and closed.
+const (
+	stateOpen   = "open"
+	stateClosed = "closed"
+	stateAll    = "all"
 )
 
 // Ready lists open, non-epic, unclaimed issues with zero open blockers.
@@ -38,27 +47,58 @@ func (a *App) Ready(ctx context.Context) error {
 
 // ListOpts filters list output.
 type ListOpts struct {
-	Label  string
-	Epic   int
+	Label string
+	Epic  int
+	// State is "open", "closed", or "all"; empty means the default, which is
+	// open — except under Epic, where progress means seeing what is done as
+	// well as what is left.
+	State string
+	// Closed is the older spelling of State "closed". Kept working for
+	// existing callers; passing both is a usage error rather than a silent
+	// precedence rule.
 	Closed bool
 	// Bodies carries each issue's body on the NDJSON lines — whole-tracker
 	// dedup in one call. JSON-only: text output has no place for bodies.
 	Bodies bool
 }
 
-// List shows issues, open by default, filtered by label or epic membership.
+// listStates resolves the requested state filter to the states to fetch, so
+// the query asks for exactly what the caller wants and nothing is dropped
+// again client-side.
+func listStates(opts ListOpts) ([]gh.IssueState, error) {
+	state := opts.State
+	if opts.Closed {
+		if state != "" {
+			return nil, usageErr("--closed and --state are alternatives; use --state %s", stateClosed)
+		}
+		state = stateClosed
+	}
+	switch state {
+	case stateOpen:
+		return openStates, nil
+	case stateClosed:
+		return closedStates, nil
+	case stateAll:
+		return allStates, nil
+	case "":
+		if opts.Epic > 0 {
+			return allStates, nil
+		}
+		return openStates, nil
+	default:
+		return nil, usageErr("--state must be %s, %s, or %s", stateOpen, stateClosed, stateAll)
+	}
+}
+
+// List shows issues, open by default, filtered by state, label, or epic
+// membership.
 func (a *App) List(ctx context.Context, opts ListOpts) error {
 	if opts.Bodies && !a.JSON {
 		return usageErr("--bodies requires --json")
 	}
-	states := openStates
-	if opts.Closed {
-		states = []gh.IssueState{gh.StateClosed}
-	}
-	if opts.Epic > 0 {
-		// Children of an epic are interesting in both states: progress
-		// means seeing what's done, not just what's left.
-		states = allStates
+	states, err := listStates(opts)
+	if err != nil {
+		return err
 	}
 	issues, err := a.Client.ListIssues(ctx, states)
 	if err != nil {
@@ -70,9 +110,6 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 			continue
 		}
 		if opts.Epic > 0 && (i.Parent == nil || i.Parent.Number != opts.Epic) {
-			continue
-		}
-		if opts.Epic > 0 && opts.Closed && i.IsOpen() {
 			continue
 		}
 		out = append(out, i)

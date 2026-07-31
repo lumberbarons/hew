@@ -67,6 +67,12 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
   never policed against the type.
 - **Workflow**: `ready` → `start` → branch (`feat/`|`fix/`|`chore/`) → PR with
   `Fixes #n`. Closing via PR is the norm; `close` is for wontfix/duplicate.
+- **One dedup sequence**: three read paths can answer "does this already exist?",
+  so the primer prescribes the order rather than leaving an agent to choose.
+  `search` first — server-side, cheap, spans open and closed. `list --json
+  --bodies --state all` when exhaustiveness matters or the search index may be
+  stale: one call, every body, both states. `show <n>` only to read a specific
+  candidate the first two surfaced. Then `create --discovered-from <n>`.
 - **Claiming is guarded**: `start` refuses an issue that is already assigned or
   `in-progress` and exits with a distinct code, so an agent loop moves on to the
   next ready item instead of doubling up. GitHub has no conditional writes, so the
@@ -105,9 +111,14 @@ primer so agents know what they're looking at:
 hew prime                      # session-start context (see below)
 hew ready                      # open, non-epic, zero *open* blockers; sorted
                                   # P0→P4 then P?, oldest first within a priority
-hew list [--label X] [--epic N] [--closed]
+hew list [--label X] [--epic N] [--state open|closed|all]
             [--bodies]           # with --json: body on every line — whole-tracker
-                                  # dedup in a single call instead of a show per candidate
+                                  # dedup in a single call instead of a show per candidate.
+                                  # --state defaults to open (both states under --epic:
+                                  # progress means seeing what is done too); --state all
+                                  # is what makes --bodies exhaustive. --closed is a
+                                  # back-compat alias for --state closed; passing both
+                                  # is a usage error, not a precedence rule
 hew show <n>                   # detail: body, deps, parent, children, recent comments
 hew search <terms>             # repo-scoped text search over open+closed issues in
                                   # best-match order — the dedupe step before filing
@@ -445,7 +456,10 @@ Findings, including the ones that don't flatter the tool:
 - **`prime` measures 863–911 tokens against its ~600 target.** The spike's ~640
   was a mock; live primers on real repos run 40–50% over. Not the static half
   either: the smaller fixture, at 10 open issues, still lands at 863. Filed
-  as #63.
+  as #63. These fixtures predate the dedup-sequence lines added for #37, which
+  take the static half from 650 to 691 tokens under the same encoding; since
+  `prime` emits it verbatim, add 41 to every `prime` figure above until the next
+  capture.
 
 ## Milestones
 
