@@ -233,6 +233,17 @@ merges, checks and PR listing stay where they are.
   prefix — there is nothing to derive one from, and an invented one files the
   work under the wrong heading. `--title` is passed through untouched, prefixed
   or not, and a title that already carries one is never given a second.
+- **Which branch.** The head is the branch *the remote* knows — the upstream
+  name with the remote stripped — not the local one. The two diverge whenever a
+  checkout is made under a generated name: an agent harness working in a git
+  worktree lands on `worktree-feat+x` tracking `origin/feat/x`, and GitHub
+  rejects a PR opened from a head it has never seen. Everything downstream of
+  the push check follows the resolved name, including the branch-prefix warning
+  (it is what reviewers and the changelog see) and the existing-PR lookup. The
+  remote is read from `branch.<name>.remote` rather than assumed to be the
+  first path segment, since branch names contain slashes too; a branch tracking
+  an upstream in this same repository (`remote = .`) has no remote name to
+  strip and keeps the local one, as does a branch with no upstream at all.
 - **Guards.** Draft by default (`--ready` opens for review). Refuses an
   unpushed branch (GitHub can only open a PR for a ref it can see), the default
   branch itself, a branch that already has an open PR (named, rather than
@@ -326,7 +337,8 @@ typical repo.
   - `internal/render/` — text + JSON renderers (golden-file tests)
   - `internal/conventions/` — labels, body and PR templates, primer text (the opinions
     live here)
-  - `internal/git/` — local branch state for `pr` (current branch, has-upstream)
+  - `internal/git/` — local branch state for `pr` (current branch, its upstream
+    name, has-upstream)
 - **Testing**: unit tests against a fake API layer; golden files for renderer output.
   An integration smoke test against a real scratch repo (behind a build tag, run
   manually — it needs a token and mutates state, so it stays out of CI) is deferred
