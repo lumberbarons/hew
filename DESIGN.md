@@ -65,6 +65,19 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
   guarantees, not taught conventions. `--body-file` is the escape hatch for
   long-form bodies with code blocks. Wording pairs pick one flag; word choice is
   never policed against the type.
+- **Code-shaped text is marked up**: commands, flags, branch names, paths and
+  error strings are written as code spans. Unlike the rest of the tool's output,
+  issue and PR bodies are read in a browser and outlive the branch, so the
+  characters that carry the meaning — the slashes, the double dashes, the braces
+  — are worth the two backticks. This is mostly an authoring convention, stated
+  on the `create`/`pr`/`apply` help surfaces rather than in the primer (already
+  over budget, #63). Compose marks up one token shape automatically: a bare
+  `--flag`, which cannot be prose. Nothing broader is inferred — a rule wide
+  enough to catch `origin/feat/x` also catches "and/or", and a false positive
+  ships in a body nobody re-reads. Composition is idempotent (text already
+  inside a code span or fence is skipped), which is what lets `pr` re-compose a
+  section it read back out of an issue body; `--body-file` passes through
+  verbatim on both paths.
 - **Workflow**: `ready` → `start` → branch (`feat/`|`fix/`|`chore/`) → PR with
   `Fixes #n`. Closing via PR is the norm; `close` is for wontfix/duplicate.
 - **One dedup sequence**: three read paths can answer "does this already exist?",

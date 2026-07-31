@@ -31,6 +31,61 @@ Part of #33`
 	}
 }
 
+// A body an author already marked up must survive composition byte for
+// byte, and the flags they left bare must come out marked up — the two
+// halves of the same guarantee. The Fixes trailer is checked alongside
+// because it is what the write path reads back out of the composed body.
+func TestPRComposeMarksUpFlagsAndPreservesExistingSpans(t *testing.T) {
+	got := PRSections{
+		What:    "pr now sends `git rev-parse --abbrev-ref @{u}` as the head.",
+		Why:     "The local name failed with --for in a worktree.",
+		Testing: "go test -race ./...",
+	}.Compose(PRTrailers{Fixes: 65})
+	want := `### What
+
+pr now sends ` + "`git rev-parse --abbrev-ref @{u}`" + ` as the head.
+
+### Why
+
+The local name failed with ` + "`--for`" + ` in a worktree.
+
+### Testing
+
+go test -race ./...
+
+Fixes #65`
+	if got != want {
+		t.Errorf("Compose() =\n%s\n\nwant\n%s", got, want)
+	}
+	if refs := FixesReferences(got); !reflect.DeepEqual(refs, []int{65}) {
+		t.Errorf("FixesReferences(Compose(...)) = %v, want [65]", refs)
+	}
+}
+
+// pr fills empty sections from the issue body, so text that create already
+// composed goes through Compose a second time. Backticks must not thicken.
+func TestPRComposeIsStableOnAlreadyComposedText(t *testing.T) {
+	issue := Sections{
+		Fix:      "Send the upstream name, not the local one, via --for.",
+		DoneWhen: []string{"pr passes --for through"},
+	}.Compose()
+	// create marked the flag up on the way in, in both the prose section and
+	// the checklist item.
+	if !strings.Contains(issue, "via `--for`.") || !strings.Contains(issue, "- [ ] pr passes `--for` through") {
+		t.Fatalf("Sections.Compose() did not mark up the flag:\n%s", issue)
+	}
+	// pr reads that section back and composes it again; the second pass must
+	// change nothing.
+	what := Section(issue, "Fix")
+	body := PRSections{What: what}.Compose(PRTrailers{Fixes: 65})
+	if !strings.Contains(body, what) {
+		t.Errorf("re-composing changed the section:\nbody:\n%s\n\nwant it to contain %q", body, what)
+	}
+	if strings.Contains(body, "``") {
+		t.Errorf("Compose() doubled a backtick:\n%s", body)
+	}
+}
+
 // An absent section leaves no bare header behind — the same rule the issue
 // template follows.
 func TestPRComposeOmitsEmptySections(t *testing.T) {
