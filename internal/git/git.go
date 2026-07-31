@@ -14,10 +14,25 @@ import (
 type State struct {
 	// Branch is the current branch name, empty on a detached HEAD.
 	Branch string
+	// Upstream is the branch name on the remote, empty when the branch
+	// tracks nothing there. It is not always the local name: see Head.
+	Upstream string
 	// Pushed reports whether the branch has a remote-tracking counterpart.
 	// GitHub can only open a pull request for a ref it can already see, so
 	// this is a precondition, not a nicety.
 	Pushed bool
+}
+
+// Head is the branch a pull request is opened from — the upstream name when
+// there is one, the local name otherwise. The two differ whenever a checkout
+// is made under a generated local name: an agent harness working in a git
+// worktree ends up on worktree-feat+x tracking origin/feat/x, and GitHub has
+// never heard of the local name, so a PR opened from it is rejected outright.
+func (s State) Head() string {
+	if s.Upstream != "" {
+		return s.Upstream
+	}
+	return s.Branch
 }
 
 // runner runs a command and returns its trimmed stdout; injected by tests.
@@ -43,5 +58,23 @@ func current(r runner) (State, error) {
 	// git exits non-zero for an unset upstream exactly as it does for a
 	// broken repo, and the repo can't be broken — the branch just resolved.
 	upstream, err := r("git", "rev-parse", "--abbrev-ref", "@{upstream}")
-	return State{Branch: branch, Pushed: err == nil && upstream != ""}, nil
+	if err != nil || upstream == "" {
+		return State{Branch: branch}, nil
+	}
+	return State{Branch: branch, Upstream: remoteBranch(r, branch, upstream), Pushed: true}, nil
+}
+
+// remoteBranch strips the remote from an upstream ref like origin/feat/x,
+// returning "" when the branch tracks no remote at all. The remote name is
+// read rather than assumed to be the first path segment, because branch
+// names contain slashes too: cutting blindly at the first one turns a branch
+// tracking the local feat/x into a PR opened from x.
+func remoteBranch(r runner, branch, upstream string) string {
+	remote, err := r("git", "config", "--get", "branch."+branch+".remote")
+	// "." is git's spelling of "the local repository" — an upstream that
+	// lives here rather than on a remote, and so no name GitHub knows.
+	if err != nil || remote == "" || remote == "." {
+		return ""
+	}
+	return strings.TrimPrefix(upstream, remote+"/")
 }

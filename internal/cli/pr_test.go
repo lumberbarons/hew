@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -20,6 +21,15 @@ import (
 func onBranch(app *App, branch string) {
 	app.Git = func() (git.State, error) {
 		return git.State{Branch: branch, Pushed: true}, nil
+	}
+}
+
+// inWorktree wires the state an agent harness leaves behind: the checkout is
+// on a generated local branch name, and the branch it tracks on the remote
+// keeps the real one.
+func inWorktree(app *App, local, upstream string) {
+	app.Git = func() (git.State, error) {
+		return git.State{Branch: local, Upstream: upstream, Pushed: true}, nil
 	}
 }
 
@@ -531,6 +541,64 @@ func TestPRWarnsOnANonConventionalBranch(t *testing.T) {
 	}
 	// The warning is advice, not a refusal — the work is already committed.
 	createdPR(t, f)
+}
+
+// GitHub knows the branch by its upstream name only, so a PR opened from the
+// worktree's local name is rejected with "PullRequest.head is invalid" (#65).
+// Both the create and the existing-PR lookup go out under the resolved name.
+func TestPRFromAWorktreeOpensFromTheUpstreamBranch(t *testing.T) {
+	f := newFake(claimed(30, "one"))
+	app, _, errOut := newApp(f)
+	inWorktree(app, "worktree-fix+pr-head", "fix/pr-head")
+
+	if err := app.PR(context.Background(), PROpts{Sections: sections("", "", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	if call := createdPR(t, f); !strings.Contains(call, "fix/pr-head→main") {
+		t.Errorf("PR head is not the upstream branch: %s", call)
+	}
+	if !slices.Contains(f.calls, "PullRequestContext fix/pr-head") {
+		t.Errorf("existing-PR lookup did not use the upstream branch: %v", f.calls)
+	}
+	for _, call := range f.calls {
+		if strings.Contains(call, "worktree-fix+pr-head") {
+			t.Errorf("the local branch name reached the API: %s", call)
+		}
+	}
+	// fix/pr-head carries a conventional prefix even though the local name
+	// does not, so there is nothing to warn about.
+	if got := errOut.String(); strings.Contains(got, "prefix") {
+		t.Errorf("warned about the local name's missing prefix: %q", got)
+	}
+}
+
+// The prefix warning is about the name reviewers and the changelog see,
+// which is the upstream one — a local name that happens to look conventional
+// does not excuse an unprefixed branch on the remote.
+func TestPRWarnsAgainstTheUpstreamBranchName(t *testing.T) {
+	f := newFake(claimed(30, "one"))
+	app, _, errOut := newApp(f)
+	inWorktree(app, "feat/looks-fine", "wip")
+
+	if err := app.PR(context.Background(), PROpts{Sections: sections("", "", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := errOut.String(); !strings.Contains(got, "branch wip has no") {
+		t.Errorf("prefix warning did not name the upstream branch: %q", got)
+	}
+}
+
+// The push advice is the one place the local name is the right answer: it is
+// what the user has checked out and what they would type.
+func TestPRUnpushedAdviceNamesTheLocalBranch(t *testing.T) {
+	f := newFake(claimed(30, "one"))
+	app, _, _ := newApp(f)
+	app.Git = func() (git.State, error) {
+		return git.State{Branch: "worktree-feat+x", Pushed: false}, nil
+	}
+
+	err := app.PR(context.Background(), PROpts{})
+	requireExit(t, err, ExitGeneric, "git push -u origin worktree-feat+x")
 }
 
 func TestPRWarnsWhenTheIssueIsSomeoneElsesClaim(t *testing.T) {

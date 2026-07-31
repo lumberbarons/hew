@@ -46,6 +46,10 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 	if !state.Pushed {
 		return genericErr("branch %s has no upstream; push it first: git push -u origin %s", state.Branch, state.Branch)
 	}
+	// Everything from here on is about the branch GitHub can see, which is
+	// not always the one checked out locally — the head it rejects, the head
+	// it matches an existing PR by, and the name a reviewer reads.
+	head := state.Head()
 
 	issues, err := a.Client.ListIssues(ctx, openStates)
 	if err != nil {
@@ -55,18 +59,18 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 	if err != nil {
 		return err
 	}
-	issue, err := a.linkedIssue(issues, state.Branch, viewer, opts.For)
+	issue, err := a.linkedIssue(issues, head, viewer, opts.For)
 	if err != nil {
 		return err
 	}
 
-	prCtx, err := a.Client.PullRequestContext(ctx, state.Branch)
+	prCtx, err := a.Client.PullRequestContext(ctx, head)
 	if err != nil {
 		return err
 	}
 	if prCtx.Existing != nil {
 		return genericErr("#%d already has an open PR from %s: #%d — push to the branch instead",
-			issue.Number, state.Branch, prCtx.Existing.Number)
+			issue.Number, head, prCtx.Existing.Number)
 	}
 	base := opts.Base
 	if base == "" {
@@ -75,11 +79,11 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 	if base == "" {
 		return genericErr("cannot determine the base branch for %s (use --base)", a.Repo)
 	}
-	if state.Branch == base {
+	if head == base {
 		return genericErr("on %s: a PR needs a branch (git checkout -b feat/…)", base)
 	}
-	if !conventions.IsConventionalBranch(state.Branch) {
-		a.warnf("branch %s has no %s prefix", state.Branch, strings.Join(conventions.BranchPrefixes, "|"))
+	if !conventions.IsConventionalBranch(head) {
+		a.warnf("branch %s has no %s prefix", head, strings.Join(conventions.BranchPrefixes, "|"))
 	}
 	if len(issue.Assignees) > 0 && !slices.Contains(issue.Assignees, viewer) {
 		a.warnf("#%d is claimed by @%s, not you", issue.Number, strings.Join(issue.Assignees, " @"))
@@ -99,7 +103,7 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 
 	created, err := a.Client.CreatePullRequest(ctx, gh.NewPullRequest{
 		Title: title, Body: body,
-		Head: state.Branch, Base: base, Draft: !opts.Ready,
+		Head: head, Base: base, Draft: !opts.Ready,
 	})
 	if err != nil {
 		return err
@@ -110,7 +114,7 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 	}
 	return a.emitResult(prJSON{
 		Number: created.Number, URL: created.URL, Draft: created.Draft,
-		Fixes: issue.Number, Head: state.Branch, Base: base, Title: title,
+		Fixes: issue.Number, Head: head, Base: base, Title: title,
 	}, func() {
 		// The summary an agent branches on, then the URL a human clicks; the
 		// create response always carries one, so it is not conditional.

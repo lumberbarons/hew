@@ -41,7 +41,7 @@ The layering exists so everything with behavior is testable without hitting GitH
 | `internal/model/` | Pure domain logic: readiness, label normalization, cycle detection — no I/O, plain unit tests | Changing readiness or label semantics |
 | `internal/render/` | Text and JSON renderers, golden-file tested (`testdata/*.golden`) | Changing output format |
 | `internal/conventions/` | The opinions: label set, issue and PR body templates, primer text | Changing labels, a template, or the primer |
-| `internal/git/` | Local branch state for `pr` (current branch, has-upstream); shells out to git behind an injectable runner | Changing what `pr` knows about the checkout |
+| `internal/git/` | Local branch state for `pr` (current branch, the upstream branch name a PR is opened from, has-upstream); shells out to git behind an injectable runner | Changing what `pr` knows about the checkout |
 | `internal/beads/` | Parses a beads (bd) `issues.jsonl` snapshot for `migrate` — pure parsing, no runtime dependency on bd | Changing the beads migration |
 | `internal/plan/` | The `apply` plan-file schema: JSONL parsing, local-`id` resolution, dangling-reference and cycle rejection — all validation happens before anything is written | Changing the plan schema or `apply` validation |
 | `internal/editor/` | Launches `$EDITOR` seeded with the body template, for `--edit` on `create` and `epic create` | Changing the `--edit` flow |
