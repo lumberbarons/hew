@@ -239,7 +239,9 @@ func (a *App) composePRBody(opts PROpts, issue model.Issue) (string, error) {
 		if sections.Testing == "" {
 			a.warnf("no --testing section: say how this was verified")
 		}
-		return sections.Compose(trailers), nil
+		body := sections.Compose(trailers)
+		a.warnUnmarkedCode(body, "gh pr edit")
+		return body, nil
 	}
 
 	raw, err := os.ReadFile(opts.BodyFile)
@@ -264,5 +266,6 @@ func (a *App) composePRBody(opts PROpts, issue model.Issue) (string, error) {
 	if missing := trailers.Render(); missing != "" {
 		body += "\n\n" + missing
 	}
+	a.warnUnmarkedCode(body, "gh pr edit")
 	return body, nil
 }

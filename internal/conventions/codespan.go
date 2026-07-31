@@ -5,45 +5,111 @@ import (
 	"strings"
 )
 
-// CodeSpanGuidance is the authoring rule the body templates prescribe. It
-// lives on the create/pr/apply help surfaces rather than in the primer,
-// which is already over its ~600-token budget (#63). Transformation covers
-// only the one token shape that cannot be prose, so the rest is authoring:
-// the text is correct where it is written, and both body escape hatches go
-// on carrying it verbatim.
+// CodeSpanGuidance is the authoring rule the body templates prescribe. It is
+// stated on the create/pr/apply help surfaces, but help text is read when
+// someone goes looking for it and the composing agent generally does not —
+// which is why the rule is also checked. UnmarkedCodeText is what makes it
+// land; this text is what the warning points at.
 const CodeSpanGuidance = "Write commands, flags, branch names, paths and error strings as code spans\n" +
-	"(`--title`, `feat/pr-head`, `internal/cli/pr.go`, `HTTP 422`): issue and PR\n" +
-	"bodies are read in a browser and outlive the branch, and those are the\n" +
-	"characters that blur into prose. A bare --flag token is marked up for you;\n" +
-	"nothing else is guessed at, so mark the rest up as you write it."
+	"(`--title`, `feat/pr-head`, `internal/cli/pr.go`, `go test -race ./...`): issue\n" +
+	"and PR bodies are read in a browser and outlive the branch, and those are the\n" +
+	"characters that blur into prose. Wrap the whole command, not just the flag\n" +
+	"inside it. Composed bodies are checked and unmarked code text is warned about."
 
-// bareLongFlag matches a token that can only be a command-line flag: two
-// dashes, then a letter. The rule is deliberately the narrowest one worth
-// having. Prose reaches for a double dash too — as an em-dash ("the fix --
-// and this is key -- was late"), inside a compound ("well--known"), as a
-// rule line ("---"), and as the end-of-flags separator ("git log -- path")
-// — but none of those put a letter immediately after the dashes, so none of
-// them match. Anything broader (branch names, paths, error strings) shares a
-// shape with ordinary words: a rule that catches origin/feat/x also catches
-// "and/or", and a false positive ships in a body nobody re-reads.
-var bareLongFlag = regexp.MustCompile(`^--[A-Za-z][A-Za-z0-9-]*(=\S+)?$`)
+// codeShaped are the token shapes that are worth flagging when they appear
+// outside a code span. Each one is high-precision on purpose: a warning the
+// author learns to skip past is worse than no warning, so a shape earns its
+// place by being something prose does not produce.
+//
+// The set is deliberately not exhaustive. "go vet" and "gofmt -l" are code
+// text this will miss, because a command is an unbounded shape and guessing
+// at one costs more credibility than it buys. Missing a case leaves the
+// authoring convention to cover it; crying wolf trains the author to ignore
+// the cases it does catch.
+var codeShaped = []struct {
+	name string
+	re   *regexp.Regexp
+}{
+	// A long flag: two dashes then a letter. Prose writes "--" as an em-dash
+	// and in "well--known", but never immediately before a letter.
+	{"flag", regexp.MustCompile(`^--[A-Za-z][A-Za-z0-9-]*(=\S+)?$`)},
+	// A path with a file extension. The extension is what separates
+	// internal/cli/pr.go from "and/or", which is otherwise the same shape.
+	{"path", regexp.MustCompile(`^[\w.\-/]+/[\w.\-]+\.(go|mod|sum|md|ya?ml|json|jsonl|sh|toml)$`)},
+	// A bare filename carrying a code extension.
+	{"file", regexp.MustCompile(`^[\w.\-]+\.(go|mod|sum|ya?ml|jsonl|sh|toml)$`)},
+	// A Go test or exported identifier, which is how test names get named in
+	// a Testing section.
+	{"identifier", regexp.MustCompile(`^(Test|Benchmark|Fuzz)[A-Z][A-Za-z0-9]+$`)},
+	// The package wildcard, unambiguous wherever it appears.
+	{"wildcard", regexp.MustCompile(`^\./\.\.\.$`)},
+}
 
 // fenceMarker matches the opening or closing line of a fenced code block.
 var fenceMarker = regexp.MustCompile("^\\s*(```|~~~)")
 
-// codeSpanFlags wraps bare long-flag tokens in code spans, leaving text
-// that is already marked up untouched. It is idempotent by construction —
-// anything inside a code span or a fenced block is skipped — which is what
-// lets `pr` re-compose a section it already read back out of an issue body
-// without accumulating backticks.
+// UnmarkedCodeText returns the code-shaped tokens in a body that are not
+// inside a code span or a fenced block, de-duplicated and in order of first
+// appearance. It reports; it never rewrites.
 //
-// It runs on composed sections only. A --body-file body is the escape hatch
-// and passes through verbatim: text is correct where it is written, and the
-// author who reached for the escape hatch has already said so.
-func codeSpanFlags(s string) string {
-	lines := strings.Split(s, "\n")
+// Checking rather than transforming is the whole design. Marking text up
+// automatically requires knowing what the text means — whether --body-file
+// is a flag being named or part of "gh pr edit --body-file" — and that
+// information is not in the token stream, so a transform splits compound
+// commands and cannot be iterated out of it. The author knows. So the tool's
+// job is to notice and say so, at the moment the body is composed, rather
+// than to guess or to rely on help text having been read.
+//
+// Reporting also inverts the cost of a false positive: a wrong rewrite ships
+// permanently in a published body, while a wrong warning costs one line of
+// stderr. That is what lets the checked set cover paths and identifiers,
+// which no safe transform could ever touch.
+func UnmarkedCodeText(body string) []string {
+	var found []string
+	seen := map[string]bool{}
+	for _, segment := range outsideCode(body) {
+		for _, token := range strings.Fields(segment) {
+			// The raw token is judged first: trimming punctuation is what
+			// lets "--title." be recognised, but it would also dismantle
+			// "./...", which is punctuation all the way down.
+			core := token
+			if !isCodeShaped(core) {
+				core = trimPunctuation(token)
+			}
+			if core == "" || seen[core] || !isCodeShaped(core) {
+				continue
+			}
+			seen[core] = true
+			found = append(found, core)
+		}
+	}
+	return found
+}
+
+func isCodeShaped(token string) bool {
+	for _, shape := range codeShaped {
+		if shape.re.MatchString(token) {
+			return true
+		}
+	}
+	return false
+}
+
+// trimPunctuation strips the characters prose wraps a token in, so a token
+// ending a sentence is judged on the token.
+func trimPunctuation(token string) string {
+	return strings.Trim(token, "([\"'.,;:)]")
+}
+
+// outsideCode returns the parts of a body that are not inside a fenced block
+// or a code span. Splitting a line on backticks alternates the parts: even
+// indexes are outside, odd are inside. An unpaired backtick leaves its
+// trailing text at an odd index, so a half-written span is treated as code
+// and not flagged — the reading that stays quiet when it cannot be sure.
+func outsideCode(body string) []string {
+	var out []string
 	inFence := false
-	for i, line := range lines {
+	for _, line := range strings.Split(body, "\n") {
 		if fenceMarker.MatchString(line) {
 			inFence = !inFence
 			continue
@@ -51,64 +117,23 @@ func codeSpanFlags(s string) string {
 		if inFence {
 			continue
 		}
-		lines[i] = markUpOutsideSpans(line)
-	}
-	return strings.Join(lines, "\n")
-}
-
-// markUpOutsideSpans applies the flag rule to the parts of a line that are
-// not already inside a code span. Splitting on backticks alternates the
-// parts: even indexes are outside, odd are inside. An unpaired backtick
-// leaves its trailing text at an odd index, so a half-written span is
-// treated as code and left alone — the conservative reading.
-func markUpOutsideSpans(line string) string {
-	parts := strings.Split(line, "`")
-	for i := 0; i < len(parts); i += 2 {
-		parts[i] = markUpTokens(parts[i])
-	}
-	return strings.Join(parts, "`")
-}
-
-// markUpTokens rewrites whitespace-delimited tokens that match the flag
-// rule, preserving the original spacing so a body's line breaks and
-// indentation survive.
-func markUpTokens(s string) string {
-	var b strings.Builder
-	for i := 0; i < len(s); {
-		j := i
-		for j < len(s) && !isSpace(s[j]) {
-			j++
-		}
-		if j > i {
-			b.WriteString(markUpToken(s[i:j]))
-			i = j
-		}
-		for i < len(s) && isSpace(s[i]) {
-			b.WriteByte(s[i])
-			i++
+		parts := strings.Split(line, "`")
+		for i := 0; i < len(parts); i += 2 {
+			out = append(out, parts[i])
 		}
 	}
-	return b.String()
+	return out
 }
 
-func isSpace(c byte) bool {
-	return c == ' ' || c == '\t'
-}
-
-// markUpToken wraps one token if its core — the token minus the punctuation
-// prose wraps it in — is a bare long flag. The punctuation stays outside the
-// span, so "pass --title." keeps its full stop as prose.
-func markUpToken(token string) string {
-	const (
-		leading  = "([\"'"
-		trailing = ".,;:)]\"'"
-	)
-	core := strings.TrimLeft(token, leading)
-	prefix := token[:len(token)-len(core)]
-	core = strings.TrimRight(core, trailing)
-	suffix := token[len(prefix)+len(core):]
-	if !bareLongFlag.MatchString(core) {
-		return token
+// FormatUnmarkedCodeText renders the warning body for a set of findings,
+// capping the list so a long body cannot bury the rest of the output.
+func FormatUnmarkedCodeText(tokens []string) string {
+	const max = 5
+	shown := tokens
+	suffix := ""
+	if len(tokens) > max {
+		shown = tokens[:max]
+		suffix = ", …"
 	}
-	return prefix + "`" + core + "`" + suffix
+	return strings.Join(shown, ", ") + suffix
 }

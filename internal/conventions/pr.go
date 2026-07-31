@@ -115,7 +115,7 @@ func (s PRSections) Compose(t PRTrailers) string {
 		if strings.TrimSpace(content) == "" {
 			return
 		}
-		fmt.Fprintf(&b, "### %s\n\n%s\n\n", header, codeSpanFlags(strings.TrimSpace(content)))
+		fmt.Fprintf(&b, "### %s\n\n%s\n\n", header, strings.TrimSpace(content))
 	}
 	section("What", s.What)
 	section("Why", s.Why)

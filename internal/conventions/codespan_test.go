@@ -1,111 +1,117 @@
 package conventions
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
-func TestCodeSpanFlagsMarksUpBareFlags(t *testing.T) {
+func TestUnmarkedCodeTextFindsCodeShapedTokens(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string
-		want string
+		want []string
 	}{
-		{"bare flag", "pass --title to override", "pass `--title` to override"},
-		{"flag with value", "run --priority=P1 next", "run `--priority=P1` next"},
-		{"trailing full stop", "name --title.", "name `--title`."},
-		{"parenthesised", "(--for n) settles it", "(`--for` n) settles it"},
-		{"start of line", "--body-file is the escape hatch", "`--body-file` is the escape hatch"},
-		{"list item", "- --testing says how", "- `--testing` says how"},
-		{"several on a line", "--what and --why are repeatable", "`--what` and `--why` are repeatable"},
+		{"bare flag", "pass --title to override", []string{"--title"}},
+		{"flag with value", "run --priority=P1 next", []string{"--priority=P1"}},
+		{"trailing full stop", "name --title.", []string{"--title"}},
+		{"path with extension", "it lives in internal/cli/pr.go today", []string{"internal/cli/pr.go"}},
+		{"bare filename", "codespan.go is new", []string{"codespan.go"}},
+		{"go test name", "TestPRCompose covers it", []string{"TestPRCompose"}},
+		{"package wildcard", "go test -race ./... is green", []string{"./..."}},
+		{"several", "--what and internal/gh/client.go", []string{"--what", "internal/gh/client.go"}},
+		{"deduplicated", "--title then --title again", []string{"--title"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := codeSpanFlags(c.in); got != c.want {
-				t.Errorf("codeSpanFlags(%q) = %q, want %q", c.in, got, c.want)
+			if got := UnmarkedCodeText(c.in); !reflect.DeepEqual(got, c.want) {
+				t.Errorf("UnmarkedCodeText(%q) = %v, want %v", c.in, got, c.want)
 			}
 		})
 	}
 }
 
-// TestCodeSpanFlagsLeavesProseAlone names the false positives the rule must
-// not produce. A wrong backtick lands in a published body that nobody
-// re-reads, so these are the cases that decide whether the rule is worth
-// having at all.
-func TestCodeSpanFlagsLeavesProseAlone(t *testing.T) {
+// TestUnmarkedCodeTextStaysQuietOnProse names the false positives the check
+// must not produce. A warning the author learns to skip past is worse than
+// no warning at all, so each of these is load-bearing for the whole design.
+func TestUnmarkedCodeTextStaysQuietOnProse(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string
 	}{
 		{"em-dash", "the fix -- and this is key -- was late"},
-		{"end-of-flags separator", "git log -- path/to/file"},
+		{"end-of-flags separator", "git log -- path"},
 		{"compound word", "a well--known problem"},
 		{"horizontal rule", "---"},
-		{"long rule", "-------"},
 		{"single dash flag", "the -v flag"},
-		{"negative number", "offset by --3 places"},
-		{"url with dashes", "see https://example.com/a--b"},
+		{"leading digit after dashes", "offset by --3 places"},
 		{"and/or", "the branch and/or the claim"},
-		{"path", "internal/cli/pr.go composes it"},
-		{"bare dashes", "-- "},
+		{"slash prose without an extension", "read/write access to internal/cli"},
+		{"sentence with a full stop", "It works. Mostly."},
+		{"ordinary capitalised word", "Testing is the section name"},
+		{"url", "see https://example.com/a/b"},
+		{"empty", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := codeSpanFlags(c.in); got != c.in {
-				t.Errorf("codeSpanFlags(%q) = %q, want it unchanged", c.in, got)
+			if got := UnmarkedCodeText(c.in); len(got) != 0 {
+				t.Errorf("UnmarkedCodeText(%q) = %v, want no findings", c.in, got)
 			}
 		})
 	}
 }
 
-// TestCodeSpanFlagsIsIdempotent is the invariant that lets pr re-compose a
-// section it read back out of an issue body: composing twice must equal
-// composing once, or every PR would thicken the backticks its issue already
-// carried.
-func TestCodeSpanFlagsIsIdempotent(t *testing.T) {
-	inputs := []string{
-		"pass --title to override",
-		"already `--title` marked up",
-		"mixed `--what` and --why",
-		"run `git rev-parse --abbrev-ref @{u}` first",
-		"```\n--not-a-flag-here\n```",
-		"a `--flag` and prose",
+// Text the author already marked up is exactly what the check must not
+// nag about, or it would fire forever on a body that is already correct.
+func TestUnmarkedCodeTextSkipsMarkedUpText(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"code span", "pass `--title` to override"},
+		{"whole command in a span", "run `gh pr edit --body-file x.md` instead"},
+		{"path in a span", "it lives in `internal/cli/pr.go`"},
+		{"fenced block", "```sh\nhew pr --testing x\ngo test ./...\n```"},
+		{"unpaired backtick leaves the tail alone", "an unclosed `span with --flag"},
 	}
-	for _, in := range inputs {
-		once := codeSpanFlags(in)
-		twice := codeSpanFlags(once)
-		if once != twice {
-			t.Errorf("codeSpanFlags not idempotent for %q: once = %q, twice = %q", in, once, twice)
-		}
-	}
-}
-
-func TestCodeSpanFlagsSkipsExistingSpans(t *testing.T) {
-	in := "run `git rev-parse --abbrev-ref @{u}` before --push"
-	want := "run `git rev-parse --abbrev-ref @{u}` before `--push`"
-	if got := codeSpanFlags(in); got != want {
-		t.Errorf("codeSpanFlags(%q) = %q, want %q", in, got, want)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := UnmarkedCodeText(c.in); len(got) != 0 {
+				t.Errorf("UnmarkedCodeText(%q) = %v, want no findings", c.in, got)
+			}
+		})
 	}
 }
 
-func TestCodeSpanFlagsSkipsFencedBlocks(t *testing.T) {
-	in := "before --one\n```sh\nhew pr --testing x\n```\nafter --two"
-	want := "before `--one`\n```sh\nhew pr --testing x\n```\nafter `--two`"
-	if got := codeSpanFlags(in); got != want {
-		t.Errorf("codeSpanFlags(%q) = %q, want %q", in, got, want)
+// The check reports across a whole composed body, which is how it catches a
+// Testing section written after the prose sections were marked up properly.
+func TestUnmarkedCodeTextSpansSections(t *testing.T) {
+	body := PRSections{
+		What:    "Marks up `--title` correctly.",
+		Testing: "go test -race ./... is green; codespan.go is covered.",
+	}.Compose(PRTrailers{Fixes: 71})
+	got := UnmarkedCodeText(body)
+	want := []string{"./...", "codespan.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("UnmarkedCodeText(body) = %v, want %v", got, want)
 	}
 }
 
-func TestCodeSpanFlagsTreatsUnpairedBacktickAsCode(t *testing.T) {
-	// A half-written span is ambiguous; leaving the tail alone is the
-	// reading that cannot produce a nested backtick.
-	in := "an unclosed `span with --flag"
-	if got := codeSpanFlags(in); got != in {
-		t.Errorf("codeSpanFlags(%q) = %q, want it unchanged", in, got)
+// Compose must not rewrite anything: the check reports, the author fixes.
+func TestComposeLeavesBodiesVerbatim(t *testing.T) {
+	in := "pass --title to override, see internal/cli/pr.go"
+	body := PRSections{What: in}.Compose(PRTrailers{Fixes: 71})
+	if want := "### What\n\n" + in + "\n\nFixes #71"; body != want {
+		t.Errorf("Compose() = %q, want %q — Compose must not transform", body, want)
 	}
 }
 
-func TestCodeSpanFlagsPreservesSpacing(t *testing.T) {
-	in := "  indented --flag\ttabbed --other"
-	want := "  indented `--flag`\ttabbed `--other`"
-	if got := codeSpanFlags(in); got != want {
-		t.Errorf("codeSpanFlags(%q) = %q, want %q", in, got, want)
+func TestFormatUnmarkedCodeTextCapsTheList(t *testing.T) {
+	many := []string{"a.go", "b.go", "c.go", "d.go", "e.go", "f.go", "g.go"}
+	got := FormatUnmarkedCodeText(many)
+	if want := "a.go, b.go, c.go, d.go, e.go, …"; got != want {
+		t.Errorf("FormatUnmarkedCodeText(%v) = %q, want %q", many, got, want)
+	}
+	if got := FormatUnmarkedCodeText([]string{"a.go", "b.go"}); got != "a.go, b.go" {
+		t.Errorf("FormatUnmarkedCodeText short list = %q", got)
 	}
 }

@@ -95,7 +95,7 @@ func (s Sections) Compose() string {
 		if strings.TrimSpace(content) == "" {
 			return
 		}
-		fmt.Fprintf(&b, "### %s\n\n%s\n\n", header, codeSpanFlags(strings.TrimSpace(content)))
+		fmt.Fprintf(&b, "### %s\n\n%s\n\n", header, strings.TrimSpace(content))
 	}
 	section("Where", s.Where)
 	section("Problem", s.Problem)
@@ -105,7 +105,7 @@ func (s Sections) Compose() string {
 	if len(s.DoneWhen) > 0 {
 		b.WriteString("### Done when\n\n")
 		for _, item := range s.DoneWhen {
-			fmt.Fprintf(&b, "- [ ] %s\n", codeSpanFlags(strings.TrimSpace(item)))
+			fmt.Fprintf(&b, "- [ ] %s\n", strings.TrimSpace(item))
 		}
 	}
 	return strings.TrimSpace(b.String())
