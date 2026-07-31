@@ -17,6 +17,11 @@ jobs:
         with:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+      # The action only runs `golangci-lint run`, which never checks
+      # formatting. It does put the binary it installed on PATH, so the
+      # formatters configured in .golangci.yml are gated here instead.
+      - name: formatting
+        run: golangci-lint fmt --diff
 
   test:
     runs-on: ubuntu-latest
@@ -42,8 +47,67 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           working-directory: evals
+      # Same reason as the lint job: the action never checks formatting, and
+      # the root job's formatting step does not reach a nested module.
+      - name: formatting
+        run: golangci-lint fmt --diff
+        working-directory: evals
       - run: go test -race ./...
         working-directory: evals
+
+  # Scoped to the root module deliberately: evals/ is a harness that is never
+  # shipped (`go install .../cmd/hew` does not pull it), so its dependencies
+  # carry no user-facing risk.
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          # The action passes go-version and go-version-file straight through
+          # to setup-go, where a non-empty go-version wins. Blanking its
+          # 'stable' default is what makes go-version-file take effect, so
+          # stdlib advisories are reported against the version CI builds with
+          # rather than whatever is newest.
+          go-version-input: ''
+          go-version-file: go.mod
+          # Our own checkout above is the pinned one; the action's is not.
+          repo-checkout: false
+
+  # A broken .goreleaser.yaml, or a target that quietly stops cross-compiling,
+  # would otherwise surface only when a tag is pushed — too late, since the tag
+  # is already public and immutable.
+  release-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # goreleaser reads tags to derive the snapshot version and warns on a
+          # shallow clone.
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: '~> v2'
+          install-only: true
+      - run: goreleaser check
+      - run: goreleaser build --snapshot --clean
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
+        with:
+          # The actionlint version itself floats, as golangci-lint's does —
+          # the action ref is what we pin.
+          #
+          # examples/auto-triage.yml ships to users and is documented in the
+          # README, so it is linted alongside our own workflows even though it
+          # lives outside .github/workflows.
+          files: .github/workflows/*.yml, examples/auto-triage.yml
 
   shellcheck:
     runs-on: ubuntu-latest

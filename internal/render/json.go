@@ -12,30 +12,30 @@ import (
 // IssueJSON is the stable flat schema for --json output: deps as number
 // arrays, GraphQL shapes hidden.
 type IssueJSON struct {
-	Number             int           `json:"number"`
-	Title              string        `json:"title"`
-	State              string        `json:"state"`
-	Priority           *string       `json:"priority"`
-	Type               *string       `json:"type"`
-	Areas              []string      `json:"areas"`
-	Assignees          []string      `json:"assignees"`
-	Epic               bool          `json:"epic"`
-	InProgress         bool          `json:"inProgress"`
-	Untriaged          bool          `json:"untriaged"`
-	Parent             *int          `json:"parent"`
-	BlockedBy          []int         `json:"blockedBy"`
-	BlockedByTotal     int           `json:"blockedByTotal"`
-	OpenBlockers       []int         `json:"openBlockers"`
-	SubIssues          []int         `json:"subIssues"`
-	SubIssuesTotal     int           `json:"subIssuesTotal"`
-	SubIssuesCompleted int           `json:"subIssuesCompleted"`
-	CreatedAt          time.Time     `json:"createdAt"`
+	Number             int       `json:"number"`
+	Title              string    `json:"title"`
+	State              string    `json:"state"`
+	Priority           *string   `json:"priority"`
+	Type               *string   `json:"type"`
+	Areas              []string  `json:"areas"`
+	Assignees          []string  `json:"assignees"`
+	Epic               bool      `json:"epic"`
+	InProgress         bool      `json:"inProgress"`
+	Untriaged          bool      `json:"untriaged"`
+	Parent             *int      `json:"parent"`
+	BlockedBy          []int     `json:"blockedBy"`
+	BlockedByTotal     int       `json:"blockedByTotal"`
+	OpenBlockers       []int     `json:"openBlockers"`
+	SubIssues          []int     `json:"subIssues"`
+	SubIssuesTotal     int       `json:"subIssuesTotal"`
+	SubIssuesCompleted int       `json:"subIssuesCompleted"`
+	CreatedAt          time.Time `json:"createdAt"`
 	// Body is a pointer so presence tracks the mode (show, list --bodies)
 	// rather than emptiness: modes that carry it emit the field on every
 	// issue, empty or not, and plain list lines stay byte-for-byte body-free.
-	Body     *string       `json:"body,omitempty"`
-	Comments []CommentJSON `json:"comments,omitempty"`
-	CommentsTotal      int           `json:"commentsTotal,omitempty"`
+	Body          *string       `json:"body,omitempty"`
+	Comments      []CommentJSON `json:"comments,omitempty"`
+	CommentsTotal int           `json:"commentsTotal,omitempty"`
 }
 
 // CommentJSON is one recent comment in show --json.

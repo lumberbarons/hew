@@ -257,7 +257,7 @@ func TestJSONListBodies(t *testing.T) {
 func TestJSONIssue(t *testing.T) {
 	i := model.Issue{
 		Number: 42, Title: "T", State: "OPEN", CreatedAt: ts(6),
-		Labels:   []string{"P1", "bug"},
+		Labels:        []string{"P1", "bug"},
 		Body:          "body here",
 		Comments:      []model.Comment{{Author: "alice", CreatedAt: ts(7), Body: "hi"}},
 		CommentsTotal: 3,

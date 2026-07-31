@@ -22,7 +22,8 @@ curl -fsSL https://raw.githubusercontent.com/lumberbarons/hew/main/install.sh | 
 Installs to `~/.local/bin` (override with `INSTALL_DIR`); never uses sudo.
 Linux and macOS (x86_64 and arm64) only — elsewhere, use `go install` below.
 
-Or, with a Go toolchain (1.25+):
+Or, with a Go toolchain — the minimum is the `go` directive in `go.mod`, which
+tracks the latest patched release:
 
 ```sh
 go install github.com/lumberbarons/hew/cmd/hew@latest

@@ -11,3 +11,10 @@ linters:
         - fmt.Fprintf
         - fmt.Fprintln
         - (*text/tabwriter.Writer).Flush
+
+# `default: standard` is errcheck/govet/ineffassign/staticcheck/unused — none of
+# which look at formatting. These make `golangci-lint fmt` the formatting gate.
+formatters:
+  enable:
+    - gofmt
+    - goimports
