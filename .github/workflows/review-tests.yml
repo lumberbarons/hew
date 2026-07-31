@@ -62,8 +62,9 @@ jobs:
             (.claude/skills/review-tests/SKILL.md). The PR branch is already checked out in
             the working directory, but HEAD is detached, so skip the skill's
             discover-files.sh scoping step — the file list above is the review scope. Follow
-            the rest of the skill as written: quality criteria, severity, pattern collapsing,
-            the reporting cap, and the REFERENCE.md output format.
+            the rest of the skill as written: the falsifiability bar and severity rules, what
+            not to flag, pattern collapsing, the finding cap, and the REFERENCE.md output
+            format.
 
             Focus: run `gh pr diff ${{ github.event.pull_request.number }}` and prioritize
             findings on lines this PR adds or modifies. For pre-existing code in the scoped
