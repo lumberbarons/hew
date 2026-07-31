@@ -39,6 +39,7 @@ var omittedFlags = map[string]bool{
 	"create --edit":    true, // interactive, not for agents
 	"start --force":    true, // escape hatch
 	"apply --state":    true, // plumbing; the default is right
+	"list --closed":    true, // back-compat alias for --state closed, which the primer teaches instead
 	"apply --throttle": true, // plumbing; the default is right
 	"pr --body-file":   true, // long-form escape hatch; the composed body is the point
 	"pr --base":        true, // the repo default is right outside release branches

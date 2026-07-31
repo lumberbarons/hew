@@ -130,7 +130,8 @@ func listCmd() *ucli.Command {
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{Name: "label", Usage: "only issues with this label"},
 			&ucli.IntFlag{Name: "epic", Usage: "only children of epic `N`"},
-			&ucli.BoolFlag{Name: "closed", Usage: "show closed issues instead"},
+			&ucli.StringFlag{Name: "state", Usage: "issue state: `open`, closed, or all"},
+			&ucli.BoolFlag{Name: "closed", Usage: "alias for --state closed"},
 			&ucli.BoolFlag{Name: "bodies", Usage: "include issue bodies (requires --json) for single-call dedup"},
 		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
@@ -141,6 +142,7 @@ func listCmd() *ucli.Command {
 			return app.List(ctx, appcli.ListOpts{
 				Label:  cmd.String("label"),
 				Epic:   cmd.Int("epic"),
+				State:  cmd.String("state"),
 				Closed: cmd.Bool("closed"),
 				Bodies: cmd.Bool("bodies"),
 			})
