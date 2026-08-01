@@ -17,6 +17,8 @@ func TestUnmarkedCodeTextFindsCodeShapedTokens(t *testing.T) {
 		{"path with extension", "it lives in internal/cli/pr.go today", []string{"internal/cli/pr.go"}},
 		{"bare filename", "codespan.go is new", []string{"codespan.go"}},
 		{"go test name", "TestPRCompose covers it", []string{"TestPRCompose"}},
+		{"benchmark name", "BenchmarkCompose covers it", []string{"BenchmarkCompose"}},
+		{"fuzz name", "FuzzParse covers it", []string{"FuzzParse"}},
 		{"package wildcard", "go test -race ./... is green", []string{"./..."}},
 		{"several", "--what and internal/gh/client.go", []string{"--what", "internal/gh/client.go"}},
 		{"deduplicated", "--title then --title again", []string{"--title"}},
@@ -33,6 +35,53 @@ func TestUnmarkedCodeTextFindsCodeShapedTokens(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			if got := UnmarkedCodeText(c.in); !reflect.DeepEqual(got, c.want) {
 				t.Errorf("UnmarkedCodeText(%q) = %v, want %v", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// The path and file shapes carry multi-branch extension alternations, and a
+// table that only ever writes ".go" leaves every other branch unpinned:
+// dropping "toml" from either regex would turn nothing red. Each arm gets a
+// case in both shapes.
+//
+// The two sets are not the same, and that is what this table is really for.
+// "md" and "json" are in the path set and not the bare-filename one, so
+// "docs/DESIGN.md" is flagged and a bare "DESIGN.md" is not. These cases
+// record that boundary so a change to it is a decision rather than an
+// accident; whether the boundary is right is #75.
+func TestUnmarkedCodeTextCoversEveryExtensionArm(t *testing.T) {
+	cases := []struct {
+		ext string
+		// bare is a filename with no directory, path is the same extension
+		// carried by a path. A path is always flagged; bare only when the
+		// smaller file set includes the extension.
+		bare      string
+		path      string
+		bareFound bool
+	}{
+		{"go", "codespan.go", "internal/cli/pr.go", true},
+		{"mod", "go.mod", "evals/go.mod", true},
+		{"sum", "go.sum", "evals/go.sum", true},
+		{"yml", "ci.yml", ".github/workflows/ci.yml", true},
+		{"yaml", "config.yaml", "deploy/config.yaml", true},
+		{"jsonl", "plan.jsonl", "testdata/plan.jsonl", true},
+		{"sh", "install.sh", "scripts/install.sh", true},
+		{"toml", "config.toml", "cfg/config.toml", true},
+		{"md", "DESIGN.md", "docs/DESIGN.md", false},
+		{"json", "config.json", "internal/x/config.json", false},
+	}
+	for _, c := range cases {
+		t.Run(c.ext, func(t *testing.T) {
+			if got := UnmarkedCodeText("see " + c.path + " here"); !reflect.DeepEqual(got, []string{c.path}) {
+				t.Errorf("path %q = %v, want it flagged", c.path, got)
+			}
+			got := UnmarkedCodeText("see " + c.bare + " here")
+			if c.bareFound && !reflect.DeepEqual(got, []string{c.bare}) {
+				t.Errorf("bare %q = %v, want it flagged", c.bare, got)
+			}
+			if !c.bareFound && len(got) != 0 {
+				t.Errorf("bare %q = %v, want no findings (see #75)", c.bare, got)
 			}
 		})
 	}
