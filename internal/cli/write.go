@@ -163,6 +163,36 @@ func (a *App) warnUnmarkedCode(body, remedy string) {
 		conventions.FormatUnmarkedCodeText(tokens), remedy)
 }
 
+// formatStateReason renders GitHub's close-reason enum (COMPLETED,
+// NOT_PLANNED, DUPLICATE) as the prose the CLI prints.
+func formatStateReason(reason string) string {
+	return strings.ToLower(strings.ReplaceAll(reason, "_", " "))
+}
+
+// closeState renders " (completed)" for an issue whose close reason GitHub
+// recorded, and nothing for one closed before that field existed — "#20 is
+// closed ()" reads as a bug in the tool rather than a gap in the data.
+func closeState(issue model.Issue) string {
+	if issue.StateReason == "" {
+		return ""
+	}
+	return " (" + formatStateReason(issue.StateReason) + ")"
+}
+
+// guardClosed refuses a write aimed at a closed issue. Editing one is almost
+// always stale state rather than intent — the case this comes from is an issue
+// closed by a PR merge mid-session, quietly absorbing a later edit that nobody
+// noticed until much later. The close state is in the message because that is
+// what separates "the target moved under me" from "I typed the wrong number".
+// The override exists because a guard with no escape hatch just moves the rare
+// deliberate edit to the web UI, where none of the conventions are enforced.
+func guardClosed(issue model.Issue, allowClosed bool) error {
+	if issue.IsOpen() || allowClosed {
+		return nil
+	}
+	return genericErr("#%d is closed%s — pass --closed to edit anyway", issue.Number, closeState(issue))
+}
+
 // claimRefusal turns a tripped claim guard into the exit code that tells the
 // caller what to do about it: someone else's claim is exit 3 (pick the next
 // ready item), your own is exit 5 (resume the work you already claimed). The
@@ -258,6 +288,7 @@ type SetOpts struct {
 	NoParent    bool
 	Title       string
 	BodyFile    string
+	AllowClosed bool
 }
 
 func (o SetOpts) empty() bool {
@@ -267,7 +298,8 @@ func (o SetOpts) empty() bool {
 }
 
 // Set retriages or edits within the conventions, swapping the old
-// priority/type label rather than stacking a second one.
+// priority/type label rather than stacking a second one. It refuses a closed
+// target unless AllowClosed is set.
 func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 	if opts.empty() {
 		return usageErr("nothing to change; pass --priority, --type, --add-area, --remove-area, --parent, --no-parent, --title, or --body-file")
@@ -310,6 +342,13 @@ func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 	}
 	issue, err := a.Client.GetIssue(ctx, number)
 	if err != nil {
+		return err
+	}
+	// The pre-mutation read is already here, so the guard costs no extra call.
+	// It has to run before the first step below: Set applies its changes in
+	// sequence, and a refusal discovered halfway would leave a partial edit on
+	// an issue that should not have been touched at all.
+	if err := guardClosed(issue, opts.AllowClosed); err != nil {
 		return err
 	}
 
@@ -432,7 +471,11 @@ func (a *App) Close(ctx context.Context, number int, reason string, completed bo
 		return err
 	}
 	if !issue.IsOpen() {
-		return genericErr("#%d is already closed", number)
+		// No override here: re-closing a closed issue has no effect to
+		// authorize. Naming the existing state is the whole remedy — it says
+		// whether the issue was completed or dropped, which is what decides
+		// if this call was a mistake.
+		return genericErr("#%d is already closed%s", number, closeState(issue))
 	}
 	if err := a.Client.Comment(ctx, number, reason); err != nil {
 		return err
@@ -442,13 +485,14 @@ func (a *App) Close(ctx context.Context, number int, reason string, completed bo
 		// a clean redo — re-running would post the comment a second time.
 		return fmt.Errorf("posted the reason comment on #%d but closing it failed (a retry will comment again): %w", number, err)
 	}
-	return a.reportMutation(ctx, number, "closed #%d (%s)\n", number, strings.ToLower(strings.ReplaceAll(string(stateReason), "_", " ")))
+	return a.reportMutation(ctx, number, "closed #%d (%s)\n", number, formatStateReason(string(stateReason)))
 }
 
 // Block adds a native dependency after a transitive client-side cycle
 // check — GitHub itself only rejects self-blocks and direct two-issue
-// cycles.
-func (a *App) Block(ctx context.Context, number, blocker int) error {
+// cycles. It refuses a closed target unless allowClosed is set; a closed
+// blocker is refused outright, since closed blockers don't block.
+func (a *App) Block(ctx context.Context, number, blocker int, allowClosed bool) error {
 	issues, err := a.Client.ListIssues(ctx, openStates)
 	if err != nil {
 		return err
@@ -456,7 +500,20 @@ func (a *App) Block(ctx context.Context, number, blocker int) error {
 	byNum := model.ByNumber(issues)
 	issue, ok := byNum[number]
 	if !ok {
-		return genericErr("#%d is not an open issue in %s", number, a.Repo)
+		// Absent from the open set means closed or nonexistent, and the old
+		// message conflated the two. Re-read to tell them apart; only this
+		// path pays for the extra call, so the common case stays one query.
+		target, getErr := a.Client.GetIssue(ctx, number)
+		if getErr != nil {
+			return genericErr("#%d is not an open issue in %s", number, a.Repo)
+		}
+		if err := guardClosed(target, allowClosed); err != nil {
+			return err
+		}
+		// Overridden: a closed issue is absent from the open-issue graph, so
+		// no open blocked-by edge can reach it and the cycle check below is
+		// vacuously safe for it.
+		issue = target
 	}
 	if _, ok := byNum[blocker]; !ok {
 		return genericErr("#%d is not an open issue in %s; closed blockers don't block", blocker, a.Repo)
@@ -478,10 +535,14 @@ func (a *App) Block(ctx context.Context, number, blocker int) error {
 	return a.reportMutation(ctx, number, "blocked #%d on #%d\n", number, blocker)
 }
 
-// Unblock removes a dependency.
-func (a *App) Unblock(ctx context.Context, number, blocker int) error {
+// Unblock removes a dependency. It refuses a closed target unless allowClosed
+// is set.
+func (a *App) Unblock(ctx context.Context, number, blocker int, allowClosed bool) error {
 	issue, err := a.Client.GetIssue(ctx, number)
 	if err != nil {
+		return err
+	}
+	if err := guardClosed(issue, allowClosed); err != nil {
 		return err
 	}
 	found := false

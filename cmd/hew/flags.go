@@ -54,3 +54,12 @@ func (p *proseSlice) Get() any {
 	}
 	return *p.slice
 }
+
+// closedOverrideFlag is the escape hatch shared by the write commands that
+// refuse a closed target (#39). Declared once so the three commands cannot
+// drift apart in name or wording — the refusal message names the flag, and a
+// command spelling it differently would send the caller somewhere that does
+// not exist.
+func closedOverrideFlag() ucli.Flag {
+	return &ucli.BoolFlag{Name: "closed", Usage: "edit the issue even though it is closed"}
+}

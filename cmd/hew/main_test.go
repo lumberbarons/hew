@@ -41,6 +41,12 @@ var omittedFlags = map[string]bool{
 	"apply --state":    true, // plumbing; the default is right
 	"list --closed":    true, // back-compat alias for --state closed, which the primer teaches instead
 	"apply --throttle": true, // plumbing; the default is right
+	// The closed-target refusal names --closed as the remedy at the moment it
+	// fires, so the primer doesn't spend budget teaching an escape hatch the
+	// tool already hands you.
+	"set --closed":     true,
+	"block --closed":   true,
+	"unblock --closed": true,
 	"pr --body-file":   true, // long-form escape hatch; the composed body is the point
 	"pr --base":        true, // the repo default is right outside release branches
 	// epic create's body flags mirror create's exactly; the primer shows the
@@ -225,6 +231,37 @@ func TestJSONFlagReachesCommand(t *testing.T) {
 			}
 			if !got {
 				t.Errorf("run %v: json = false, want true", tc.args)
+			}
+		})
+	}
+}
+
+// TestClosedOverrideFlagReachesCommand covers #39: the closed-target guard is
+// only escapable if --closed actually arrives at the command enforcing it. The
+// refusal names the flag by way of remedy, so a flag declared here but never
+// read would leave the caller following an instruction that does nothing.
+func TestClosedOverrideFlagReachesCommand(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"set", []string{"hew", "set", "1", "--closed", "--priority", "P1"}},
+		{"block", []string{"hew", "block", "1", "--closed", "--on", "2"}},
+		{"unblock", []string{"hew", "unblock", "1", "--closed", "--from", "2"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app := root()
+			var got bool
+			findCommand(t, app, tc.name).Action = func(_ context.Context, cmd *ucli.Command) error {
+				got = cmd.Bool("closed")
+				return nil
+			}
+			if err := app.Run(context.Background(), tc.args); err != nil {
+				t.Fatalf("run %v: %v", tc.args, err)
+			}
+			if !got {
+				t.Errorf("run %v: closed = false, want true", tc.args)
 			}
 		})
 	}

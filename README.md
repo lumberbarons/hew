@@ -76,6 +76,9 @@ hew triage                     # issues missing priority/type labels
 hew set <n> [--priority ..] [--type ..] [--add-area X] [--remove-area X]
            [--parent N | --no-parent] [--title "..."]
            [--body-file F]        # replace the body (an empty file is refused)
+           [--closed]             # set/block/unblock refuse a closed target — an
+                                  # edit landing on one is almost always stale
+                                  # state; this is the override
 hew pr [--for N] [--title "..."]
           [--what "..."] [--why "..."] [--testing "..."]
                                   # draft PR for the claimed issue: body composed from
@@ -88,8 +91,8 @@ hew pr [--for N] [--title "..."]
                                   # trailers are appended, never duplicated)
           [--base BRANCH] [--ready]
 hew close <n> --reason "..." [--completed | --duplicate-of M]
-hew block <n> --on <m>         # native dependency, cycle-checked
-hew unblock <n> --from <m>
+hew block <n> --on <m> [--closed]      # native dependency, cycle-checked
+hew unblock <n> --from <m> [--closed]
 hew epic create --title "..." [--children N,N]
                    [--goal "..." --done-when "..." | --body-file F | --edit]
 hew epic status [<n>]
