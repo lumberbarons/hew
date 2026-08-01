@@ -58,6 +58,11 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 		return err
 	}
 
+	// Reported in the pass that runs before anything is written, and on the
+	// dry run that exists to be read first — so the plan can be fixed while
+	// fixing it is still free.
+	a.warnPlanCodeText(entries)
+
 	if opts.DryRun {
 		a.applyPlan(entries, state)
 		return nil
@@ -205,6 +210,19 @@ func applyTitle(e plan.Entry) string {
 		return conventions.EpicTitlePrefix + e.Title
 	}
 	return e.Title
+}
+
+// warnPlanCodeText reports code-shaped text left as prose, per entry, so a
+// plan naming twenty files says which entry to fix rather than which token.
+func (a *App) warnPlanCodeText(entries []plan.Entry) {
+	for _, e := range entries {
+		tokens := conventions.UnmarkedCodeText(applyBody(e))
+		if len(tokens) == 0 {
+			continue
+		}
+		a.warnf("%s: not in code spans: %s — wrap them (and any command around them) in backticks",
+			e.Key(), conventions.FormatUnmarkedCodeText(tokens))
+	}
 }
 
 // applyBody composes structured section fields the same way the create

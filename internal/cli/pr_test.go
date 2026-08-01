@@ -910,3 +910,72 @@ func requireExit(t *testing.T, err error, code int, substr string) {
 		t.Errorf("err = %q, want it to contain %q", err, substr)
 	}
 }
+
+// The convention lives in help text, which the agent composing a body has
+// generally not read. So the tool says it at the moment the body is
+// written: the check names the tokens and the remedy rather than the rule.
+func TestPRWarnsAboutUnmarkedCodeText(t *testing.T) {
+	f := newFake(claimed(30, "PR creation command", "P2", "enhancement"))
+	app, _, errOut := newApp(f)
+	onBranch(app, "feat/pr-command")
+
+	err := app.PR(context.Background(), PROpts{
+		Sections: sections("Rewrites internal/cli/pr.go.", "", "go test -race ./... is green"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	warning := errOut.String()
+	for _, want := range []string{"internal/cli/pr.go", "./...", "gh pr edit"} {
+		if !strings.Contains(warning, want) {
+			t.Errorf("warning %q does not name %q", warning, want)
+		}
+	}
+	// The body itself is untouched — the author fixes it, not the tool.
+	if body := createdPR(t, f); !strings.Contains(body, "Rewrites internal/cli/pr.go.") {
+		t.Errorf("pr rewrote the author's text: %s", body)
+	}
+}
+
+// --body-file is the escape hatch for a body the sections cannot express,
+// not an escape from the convention: it composes a body the same way and is
+// checked the same way. Its own warn call is separate from the sections
+// one, so it needs its own case.
+func TestPRWarnsAboutUnmarkedCodeTextInABodyFile(t *testing.T) {
+	path := writeTemp(t, "Touch internal/cli/pr.go and run go test ./..., then check\n")
+	f := newFake(claimed(30, "one"))
+	app, _, errOut := newApp(f)
+	onBranch(app, "feat/x")
+
+	if err := app.PR(context.Background(), PROpts{BodyFile: path}); err != nil {
+		t.Fatal(err)
+	}
+	warning := errOut.String()
+	for _, want := range []string{"internal/cli/pr.go", "./...", "gh pr edit"} {
+		if !strings.Contains(warning, want) {
+			t.Errorf("warning %q does not name %q", warning, want)
+		}
+	}
+	// The hand-written body is kept verbatim; only the trailer is appended.
+	if body := prBody(t, createdPR(t, f)); !strings.HasPrefix(body, "Touch internal/cli/pr.go and run go test ./..., then check") {
+		t.Errorf("pr rewrote the author's text: %q", body)
+	}
+}
+
+// A body the author already marked up must draw no warning, or the check
+// fires forever on correct input and stops being read.
+func TestPRStaysQuietWhenCodeTextIsMarkedUp(t *testing.T) {
+	f := newFake(claimed(30, "PR creation command", "P2", "enhancement"))
+	app, _, errOut := newApp(f)
+	onBranch(app, "feat/pr-command")
+
+	err := app.PR(context.Background(), PROpts{
+		Sections: sections("Rewrites `internal/cli/pr.go`.", "", "`go test -race ./...` is green"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(errOut.String(), "code spans") {
+		t.Errorf("warned about a correctly marked-up body: %q", errOut.String())
+	}
+}

@@ -145,7 +145,22 @@ func (a *App) composeBody(src bodySource) (string, error) {
 			body = strings.TrimRight(body, "\n") + "\n\n" + link
 		}
 	}
+	a.warnUnmarkedCode(body, "hew set <n> --body-file")
 	return body, nil
+}
+
+// warnUnmarkedCode reports code-shaped text the author left as prose. The
+// convention is stated in help text, but help text is read by someone who
+// goes looking for it and the agent composing a body generally does not —
+// so the tool says it at the moment the body is written, and names the
+// remedy rather than only the rule.
+func (a *App) warnUnmarkedCode(body, remedy string) {
+	tokens := conventions.UnmarkedCodeText(body)
+	if len(tokens) == 0 {
+		return
+	}
+	a.warnf("not in code spans: %s — wrap them (and any command around them) in backticks: %s",
+		conventions.FormatUnmarkedCodeText(tokens), remedy)
 }
 
 // claimRefusal turns a tripped claim guard into the exit code that tells the

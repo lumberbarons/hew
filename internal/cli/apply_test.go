@@ -122,6 +122,35 @@ func TestApplyDryRun(t *testing.T) {
 	}
 }
 
+// A plan can name twenty files across a dozen entries, so the warning is
+// per entry and leads with the key: the author needs to know which entry to
+// fix, not just which token offended. It reports on the dry run — the pass
+// that exists to be read before anything is written.
+func TestApplyWarnsAboutUnmarkedCodeTextPerEntry(t *testing.T) {
+	fixture := `{"id":"bare","title":"Collector","type":"task","goal":"Rewrite internal/cli/pr.go, run go test ./..., then check"}
+{"id":"marked","title":"Wired","type":"task","goal":"Rewrite ` + "`internal/cli/pr.go`" + ` and run ` + "`go test ./...`" + `"}
+`
+	f, app, opts := applySetup(t, fixture)
+	opts.DryRun = true
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("dry run made API calls: %v", f.calls)
+	}
+	warning := app.ErrOut.(interface{ String() string }).String()
+	for _, want := range []string{"bare: not in code spans", "internal/cli/pr.go", "./...", "backticks"} {
+		if !strings.Contains(warning, want) {
+			t.Errorf("warning %q does not name %q", warning, want)
+		}
+	}
+	// The entry that already follows the convention must not be named, or
+	// the warning fires forever on a correct plan and stops being read.
+	if strings.Contains(warning, "marked:") {
+		t.Errorf("warned about a correctly marked-up entry: %q", warning)
+	}
+}
+
 func TestApplyResume(t *testing.T) {
 	f, app, opts := applySetup(t, applyFixture)
 	// Pretend the epic was already created as #55.

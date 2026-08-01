@@ -987,3 +987,49 @@ func TestInitJSON(t *testing.T) {
 		t.Errorf("JSON = %s", out.String())
 	}
 }
+
+// create composes issue bodies, and pr later copies those sections into the
+// PR verbatim — so the check belongs at the point the text is first written,
+// where the remedy (set --body-file) still applies cheaply.
+func TestCreateWarnsAboutUnmarkedCodeText(t *testing.T) {
+	f := newFake()
+	app, _, errOut := newApp(f)
+	err := app.Create(ctx, CreateOpts{
+		Title: "T", Type: "task",
+		Sections: conventions.Sections{
+			Goal:     "Rewrite internal/cli/write.go",
+			DoneWhen: []string{"go test -race ./... is green"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	warning := errOut.String()
+	for _, want := range []string{"internal/cli/write.go", "./...", "hew set"} {
+		if !strings.Contains(warning, want) {
+			t.Errorf("warning %q does not name %q", warning, want)
+		}
+	}
+	// Reporting, not rewriting: the stored body is exactly what was passed.
+	if body := f.byNumber(101).Body; !strings.Contains(body, "Rewrite internal/cli/write.go") {
+		t.Errorf("create rewrote the author's text: %q", body)
+	}
+}
+
+// A --body-file body is checked too. The escape hatch skips composition, not
+// the convention — and a warning cannot corrupt what it only reports on.
+func TestCreateWarnsAboutUnmarkedCodeTextInABodyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "body.md")
+	if err := os.WriteFile(path, []byte("### Goal\n\nTouch internal/gh/client.go"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := newFake()
+	app, _, errOut := newApp(f)
+	if err := app.Create(ctx, CreateOpts{Title: "T", Type: "task", BodyFile: path}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errOut.String(), "internal/gh/client.go") {
+		t.Errorf("no warning for a --body-file body: %q", errOut.String())
+	}
+}

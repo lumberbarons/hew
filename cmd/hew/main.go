@@ -213,8 +213,9 @@ func sectionsFromFlags(cmd *ucli.Command) conventions.Sections {
 
 func createCmd() *ucli.Command {
 	return &ucli.Command{
-		Name:  "create",
-		Usage: "file a new issue within the conventions",
+		Name:        "create",
+		Usage:       "file a new issue within the conventions",
+		Description: conventions.CodeSpanGuidance,
 		Flags: append([]ucli.Flag{
 			&ucli.StringFlag{Name: "title", Usage: "issue title (required)"},
 			&ucli.StringFlag{Name: "type", Usage: "bug|enhancement|task (required)"},
@@ -330,7 +331,9 @@ from what you have claimed (a number in the branch name breaks ties, and
 with exactly one "Fixes #n" so the merge closes the issue, and the base is
 the repo's default branch. What and Why default to the issue's own
 Fix/Approach and Problem/Goal sections. Push the branch first — GitHub can
-only open a PR for a ref it can see.`,
+only open a PR for a ref it can see.
+
+` + conventions.CodeSpanGuidance,
 		Flags: []ucli.Flag{
 			&ucli.IntFlag{Name: "for", Usage: "link issue `N` instead of inferring it"},
 			&ucli.StringFlag{Name: "title", Usage: "PR title (default: the issue title)"},
@@ -543,7 +546,9 @@ from the section fields — where, problem or goal, fix or approach, done-when
 (a list, one checklist item each) — composed into the body template; body
 holds raw long-form text instead (mutually exclusive with sections). Creation
 is checkpointed after every write, so a failed run resumes without duplicates;
-dependency cycles between entries are rejected before anything is written.`,
+dependency cycles between entries are rejected before anything is written.
+
+` + conventions.CodeSpanGuidance,
 		Flags: append(globalFlags(),
 			&ucli.StringFlag{Name: "state", Usage: "resume-state `FILE` (default: <plan>.state.json)"},
 			&ucli.BoolFlag{Name: "dry-run", Usage: "print the plan without creating anything"},

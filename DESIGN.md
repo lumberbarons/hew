@@ -65,6 +65,21 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
   guarantees, not taught conventions. `--body-file` is the escape hatch for
   long-form bodies with code blocks. Wording pairs pick one flag; word choice is
   never policed against the type.
+- **Code-shaped text is marked up, and the tool checks rather than guesses**:
+  commands, flags, branch names, paths and error strings are written as code
+  spans. Unlike the rest of the tool's output, issue and PR bodies are read in a
+  browser and outlive the branch, so the characters that carry the meaning — the
+  slashes, the double dashes, the braces — are worth two backticks. Composition
+  never rewrites the author's text: marking up correctly requires knowing what
+  the text *means* (is `--body-file` a flag being named, or part of `gh pr edit
+  --body-file`?), and that is not in the token stream, so a transform splits
+  compound commands and cannot be iterated out of it. Instead `create` and `pr`
+  **warn**, naming the unmarked tokens and the remedy. Reporting inverts the cost
+  of a false positive — a bad rewrite ships permanently, a bad warning costs a
+  line of stderr — which is what lets the check cover paths and identifiers that
+  no safe transform could touch. The checked shapes stay high-precision anyway: a
+  warning the author skips past is worse than none, so unbounded shapes (a bare
+  command like `go vet`) are left to the convention.
 - **Workflow**: `ready` → `start` → branch (`feat/`|`fix/`|`chore/`) → PR with
   `Fixes #n`. Closing via PR is the norm; `close` is for wontfix/duplicate.
 - **One dedup sequence**: three read paths can answer "does this already exist?",
