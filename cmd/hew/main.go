@@ -297,6 +297,7 @@ func setCmd() *ucli.Command {
 			&ucli.BoolFlag{Name: "no-parent", Usage: "detach from its epic"},
 			&ucli.StringFlag{Name: "title", Usage: "new title"},
 			&ucli.StringFlag{Name: "body-file", Usage: "replace the body with the contents of `FILE`"},
+			closedOverrideFlag(),
 		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			n, err := numberArg(cmd, "hew set <n>")
@@ -316,6 +317,7 @@ func setCmd() *ucli.Command {
 				NoParent:    cmd.Bool("no-parent"),
 				Title:       cmd.String("title"),
 				BodyFile:    cmd.String("body-file"),
+				AllowClosed: cmd.Bool("closed"),
 			})
 		},
 	}
@@ -396,6 +398,7 @@ func blockCmd() *ucli.Command {
 		ArgsUsage: "<n> --on <m>",
 		Flags: []ucli.Flag{
 			&ucli.IntFlag{Name: "on", Usage: "blocking issue `N` (required)", Required: true},
+			closedOverrideFlag(),
 		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			n, err := numberArg(cmd, "hew block <n> --on <m>")
@@ -406,7 +409,7 @@ func blockCmd() *ucli.Command {
 			if err != nil {
 				return err
 			}
-			return app.Block(ctx, n, cmd.Int("on"))
+			return app.Block(ctx, n, cmd.Int("on"), cmd.Bool("closed"))
 		},
 	}
 }
@@ -418,6 +421,7 @@ func unblockCmd() *ucli.Command {
 		ArgsUsage: "<n> --from <m>",
 		Flags: []ucli.Flag{
 			&ucli.IntFlag{Name: "from", Usage: "blocking issue `N` (required)", Required: true},
+			closedOverrideFlag(),
 		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			n, err := numberArg(cmd, "hew unblock <n> --from <m>")
@@ -428,7 +432,7 @@ func unblockCmd() *ucli.Command {
 			if err != nil {
 				return err
 			}
-			return app.Unblock(ctx, n, cmd.Int("from"))
+			return app.Unblock(ctx, n, cmd.Int("from"), cmd.Bool("closed"))
 		},
 	}
 }

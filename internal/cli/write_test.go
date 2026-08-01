@@ -402,6 +402,9 @@ func TestSetValidation(t *testing.T) {
 	exitCode(t, app.Set(ctx, 1, SetOpts{Priority: "P9"}), ExitUsage)
 	exitCode(t, app.Set(ctx, 1, SetOpts{Type: "story"}), ExitUsage)
 	exitCode(t, app.Set(ctx, 1, SetOpts{Parent: 2, NoParent: true}), ExitUsage)
+	// --closed modifies how a change is applied; it is not itself a change,
+	// so it must not satisfy the "nothing to change" check.
+	exitCode(t, app.Set(ctx, 1, SetOpts{AllowClosed: true}), ExitUsage)
 }
 
 func TestSetSwapsLabels(t *testing.T) {
@@ -546,6 +549,42 @@ func TestSetBodyFailurePropagates(t *testing.T) {
 	}
 }
 
+// TestSetRefusesClosedIssue covers #39: an issue closed by a merge mid-session
+// used to absorb a later edit without any signal, and the staleness only
+// surfaced by accident. The refusal has to name the close state (so the caller
+// can tell "closed as completed" from "closed as not planned") and land before
+// any mutation, since Set applies several in sequence.
+func TestSetRefusesClosedIssue(t *testing.T) {
+	closed := issue(1, "Work", "P2", "bug")
+	closed.State = "CLOSED"
+	closed.StateReason = "COMPLETED"
+	f := newFake(closed)
+	app, _, _ := newApp(f)
+
+	err := app.Set(ctx, 1, SetOpts{Priority: "P0", Title: "Renamed"})
+	if err == nil || !strings.Contains(err.Error(), "#1 is closed (completed)") {
+		t.Errorf("err = %v", err)
+	}
+	// The remedy belongs in the message: an agent that reads the refusal
+	// should not have to go looking through --help for the override.
+	if err != nil && !strings.Contains(err.Error(), "--closed") {
+		t.Errorf("refusal omits the override flag: %v", err)
+	}
+	i := f.byNumber(1)
+	if i.Title != "Work" {
+		t.Errorf("title mutated on a closed issue: %q", i.Title)
+	}
+	if !reflect.DeepEqual(i.Labels, []string{"P2", "bug"}) {
+		t.Errorf("labels mutated on a closed issue: %v", i.Labels)
+	}
+	for _, call := range f.calls {
+		if strings.HasPrefix(call, "AddLabels") || strings.HasPrefix(call, "RemoveLabel") ||
+			strings.HasPrefix(call, "EditTitle") || strings.HasPrefix(call, "EditBody") {
+			t.Errorf("refused set still mutated: %s", call)
+		}
+	}
+}
+
 func TestCloseNotPlanned(t *testing.T) {
 	f := newFake(issue(1, "Work", "P2", "bug"))
 	app, out, _ := newApp(f)
@@ -611,10 +650,41 @@ func TestCloseValidation(t *testing.T) {
 	}
 }
 
+// TestCloseReportsExistingCloseState covers #39: close already refused an
+// already-closed issue, but said only "already closed" — which leaves the
+// caller unable to tell a completed issue from one closed as not planned, the
+// distinction that decides whether re-closing was a mistake at all.
+func TestCloseReportsExistingCloseState(t *testing.T) {
+	completed := issue(1, "Done", "P2", "bug")
+	completed.State = "CLOSED"
+	completed.StateReason = "COMPLETED"
+	// GitHub records no state reason on issues closed before the field
+	// existed, and reports none for them.
+	reasonless := issue(2, "Ancient", "P2", "bug")
+	reasonless.State = "CLOSED"
+	f := newFake(completed, reasonless)
+	app, _, _ := newApp(f)
+
+	err := app.Close(ctx, 1, "r", false, 0)
+	if err == nil || !strings.Contains(err.Error(), "#1 is already closed (completed)") {
+		t.Errorf("err = %v", err)
+	}
+	err = app.Close(ctx, 2, "r", false, 0)
+	if err == nil || !strings.Contains(err.Error(), "#2 is already closed") {
+		t.Errorf("err = %v", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "()") {
+		t.Errorf("absent state reason rendered as empty parentheses: %v", err)
+	}
+	if len(f.comments[1]) != 0 || len(f.comments[2]) != 0 {
+		t.Errorf("refused close still commented: %v %v", f.comments[1], f.comments[2])
+	}
+}
+
 func TestBlock(t *testing.T) {
 	f := newFake(issue(1, "A", "P2", "bug"), issue(2, "B", "P2", "bug"))
 	app, out, _ := newApp(f)
-	if err := app.Block(ctx, 1, 2); err != nil {
+	if err := app.Block(ctx, 1, 2, false); err != nil {
 		t.Fatal(err)
 	}
 	i := f.byNumber(1)
@@ -633,7 +703,7 @@ func TestBlockRefusesCycle(t *testing.T) {
 	c.BlockedBy = []model.Ref{{Number: 1, State: "OPEN"}}
 	f := newFake(issue(1, "A", "P2", "bug"), b, c)
 	app, _, _ := newApp(f)
-	err := app.Block(ctx, 1, 2)
+	err := app.Block(ctx, 1, 2, false)
 	if err == nil || !strings.Contains(err.Error(), "cycle #1 → #2 → #3 → #1") {
 		t.Errorf("err = %v", err)
 	}
@@ -645,7 +715,7 @@ func TestBlockRefusesCycle(t *testing.T) {
 func TestBlockRefusesSelfBlock(t *testing.T) {
 	f := newFake(issue(1, "A", "P2", "bug"))
 	app, _, _ := newApp(f)
-	err := app.Block(ctx, 1, 1)
+	err := app.Block(ctx, 1, 1, false)
 	if err == nil || !strings.Contains(err.Error(), "cycle #1 → #1") {
 		t.Errorf("err = %v", err)
 	}
@@ -661,7 +731,7 @@ func TestBlockRefusesTwoCycle(t *testing.T) {
 	b.BlockedBy = []model.Ref{{Number: 1, State: "OPEN"}}
 	f := newFake(issue(1, "A", "P2", "bug"), b)
 	app, _, _ := newApp(f)
-	err := app.Block(ctx, 1, 2)
+	err := app.Block(ctx, 1, 2, false)
 	if err == nil || !strings.Contains(err.Error(), "cycle #1 → #2 → #1") {
 		t.Errorf("err = %v", err)
 	}
@@ -679,7 +749,7 @@ func TestBlockRefusesWhenCycleCheckUnverifiable(t *testing.T) {
 	b.BlockedByTotal = 25
 	f := newFake(issue(1, "A", "P2", "bug"), b, issue(3, "C", "P2", "bug"))
 	app, _, _ := newApp(f)
-	err := app.Block(ctx, 1, 2)
+	err := app.Block(ctx, 1, 2, false)
 	if err == nil || !strings.Contains(err.Error(), "cannot verify") {
 		t.Errorf("err = %v", err)
 	}
@@ -693,7 +763,7 @@ func TestBlockAlreadyBlocked(t *testing.T) {
 	a.BlockedBy = []model.Ref{{Number: 2, State: "OPEN"}}
 	f := newFake(a, issue(2, "B", "P2", "bug"))
 	app, out, _ := newApp(f)
-	if err := app.Block(ctx, 1, 2); err != nil {
+	if err := app.Block(ctx, 1, 2, false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "already blocked") {
@@ -709,11 +779,89 @@ func TestBlockRequiresOpenIssues(t *testing.T) {
 	closed.State = "CLOSED"
 	f := newFake(issue(1, "A", "P2", "bug"), closed)
 	app, _, _ := newApp(f)
-	if err := app.Block(ctx, 1, 2); err == nil || !strings.Contains(err.Error(), "closed blockers don't block") {
+	if err := app.Block(ctx, 1, 2, false); err == nil || !strings.Contains(err.Error(), "closed blockers don't block") {
 		t.Errorf("err = %v", err)
 	}
-	if err := app.Block(ctx, 99, 1); err == nil || !strings.Contains(err.Error(), "not an open issue") {
+	if err := app.Block(ctx, 99, 1, false); err == nil || !strings.Contains(err.Error(), "not an open issue") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// TestBlockRefusesClosedTarget covers #39. Block's old message for a closed
+// target was "not an open issue in <repo>", which reads as "no such issue" —
+// the caller cannot tell a typo'd number from a target that was closed out
+// from under them, and only one of those is worth retrying with --closed.
+func TestBlockRefusesClosedTarget(t *testing.T) {
+	closed := issue(1, "A", "P2", "bug")
+	closed.State = "CLOSED"
+	closed.StateReason = "NOT_PLANNED"
+	f := newFake(closed, issue(2, "B", "P2", "bug"))
+	app, _, _ := newApp(f)
+
+	err := app.Block(ctx, 1, 2, false)
+	if err == nil || !strings.Contains(err.Error(), "#1 is closed (not planned)") {
+		t.Errorf("err = %v", err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "--closed") {
+		t.Errorf("refusal omits the override flag: %v", err)
+	}
+	if got := f.byNumber(1).BlockedBy; len(got) != 0 {
+		t.Errorf("edge added to a closed issue: %v", got)
+	}
+}
+
+// TestUnblockRefusesClosedTarget covers #39. Unblock is the case where a silent
+// success is most misleading: the edge really is gone from a closed issue, so
+// nothing looks wrong until someone reopens it.
+func TestUnblockRefusesClosedTarget(t *testing.T) {
+	closed := issue(1, "A", "P2", "bug")
+	closed.State = "CLOSED"
+	closed.StateReason = "COMPLETED"
+	closed.BlockedBy = []model.Ref{{Number: 2, State: "OPEN"}}
+	f := newFake(closed, issue(2, "B", "P2", "bug"))
+	app, _, _ := newApp(f)
+
+	err := app.Unblock(ctx, 1, 2, false)
+	if err == nil || !strings.Contains(err.Error(), "#1 is closed (completed)") {
+		t.Errorf("err = %v", err)
+	}
+	if got := f.byNumber(1).BlockedBy; len(got) != 1 {
+		t.Errorf("edge removed from a closed issue: %v", got)
+	}
+	for _, call := range f.calls {
+		if strings.HasPrefix(call, "RemoveBlockedBy") {
+			t.Errorf("refused unblock still mutated: %s", call)
+		}
+	}
+}
+
+// TestWriteCommandsEditClosedWithOverride is the other half of the guard: the
+// rare deliberate edit of a closed issue has to remain possible, or the guard
+// just moves the work to the web UI where none of the conventions apply.
+func TestWriteCommandsEditClosedWithOverride(t *testing.T) {
+	closed := issue(1, "Work", "P2", "bug")
+	closed.State = "CLOSED"
+	closed.StateReason = "COMPLETED"
+	f := newFake(closed, issue(2, "B", "P2", "bug"))
+	app, _, _ := newApp(f)
+
+	if err := app.Set(ctx, 1, SetOpts{Priority: "P0", AllowClosed: true}); err != nil {
+		t.Fatalf("set with override: %v", err)
+	}
+	if got := f.byNumber(1).Labels; !slices.Contains(got, "P0") {
+		t.Errorf("override set did not apply: %v", got)
+	}
+	if err := app.Block(ctx, 1, 2, true); err != nil {
+		t.Fatalf("block with override: %v", err)
+	}
+	if got := f.byNumber(1).BlockedBy; len(got) != 1 {
+		t.Errorf("override block did not apply: %v", got)
+	}
+	if err := app.Unblock(ctx, 1, 2, true); err != nil {
+		t.Fatalf("unblock with override: %v", err)
+	}
+	if got := f.byNumber(1).BlockedBy; len(got) != 0 {
+		t.Errorf("override unblock did not apply: %v", got)
 	}
 }
 
@@ -722,7 +870,7 @@ func TestUnblock(t *testing.T) {
 	a.BlockedBy = []model.Ref{{Number: 2, State: "OPEN"}}
 	f := newFake(a, issue(2, "B", "P2", "bug"))
 	app, out, _ := newApp(f)
-	if err := app.Unblock(ctx, 1, 2); err != nil {
+	if err := app.Unblock(ctx, 1, 2, false); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.byNumber(1).BlockedBy) != 0 {
@@ -736,7 +884,7 @@ func TestUnblock(t *testing.T) {
 func TestUnblockNotBlocked(t *testing.T) {
 	f := newFake(issue(1, "A", "P2", "bug"), issue(2, "B", "P2", "bug"))
 	app, out, _ := newApp(f)
-	if err := app.Unblock(ctx, 1, 2); err != nil {
+	if err := app.Unblock(ctx, 1, 2, false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "not blocked") {
@@ -881,7 +1029,7 @@ func TestReportMutationWrapsRefetchFailure(t *testing.T) {
 	f.failOn["GetIssue"] = errors.New("boom") // only the JSON re-fetch calls it here
 	app, _, _ := newApp(f)
 	app.JSON = true
-	err := app.Block(ctx, 1, 2)
+	err := app.Block(ctx, 1, 2, false)
 	if err == nil || !strings.Contains(err.Error(), "was updated, but fetching the result") {
 		t.Errorf("err = %v", err)
 	}

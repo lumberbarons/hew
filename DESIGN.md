@@ -102,6 +102,17 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
   are the only per-issue warnings `prime` emits; normalization still picks a
   deterministic answer in the meantime. Cycles matter most: their members all have
   open blockers, so they'd otherwise drop out of `ready` without a trace.
+- **Closed targets are refused, not silently written.** `set`, `block` and `unblock`
+  read the issue before mutating anyway, so they check its state there and refuse a
+  closed one, naming the close reason (`#20 is closed (completed) — pass --closed to
+  edit anyway`). The motivating case: an issue closed by a PR merge mid-session
+  absorbed a later edit with no signal at all, and the staleness surfaced only by
+  accident much later. The state is in the message because it distinguishes a target
+  that moved underneath the caller from a mistyped number. `--closed` covers the rare
+  deliberate edit — a guard with no override just relocates the work to the web UI,
+  where none of these conventions are enforced. `close` on an already-closed issue
+  reports the existing state for the same reason, and takes no override: re-closing
+  has no effect to authorize.
 
 ### Read-path normalization
 
@@ -156,11 +167,14 @@ hew triage                     # untriaged issues (missing priority/type), oldes
                                   # first — work through them with `set`
 hew set <n> [--priority P0..P4] [--type bug|enhancement|task] [--add-area X]
            [--remove-area X] [--parent N | --no-parent] [--title "..."]
-           [--body-file F]
+           [--body-file F] [--closed]
                                   # retriage/edit within conventions (swaps the old
                                   # priority/type label, never stacks a second one);
                                   # --body-file replaces the whole body — an empty
-                                  # file is refused rather than blanking it
+                                  # file is refused rather than blanking it;
+                                  # a closed target is refused (naming the close
+                                  # state) unless --closed — see Enshrined
+                                  # conventions
 hew pr [--for N] [--title "..."] [--what|--why|--testing "..."]
           [--body-file F] [--base BRANCH] [--ready]
                                   # the PR step of the workflow, composed rather than
@@ -169,8 +183,8 @@ hew pr [--for N] [--title "..."] [--what|--why|--testing "..."]
                                   # exactly one "Fixes #n" (see below)
 hew close <n> --reason "..."   # comment + close (not-planned unless --completed
                                   # or --duplicate-of M)
-hew block <n> --on <m>         # add dependency (cycle-checked)
-hew unblock <n> --from <m>
+hew block <n> --on <m> [--closed]      # add dependency (cycle-checked)
+hew unblock <n> --from <m> [--closed]
 hew epic create --title "..." [--children N,N,N]
                    [section flags | --body-file F | --edit]
 hew epic status [<n>]          # progress rollup per epic
