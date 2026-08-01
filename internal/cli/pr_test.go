@@ -937,6 +937,31 @@ func TestPRWarnsAboutUnmarkedCodeText(t *testing.T) {
 	}
 }
 
+// --body-file is the escape hatch for a body the sections cannot express,
+// not an escape from the convention: it composes a body the same way and is
+// checked the same way. Its own warn call is separate from the sections
+// one, so it needs its own case.
+func TestPRWarnsAboutUnmarkedCodeTextInABodyFile(t *testing.T) {
+	path := writeTemp(t, "Touch internal/cli/pr.go and run go test ./..., then check\n")
+	f := newFake(claimed(30, "one"))
+	app, _, errOut := newApp(f)
+	onBranch(app, "feat/x")
+
+	if err := app.PR(context.Background(), PROpts{BodyFile: path}); err != nil {
+		t.Fatal(err)
+	}
+	warning := errOut.String()
+	for _, want := range []string{"internal/cli/pr.go", "./...", "gh pr edit"} {
+		if !strings.Contains(warning, want) {
+			t.Errorf("warning %q does not name %q", warning, want)
+		}
+	}
+	// The hand-written body is kept verbatim; only the trailer is appended.
+	if body := prBody(t, createdPR(t, f)); !strings.HasPrefix(body, "Touch internal/cli/pr.go and run go test ./..., then check") {
+		t.Errorf("pr rewrote the author's text: %q", body)
+	}
+}
+
 // A body the author already marked up must draw no warning, or the check
 // fires forever on correct input and stops being read.
 func TestPRStaysQuietWhenCodeTextIsMarkedUp(t *testing.T) {
