@@ -20,6 +20,14 @@ func TestUnmarkedCodeTextFindsCodeShapedTokens(t *testing.T) {
 		{"package wildcard", "go test -race ./... is green", []string{"./..."}},
 		{"several", "--what and internal/gh/client.go", []string{"--what", "internal/gh/client.go"}},
 		{"deduplicated", "--title then --title again", []string{"--title"}},
+		// The wildcard is punctuation all the way down, so any clause mark
+		// after it used to take the token's own dots with it and the check
+		// went quiet on the shape it most wants to catch.
+		{"wildcard then comma", "run go test ./..., then check", []string{"./..."}},
+		{"wildcard ending a sentence", "run go test ./....", []string{"./..."}},
+		{"wildcard in brackets", "the suite (./...) is green", []string{"./..."}},
+		{"path ending a sentence", "it lives in internal/cli/pr.go.", []string{"internal/cli/pr.go"}},
+		{"quoted flag", "the \"--title\" flag", []string{"--title"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

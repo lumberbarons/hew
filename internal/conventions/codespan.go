@@ -69,14 +69,8 @@ func UnmarkedCodeText(body string) []string {
 	seen := map[string]bool{}
 	for _, segment := range outsideCode(body) {
 		for _, token := range strings.Fields(segment) {
-			// The raw token is judged first: trimming punctuation is what
-			// lets "--title." be recognised, but it would also dismantle
-			// "./...", which is punctuation all the way down.
-			core := token
-			if !isCodeShaped(core) {
-				core = trimPunctuation(token)
-			}
-			if core == "" || seen[core] || !isCodeShaped(core) {
+			core := codeShapedCore(token)
+			if core == "" || seen[core] {
 				continue
 			}
 			seen[core] = true
@@ -95,10 +89,40 @@ func isCodeShaped(token string) bool {
 	return false
 }
 
-// trimPunctuation strips the characters prose wraps a token in, so a token
-// ending a sentence is judged on the token.
-func trimPunctuation(token string) string {
-	return strings.Trim(token, "([\"'.,;:)]")
+// wrapPunctuation is what prose wraps a token in: brackets, quotes and the
+// marks that end a clause.
+const wrapPunctuation = "([\"'.,;:)]"
+
+func isWrapPunctuation(b byte) bool {
+	return strings.IndexByte(wrapPunctuation, b) >= 0
+}
+
+// codeShapedCore returns the code-shaped reading of a token, or "" when it has
+// none. The raw token is judged first, then readings with wrapping punctuation
+// peeled off one character at a time from each end, longest first.
+//
+// Peeling one character at a time rather than trimming a whole cutset is what
+// separates "./...," — the wildcard with a comma after it — from "./..."
+// itself, which is punctuation all the way down. Trimming the cutset off both
+// ends dismantles the wildcard to "/" and the check goes quiet on the token it
+// most wants to catch, while "--title." survives because a flag has letters to
+// stop the trim at. Longest first so the reading keeps every character the
+// shape claims: "./..." wins over the "/" hiding inside it.
+func codeShapedCore(token string) string {
+	for start := 0; start < len(token); start++ {
+		if start > 0 && !isWrapPunctuation(token[start-1]) {
+			break
+		}
+		for end := len(token); end > start; end-- {
+			if end < len(token) && !isWrapPunctuation(token[end]) {
+				break
+			}
+			if candidate := token[start:end]; isCodeShaped(candidate) {
+				return candidate
+			}
+		}
+	}
+	return ""
 }
 
 // outsideCode returns the parts of a body that are not inside a fenced block
