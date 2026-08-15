@@ -46,6 +46,29 @@ hew start 42      # claim it: assign @me + in-progress (refuses claimed work: ex
 hew pr            # draft PR for the claimed issue, body composed, "Fixes #42" enforced
 ```
 
+## Session-start agents
+
+`hew prime` works with both Claude Code and Codex.
+
+- **Claude Code:** `hew hooks install` adds a SessionStart hook to the
+  project's `.claude/settings.json`.
+- **Codex:** create the project's `.codex/hooks.json` with a SessionStart
+  command hook running `hew prime`:
+
+  ```json
+  {
+    "hooks": {
+      "SessionStart": [{
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [{"type": "command", "command": "hew prime"}]
+      }]
+    }
+  }
+  ```
+
+  Codex requires project hooks to be trusted; review and enable it with
+  `/hooks`. `hew hooks install` currently manages the Claude Code file only.
+
 `hew ready` prints one line per issue, so you can tell it worked:
 
 ```
