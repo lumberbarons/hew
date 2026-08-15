@@ -40,6 +40,10 @@ func usageErr(format string, args ...any) *ExitError {
 	return &ExitError{Code: ExitUsage, Message: fmt.Sprintf(format, args...)}
 }
 
+// UsageError lets command wiring report a usage failure with the same exit
+// contract as command-layer validation.
+func UsageError(format string, args ...any) *ExitError { return usageErr(format, args...) }
+
 func genericErr(format string, args ...any) *ExitError {
 	return &ExitError{Code: ExitGeneric, Message: fmt.Sprintf(format, args...)}
 }

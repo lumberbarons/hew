@@ -499,32 +499,50 @@ func hooksApp(cmd *ucli.Command) (*appcli.App, string, error) {
 func hooksCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:  "hooks",
-		Usage: "manage the Claude Code SessionStart hook that runs `hew prime`",
+		Usage: "manage Claude Code or Codex SessionStart hooks that run `hew prime`",
 		Commands: []*ucli.Command{
 			{
-				Name:  "install",
-				Usage: "add the hook to this project's .claude/settings.json",
+				Name:      "install",
+				Usage:     "add the hook for `claude` or `codex`",
+				ArgsUsage: "<claude|codex>",
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
+					agent, err := hookAgentArg(cmd, "hew hooks install <claude|codex>")
+					if err != nil {
+						return err
+					}
 					app, root, err := hooksApp(cmd)
 					if err != nil {
 						return err
 					}
-					return app.HooksInstall(root)
+					return app.HooksInstall(root, agent)
 				},
 			},
 			{
-				Name:  "remove",
-				Usage: "remove the hook again",
+				Name:      "remove",
+				Usage:     "remove the hook for `claude` or `codex`",
+				ArgsUsage: "<claude|codex>",
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
+					agent, err := hookAgentArg(cmd, "hew hooks remove <claude|codex>")
+					if err != nil {
+						return err
+					}
 					app, root, err := hooksApp(cmd)
 					if err != nil {
 						return err
 					}
-					return app.HooksRemove(root)
+					return app.HooksRemove(root, agent)
 				},
 			},
 		},
 	}
+}
+
+func hookAgentArg(cmd *ucli.Command, usage string) (appcli.HookAgent, error) {
+	args := cmd.Args().Slice()
+	if len(args) != 1 {
+		return "", appcli.UsageError("usage: %s", usage)
+	}
+	return appcli.ParseHookAgent(args[0])
 }
 
 func applyCmd() *ucli.Command {

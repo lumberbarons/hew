@@ -16,6 +16,25 @@ const primeHookCommand = "hew prime"
 
 const hookEvent = "SessionStart"
 
+// HookAgent is an agent whose project-level session-start configuration hew
+// manages.
+type HookAgent string
+
+const (
+	HookAgentClaude HookAgent = "claude"
+	HookAgentCodex  HookAgent = "codex"
+)
+
+// ParseHookAgent accepts the agents whose hook file formats hew supports.
+func ParseHookAgent(value string) (HookAgent, error) {
+	switch HookAgent(value) {
+	case HookAgentClaude, HookAgentCodex:
+		return HookAgent(value), nil
+	default:
+		return "", usageErr("agent must be claude or codex")
+	}
+}
+
 // FindProjectRoot walks up from start until it finds the directory
 // containing .git (a directory in a normal checkout, a file in a
 // worktree). Project-level Claude Code settings live at its .claude/.
@@ -36,11 +55,16 @@ func FindProjectRoot(start string) (string, error) {
 	}
 }
 
-// HooksInstall adds a SessionStart hook running `hew prime` to the
-// project's .claude/settings.json, creating the file if needed and leaving
+// HooksInstall adds a SessionStart hook running `hew prime` to the selected
+// agent's project configuration, creating the file if needed and leaving
 // everything else in it untouched. Idempotent.
-func (a *App) HooksInstall(projectRoot string) error {
-	path := settingsPath(projectRoot)
+func (a *App) HooksInstall(projectRoot string, agent HookAgent) error {
+	var err error
+	agent, err = ParseHookAgent(string(agent))
+	if err != nil {
+		return err
+	}
+	path := hooksPath(projectRoot, agent)
 	settings, err := readSettings(path)
 	if err != nil {
 		return err
@@ -51,19 +75,24 @@ func (a *App) HooksInstall(projectRoot string) error {
 			return err
 		}
 	}
-	return a.emitResult(map[string]any{"installed": changed, "path": path}, func() {
+	return a.emitResult(map[string]any{"agent": agent, "installed": changed, "path": path}, func() {
 		if changed {
-			a.printf("installed %s hook running `%s` in %s\n", hookEvent, primeHookCommand, path)
+			a.printf("installed %s %s hook running `%s` in %s\n", agent, hookEvent, primeHookCommand, path)
 		} else {
-			a.printf("%s hook already installed in %s\n", hookEvent, path)
+			a.printf("%s %s hook already installed in %s\n", agent, hookEvent, path)
 		}
 	})
 }
 
-// HooksRemove strips the `hew prime` hook again, pruning any structures
-// it leaves empty.
-func (a *App) HooksRemove(projectRoot string) error {
-	path := settingsPath(projectRoot)
+// HooksRemove strips the selected agent's `hew prime` hook again, pruning any
+// structures it leaves empty.
+func (a *App) HooksRemove(projectRoot string, agent HookAgent) error {
+	var err error
+	agent, err = ParseHookAgent(string(agent))
+	if err != nil {
+		return err
+	}
+	path := hooksPath(projectRoot, agent)
 	settings, err := readSettings(path)
 	if err != nil {
 		return err
@@ -74,16 +103,19 @@ func (a *App) HooksRemove(projectRoot string) error {
 			return err
 		}
 	}
-	return a.emitResult(map[string]any{"removed": changed, "path": path}, func() {
+	return a.emitResult(map[string]any{"agent": agent, "removed": changed, "path": path}, func() {
 		if changed {
-			a.printf("removed %s hook from %s\n", hookEvent, path)
+			a.printf("removed %s %s hook from %s\n", agent, hookEvent, path)
 		} else {
-			a.printf("no %s hook found in %s\n", hookEvent, path)
+			a.printf("no %s %s hook found in %s\n", agent, hookEvent, path)
 		}
 	})
 }
 
-func settingsPath(projectRoot string) string {
+func hooksPath(projectRoot string, agent HookAgent) string {
+	if agent == HookAgentCodex {
+		return filepath.Join(projectRoot, ".codex", "hooks.json")
+	}
 	return filepath.Join(projectRoot, ".claude", "settings.json")
 }
 

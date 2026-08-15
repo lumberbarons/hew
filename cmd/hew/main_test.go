@@ -164,6 +164,19 @@ func findCommand(t *testing.T, cmd *ucli.Command, path ...string) *ucli.Command 
 	return cmd
 }
 
+func TestHooksRequireAgent(t *testing.T) {
+	for _, args := range [][]string{
+		{"hew", "hooks", "install"},
+		{"hew", "hooks", "remove"},
+		{"hew", "hooks", "install", "other"},
+	} {
+		err := root().Run(context.Background(), args)
+		if appcli.ExitCode(err) != appcli.ExitUsage {
+			t.Errorf("%v exit = %d, err = %v", args, appcli.ExitCode(err), err)
+		}
+	}
+}
+
 // TestRepoFlagReachesCommand covers #25: the global --repo must reach the
 // command in either position. Before the fix, `hew --repo owner/name <cmd>`
 // parsed without error but the leaf's own shadowing --repo flag stayed empty,

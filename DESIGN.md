@@ -190,9 +190,9 @@ hew apply <plan.jsonl>         # batch-create from a JSONL plan: one entry per l
                                   # complete check, since pre-existing issues can't
                                   # reference entries that don't exist yet.
 hew init                       # bootstrap labels in a repo; print CLAUDE.md snippet
-hew hooks install|remove       # Claude Code SessionStart hook running `hew prime`
-                                  # in the project's .claude/settings.json; Codex has
-                                  # a compatible project hook configuration (README)
+hew hooks install|remove <claude|codex>
+                                  # SessionStart hook running `hew prime` in the selected
+                                  # agent's project configuration
 hew migrate beads              # import a beads (bd) database from .beads/issues.jsonl
                                   # (parsed raw — no bd dependency): P0-P4 and types map
                                   # to labels, blocks→blocked-by, parent-child→sub-issues,
