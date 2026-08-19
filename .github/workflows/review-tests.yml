@@ -6,11 +6,20 @@ name: review-tests
 # does occasionally surface something the first missed, but not reliably enough
 # to be worth a review per push. Draft PRs are skipped entirely, so the single
 # run lands when the PR is marked ready (or opened non-draft). Push a large
-# batch of new tests after that and want another pass? Ask for one:
+# batch of new tests after that and want another pass? Ask for one, either by
+# commenting `@claude review tests` on the PR or with
 # `gh workflow run review-tests.yml -f pr=<number>`.
+#
+# The comment trigger is the phrase, not a bare `@claude` mention: that leaves
+# the plain mention free for a general-purpose assistant workflow later, so
+# asking Claude an unrelated question on a PR doesn't launch a test review. Only
+# comments from the repo owner, members, and collaborators trigger a run —
+# anyone can comment on a public repo, and each run spends API credits.
 on:
   pull_request:
     types: [opened, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       pr:
@@ -23,20 +32,28 @@ permissions:
   id-token: write
 
 concurrency:
-  group: review-tests-${{ github.event.pull_request.number || inputs.pr }}
+  group: review-tests-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
   cancel-in-progress: true
 
 jobs:
   review-tests:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    # A comment asking for a review is honoured even on a draft — the ask is
+    # explicit, so the draft skip that applies to automatic runs doesn't.
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       contains(github.event.comment.body, '@claude review tests') &&
+       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     env:
-      PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+      PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          # Explicit head ref so a manual re-review checks out the PR rather
-          # than the branch the workflow was dispatched from.
+          # Explicit head ref: a re-review asked for by comment or dispatch
+          # would otherwise check out the default branch, not the PR.
           ref: refs/pull/${{ env.PR_NUMBER }}/head
           fetch-depth: 1
 
