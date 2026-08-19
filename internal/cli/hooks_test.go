@@ -174,13 +174,14 @@ func TestHooksJSONOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got struct {
+		Agent     string `json:"agent"`
 		Installed bool   `json:"installed"`
 		Path      string `json:"path"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if !got.Installed || !strings.HasSuffix(got.Path, filepath.Join(".claude", "settings.json")) {
+	if got.Agent != string(HookAgentClaude) || !got.Installed || !strings.HasSuffix(got.Path, filepath.Join(".claude", "settings.json")) {
 		t.Errorf("JSON = %+v", got)
 	}
 }
@@ -189,6 +190,14 @@ func TestHooksInstallCodex(t *testing.T) {
 	app, _, root := hooksApp(t)
 	if err := app.HooksInstall(root, HookAgentCodex); err != nil {
 		t.Fatal(err)
+	}
+	codexPath := filepath.Join(root, ".codex", "hooks.json")
+	if _, err := os.Stat(codexPath); err != nil {
+		t.Fatalf("Codex hook file missing: %v", err)
+	}
+	claudePath := filepath.Join(root, ".claude", "settings.json")
+	if _, err := os.Stat(claudePath); !os.IsNotExist(err) {
+		t.Fatalf("Codex install wrote Claude settings: %v", err)
 	}
 	if err := app.HooksInstall(root, HookAgentCodex); err != nil {
 		t.Fatal(err)
