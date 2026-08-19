@@ -18,7 +18,7 @@ func TestReadyListsSorted(t *testing.T) {
 		issue(3, "Claimed", "P1", "bug", "in-progress"),
 	)
 	app, out, _ := newApp(f)
-	if err := app.Ready(ctx); err != nil {
+	if err := app.Ready(ctx, ReadyOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -30,7 +30,7 @@ func TestReadyListsSorted(t *testing.T) {
 func TestReadyNoWork(t *testing.T) {
 	f := newFake(issue(3, "Claimed", "P1", "bug", "in-progress"))
 	app, out, _ := newApp(f)
-	if err := app.Ready(ctx); err != nil {
+	if err := app.Ready(ctx, ReadyOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != "no ready work\n" {
@@ -45,7 +45,7 @@ func TestReadyWarnsOnCycle(t *testing.T) {
 	b.BlockedBy = []model.Ref{{Number: 1, State: "OPEN"}}
 	f := newFake(a, b)
 	app, out, errOut := newApp(f)
-	if err := app.Ready(ctx); err != nil {
+	if err := app.Ready(ctx, ReadyOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(errOut.String(), "dependency cycle #1 → #2 → #1") {
@@ -65,7 +65,7 @@ func TestReadyWarnsOnTruncatedBlockers(t *testing.T) {
 	a.BlockedByTotal = 25
 	f := newFake(a)
 	app, _, errOut := newApp(f)
-	if err := app.Ready(ctx); err != nil {
+	if err := app.Ready(ctx, ReadyOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(errOut.String(), "#1 has 25 blockers, only 1 fetched") {
@@ -77,7 +77,7 @@ func TestReadyJSON(t *testing.T) {
 	f := newFake(issue(1, "Work", "P2", "bug"))
 	app, out, _ := newApp(f)
 	app.JSON = true
-	if err := app.Ready(ctx); err != nil {
+	if err := app.Ready(ctx, ReadyOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -90,6 +90,110 @@ func TestReadyJSON(t *testing.T) {
 	}
 	if got["number"].(float64) != 1 || got["priority"] != "P2" {
 		t.Errorf("JSON = %s", out.String())
+	}
+}
+
+func TestReadyLimitCapsAndWarns(t *testing.T) {
+	f := newFake(
+		issue(1, "Normal work", "P2", "bug"),
+		issue(2, "Urgent", "P0", "task"),
+		issue(3, "Middling", "P1", "bug"),
+	)
+	app, out, errOut := newApp(f)
+	if err := app.Ready(ctx, ReadyOpts{Limit: 2}); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d:\n%s", len(lines), out.String())
+	}
+	// The cap keeps the top of the priority sort, not an arbitrary slice.
+	if !strings.HasPrefix(lines[0], "#2") || !strings.HasPrefix(lines[1], "#3") {
+		t.Errorf("Ready output:\n%s", out.String())
+	}
+	if !strings.Contains(errOut.String(), "showing 2 of 3") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+func TestReadyLimitZeroPrintsAll(t *testing.T) {
+	f := newFake(
+		issue(1, "Normal work", "P2", "bug"),
+		issue(2, "Urgent", "P0", "task"),
+		issue(3, "Middling", "P1", "bug"),
+	)
+	app, out, errOut := newApp(f)
+	if err := app.Ready(ctx, ReadyOpts{Limit: 0}); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d:\n%s", len(lines), out.String())
+	}
+	if errOut.String() != "" {
+		t.Errorf("unlimited must not warn; stderr = %q", errOut.String())
+	}
+}
+
+func TestReadyExactLimitDoesNotWarn(t *testing.T) {
+	f := newFake(
+		issue(1, "Normal work", "P2", "bug"),
+		issue(2, "Urgent", "P0", "task"),
+	)
+	app, out, errOut := newApp(f)
+	if err := app.Ready(ctx, ReadyOpts{Limit: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if len(strings.Split(strings.TrimSpace(out.String()), "\n")) != 2 {
+		t.Errorf("Ready output:\n%s", out.String())
+	}
+	if errOut.String() != "" {
+		t.Errorf("nothing was truncated; stderr = %q", errOut.String())
+	}
+}
+
+func TestReadyLimitWarnsOnStderrUnderJSON(t *testing.T) {
+	f := newFake(
+		issue(1, "Normal work", "P2", "bug"),
+		issue(2, "Urgent", "P0", "task"),
+	)
+	app, out, errOut := newApp(f)
+	app.JSON = true
+	if err := app.Ready(ctx, ReadyOpts{Limit: 1}); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 NDJSON line, got %d:\n%s", len(lines), out.String())
+	}
+	// stdout stays a clean NDJSON stream: the warning must not land in it.
+	var got map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &got); err != nil {
+		t.Fatalf("invalid NDJSON line: %v\n%s", err, lines[0])
+	}
+	if got["number"].(float64) != 2 {
+		t.Errorf("expected the P0 issue, got %s", lines[0])
+	}
+	if !strings.Contains(errOut.String(), "showing 1 of 2") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+func TestReadyRejectsNegativeLimit(t *testing.T) {
+	f := newFake(issue(1, "Work", "P2", "bug"))
+	app, out, _ := newApp(f)
+	err := app.Ready(ctx, ReadyOpts{Limit: -1})
+	usageError(t, err, "--limit must be 0 or greater")
+	if out.String() != "" {
+		t.Errorf("nothing should be printed; stdout = %q", out.String())
+	}
+}
+
+func TestDefaultReadyLimitExceedsPrimeCap(t *testing.T) {
+	// prime caps its ready section and points at `hew ready` for the rest; a
+	// ready default at or below that cap would make the pointer useless.
+	if DefaultReadyLimit <= primeReadyCap {
+		t.Errorf("DefaultReadyLimit = %d, primeReadyCap = %d", DefaultReadyLimit, primeReadyCap)
 	}
 }
 

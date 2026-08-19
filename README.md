@@ -58,7 +58,8 @@ If any command exits `4`, authenticate first with `gh auth login`.
 
 ```
 hew prime                      # session-start context for agents
-hew ready                      # open, non-epic, zero open blockers; P0→P4 then P?
+hew ready [--limit N]          # open, non-epic, zero open blockers; P0→P4 then P?
+                                  # capped at 30 by default (0 for all); truncation warns
 hew list [--label X] [--epic N] [--state open|closed|all]
             [--bodies]           # with --json: body on every line, dedup in one call
                                   # (--closed is an alias for --state closed)

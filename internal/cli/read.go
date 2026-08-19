@@ -29,9 +29,27 @@ const (
 	stateAll    = "all"
 )
 
+// DefaultReadyLimit caps `ready` output unless the caller says otherwise. It
+// sits above primeReadyCap on purpose: the primer truncates its own ready
+// section and points at `hew ready` for the rest, so a cap at or below that
+// one would leave the pointer pointing at nothing new.
+const DefaultReadyLimit = 30
+
+// ReadyOpts filters ready output.
+type ReadyOpts struct {
+	// Limit caps how many issues are printed; 0 means unlimited. Capping is
+	// safe because model.Ready is priority-sorted — the top N is the top N by
+	// priority — but it is never silent: ready is the queue agents branch on,
+	// and a truncated list read as complete reads as an empty backlog.
+	Limit int
+}
+
 // Ready lists open, non-epic, unclaimed issues with zero open blockers.
 // No results is exit 0: an empty queue is an answer, not an error.
-func (a *App) Ready(ctx context.Context) error {
+func (a *App) Ready(ctx context.Context, opts ReadyOpts) error {
+	if opts.Limit < 0 {
+		return usageErr("--limit must be 0 or greater")
+	}
 	issues, err := a.Client.ListIssues(ctx, openStates)
 	if err != nil {
 		return err
@@ -42,6 +60,10 @@ func (a *App) Ready(ctx context.Context) error {
 		a.warnf("%s", render.FormatWarning(w))
 	}
 	ready := model.Ready(issues)
+	if opts.Limit > 0 && len(ready) > opts.Limit {
+		a.warnf("showing %d of %d ready issues; --limit 0 for all", opts.Limit, len(ready))
+		ready = ready[:opts.Limit]
+	}
 	return a.emitList(ready, "no ready work", render.List)
 }
 

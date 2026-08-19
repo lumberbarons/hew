@@ -113,12 +113,19 @@ func readyCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:  "ready",
 		Usage: "open, non-epic issues with zero open blockers, priority-sorted",
+		Flags: []ucli.Flag{
+			&ucli.IntFlag{
+				Name:  "limit",
+				Value: appcli.DefaultReadyLimit,
+				Usage: "print at most `N` issues (0 for all); truncation warns on stderr",
+			},
+		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
 			if err != nil {
 				return err
 			}
-			return app.Ready(ctx)
+			return app.Ready(ctx, appcli.ReadyOpts{Limit: cmd.Int("limit")})
 		},
 	}
 }
