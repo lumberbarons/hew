@@ -204,9 +204,9 @@ hew apply <plan.jsonl>         # batch-create from a JSONL plan: one entry per l
                                   # complete check, since pre-existing issues can't
                                   # reference entries that don't exist yet.
 hew init                       # bootstrap labels in a repo; print CLAUDE.md snippet
-hew hooks install|remove       # Claude Code SessionStart hook running `hew prime`
-                                  # in the project's .claude/settings.json — the hook
-                                  # variant of prime's "CLAUDE.md instruction or hook"
+hew hooks install|remove <claude|codex>
+                                  # SessionStart hook running `hew prime` in the selected
+                                  # agent's project configuration
 hew migrate beads              # import a beads (bd) database from .beads/issues.jsonl
                                   # (parsed raw — no bd dependency): P0-P4 and types map
                                   # to labels, blocks→blocked-by, parent-child→sub-issues,
@@ -289,8 +289,8 @@ and any existing PR on the head, one REST create.
 ### `hew prime`
 
 The session-start ritual, modeled on `bd prime`: one command whose output an agent
-injects at the top of a session (via CLAUDE.md instruction or hook) instead of
-maintaining hand-written workflow prose. Three parts:
+injects at the top of a session (via a CLAUDE.md instruction, Claude Code hook, or
+Codex hook) instead of maintaining hand-written workflow prose. Three parts:
 
 1. **Static primer** — the conventions and workflow above, compressed to a few
    hundred tokens, including the tool's own command cheatsheet.

@@ -15,9 +15,9 @@ func hooksApp(t *testing.T) (*App, *bytes.Buffer, string) {
 	return app, out, t.TempDir()
 }
 
-func readSettingsFile(t *testing.T, root string) map[string]any {
+func readHooksFile(t *testing.T, root string, agent HookAgent) map[string]any {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(root, ".claude", "settings.json"))
+	data, err := os.ReadFile(hooksPath(root, agent))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,10 +30,10 @@ func readSettingsFile(t *testing.T, root string) map[string]any {
 
 func TestHooksInstallFresh(t *testing.T) {
 	app, out, root := hooksApp(t)
-	if err := app.HooksInstall(root); err != nil {
+	if err := app.HooksInstall(root, HookAgentClaude); err != nil {
 		t.Fatal(err)
 	}
-	settings := readSettingsFile(t, root)
+	settings := readHooksFile(t, root, HookAgentClaude)
 	entries := settings["hooks"].(map[string]any)["SessionStart"].([]any)
 	hook := entries[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)
 	if hook["command"] != "hew prime" || hook["type"] != "command" {
@@ -46,13 +46,13 @@ func TestHooksInstallFresh(t *testing.T) {
 
 func TestHooksInstallIdempotent(t *testing.T) {
 	app, _, root := hooksApp(t)
-	if err := app.HooksInstall(root); err != nil {
+	if err := app.HooksInstall(root, HookAgentClaude); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.HooksInstall(root); err != nil {
+	if err := app.HooksInstall(root, HookAgentClaude); err != nil {
 		t.Fatal(err)
 	}
-	settings := readSettingsFile(t, root)
+	settings := readHooksFile(t, root, HookAgentClaude)
 	entries := settings["hooks"].(map[string]any)["SessionStart"].([]any)
 	if len(entries) != 1 {
 		t.Errorf("hook duplicated: %v", entries)
@@ -78,10 +78,10 @@ func TestHooksInstallPreservesExistingSettings(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".claude", "settings.json"), []byte(existing), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.HooksInstall(root); err != nil {
+	if err := app.HooksInstall(root, HookAgentClaude); err != nil {
 		t.Fatal(err)
 	}
-	settings := readSettingsFile(t, root)
+	settings := readHooksFile(t, root, HookAgentClaude)
 	if _, ok := settings["permissions"]; !ok {
 		t.Error("permissions dropped")
 	}
@@ -107,7 +107,7 @@ func TestHooksInstallRefusesMalformed(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".claude", "settings.json"), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := app.HooksInstall(root)
+	err := app.HooksInstall(root, HookAgentClaude)
 	if err == nil || !strings.Contains(err.Error(), "refusing to modify") {
 		t.Errorf("err = %v", err)
 	}
@@ -115,13 +115,13 @@ func TestHooksInstallRefusesMalformed(t *testing.T) {
 
 func TestHooksRemove(t *testing.T) {
 	app, _, root := hooksApp(t)
-	if err := app.HooksInstall(root); err != nil {
+	if err := app.HooksInstall(root, HookAgentClaude); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.HooksRemove(root); err != nil {
+	if err := app.HooksRemove(root, HookAgentClaude); err != nil {
 		t.Fatal(err)
 	}
-	settings := readSettingsFile(t, root)
+	settings := readHooksFile(t, root, HookAgentClaude)
 	if _, ok := settings["hooks"]; ok {
 		t.Errorf("empty hooks object not pruned: %v", settings)
 	}
@@ -143,10 +143,10 @@ func TestHooksRemoveKeepsOtherHooks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".claude", "settings.json"), []byte(existing), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.HooksRemove(root); err != nil {
+	if err := app.HooksRemove(root, HookAgentClaude); err != nil {
 		t.Fatal(err)
 	}
-	settings := readSettingsFile(t, root)
+	settings := readHooksFile(t, root, HookAgentClaude)
 	entries := settings["hooks"].(map[string]any)["SessionStart"].([]any)
 	if len(entries) != 1 {
 		t.Fatalf("entries = %v", entries)
@@ -159,7 +159,7 @@ func TestHooksRemoveKeepsOtherHooks(t *testing.T) {
 
 func TestHooksRemoveNothingInstalled(t *testing.T) {
 	app, _, root := hooksApp(t)
-	if err := app.HooksRemove(root); err != nil {
+	if err := app.HooksRemove(root, HookAgentClaude); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".claude", "settings.json")); !os.IsNotExist(err) {
@@ -168,20 +168,88 @@ func TestHooksRemoveNothingInstalled(t *testing.T) {
 }
 
 func TestHooksJSONOutput(t *testing.T) {
-	app, out, root := hooksApp(t)
-	app.JSON = true
-	if err := app.HooksInstall(root); err != nil {
+	for _, agent := range []HookAgent{HookAgentClaude, HookAgentCodex} {
+		t.Run(string(agent), func(t *testing.T) {
+			app, out, root := hooksApp(t)
+			app.JSON = true
+			if err := app.HooksInstall(root, agent); err != nil {
+				t.Fatal(err)
+			}
+			var got struct {
+				Agent     string `json:"agent"`
+				Installed bool   `json:"installed"`
+				Path      string `json:"path"`
+			}
+			if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Agent != string(agent) || !got.Installed || !strings.HasSuffix(got.Path, hooksPath("", agent)) {
+				t.Errorf("JSON = %+v", got)
+			}
+		})
+	}
+}
+
+func TestHooksInstallCodex(t *testing.T) {
+	app, _, root := hooksApp(t)
+	if err := app.HooksInstall(root, HookAgentCodex); err != nil {
 		t.Fatal(err)
 	}
-	var got struct {
-		Installed bool   `json:"installed"`
-		Path      string `json:"path"`
+	codexPath := filepath.Join(root, ".codex", "hooks.json")
+	if _, err := os.Stat(codexPath); err != nil {
+		t.Fatalf("Codex hook file missing: %v", err)
 	}
-	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+	claudePath := filepath.Join(root, ".claude", "settings.json")
+	if _, err := os.Stat(claudePath); !os.IsNotExist(err) {
+		t.Fatalf("Codex install wrote Claude settings: %v", err)
+	}
+	if err := app.HooksInstall(root, HookAgentCodex); err != nil {
 		t.Fatal(err)
 	}
-	if !got.Installed || !strings.HasSuffix(got.Path, filepath.Join(".claude", "settings.json")) {
-		t.Errorf("JSON = %+v", got)
+	settings := readHooksFile(t, root, HookAgentCodex)
+	entries := settings["hooks"].(map[string]any)["SessionStart"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("hook duplicated: %v", entries)
+	}
+	hook := entries[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)
+	if hook["command"] != "hew prime" || hook["type"] != "command" {
+		t.Errorf("hook = %v", hook)
+	}
+}
+
+func TestHooksRemoveCodexKeepsOtherHooks(t *testing.T) {
+	app, _, root := hooksApp(t)
+	path := hooksPath(root, HookAgentCodex)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo hello"}]},{"hooks":[{"type":"command","command":"hew prime"}]}]}}`
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.HooksRemove(root, HookAgentCodex); err != nil {
+		t.Fatal(err)
+	}
+	settings := readHooksFile(t, root, HookAgentCodex)
+	entries := settings["hooks"].(map[string]any)["SessionStart"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %v", entries)
+	}
+	kept := entries[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)
+	if kept["command"] != "echo hello" {
+		t.Errorf("wrong hook removed: %v", kept)
+	}
+}
+
+func TestParseHookAgent(t *testing.T) {
+	for _, agent := range []HookAgent{HookAgentClaude, HookAgentCodex} {
+		got, err := ParseHookAgent(string(agent))
+		if err != nil || got != agent {
+			t.Errorf("ParseHookAgent(%q) = %q, %v", agent, got, err)
+		}
+	}
+	if _, err := ParseHookAgent("other"); err == nil || ExitCode(err) != ExitUsage {
+		t.Errorf("invalid agent error = %v", err)
 	}
 }
 

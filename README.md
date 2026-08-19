@@ -37,7 +37,7 @@ repository is detected from the git remote (`--repo owner/name` overrides).
 
 ```sh
 hew init          # bootstrap the label set in a repo; prints a CLAUDE.md snippet
-hew hooks install # SessionStart hook (writes the project's .claude/settings.json)
+hew hooks install claude # SessionStart hook for Claude Code (or use codex)
 hew prime         # session-start context: conventions + ready work + live state
 hew ready         # what should I work on? (priority-sorted, zero open blockers)
 hew start 42      # claim it: assign @me + in-progress (refuses claimed work: exit 3,
@@ -45,6 +45,16 @@ hew start 42      # claim it: assign @me + in-progress (refuses claimed work: ex
 # ...branch (feat/|fix/|chore/), commit, push...
 hew pr            # draft PR for the claimed issue, body composed, "Fixes #42" enforced
 ```
+
+## Session-start agents
+
+`hew prime` works with both Claude Code and Codex. Choose the agent explicitly:
+
+- **Claude Code:** `hew hooks install claude` adds a SessionStart hook to the
+  project's `.claude/settings.json`.
+- **Codex:** `hew hooks install codex` adds the equivalent hook to the
+  project's `.codex/hooks.json`. Codex requires project hooks to be trusted;
+  review and enable it with `/hooks`.
 
 `hew ready` prints one line per issue, so you can tell it worked:
 
@@ -102,10 +112,10 @@ hew apply <plan.jsonl> [--dry-run] [--state F] [--throttle D]
                                  # checkpointed and resumable (see "Plan files")
                                  # defaults: --state <plan>.state.json, --throttle 500ms
 hew init
-hew hooks install|remove      # add/remove a Claude Code SessionStart hook running
-                                 # `hew prime`. Edits the project's committed
-                                 # .claude/settings.json in place, preserving the rest
-                                 # of the file; needs a git repo to find the root
+hew hooks install|remove <claude|codex>
+                              # add/remove a SessionStart hook running `hew prime`
+                              # in the selected agent's project configuration;
+                              # preserves the rest of the file; needs a git repo
 hew migrate beads [--file F] [--state F] [--throttle D]
                      [--dry-run] [--include-closed]
                                  # import a beads (bd) database: priorities, types,

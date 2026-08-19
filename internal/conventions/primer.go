@@ -8,6 +8,8 @@ Dedup before filing: hew search <terms> (open+closed) first; hew list --json --b
 exhaustiveness matters or search may be stale; show <n> only to read a specific candidate. Then
 hew create ... --discovered-from <n>.
 
+Sandboxed sessions may not access keychain-backed GitHub credentials. If writes report auth failure but gh works elsewhere, retry outside the sandbox.
+
 Conventions (enforced by the tool's write path):
 - One priority label P0(critical)..P4(backlog), default P2; one type label bug|enhancement|task.
 - Area labels sparingly — only once several issues would share one. No title prefixes; labels carry the metadata.
