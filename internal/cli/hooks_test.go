@@ -168,21 +168,25 @@ func TestHooksRemoveNothingInstalled(t *testing.T) {
 }
 
 func TestHooksJSONOutput(t *testing.T) {
-	app, out, root := hooksApp(t)
-	app.JSON = true
-	if err := app.HooksInstall(root, HookAgentClaude); err != nil {
-		t.Fatal(err)
-	}
-	var got struct {
-		Agent     string `json:"agent"`
-		Installed bool   `json:"installed"`
-		Path      string `json:"path"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.Agent != string(HookAgentClaude) || !got.Installed || !strings.HasSuffix(got.Path, filepath.Join(".claude", "settings.json")) {
-		t.Errorf("JSON = %+v", got)
+	for _, agent := range []HookAgent{HookAgentClaude, HookAgentCodex} {
+		t.Run(string(agent), func(t *testing.T) {
+			app, out, root := hooksApp(t)
+			app.JSON = true
+			if err := app.HooksInstall(root, agent); err != nil {
+				t.Fatal(err)
+			}
+			var got struct {
+				Agent     string `json:"agent"`
+				Installed bool   `json:"installed"`
+				Path      string `json:"path"`
+			}
+			if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Agent != string(agent) || !got.Installed || !strings.HasSuffix(got.Path, hooksPath("", agent)) {
+				t.Errorf("JSON = %+v", got)
+			}
+		})
 	}
 }
 
