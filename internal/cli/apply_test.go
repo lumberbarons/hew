@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/lumberbarons/hew/internal/conventions"
 )
 
 // applyFixture covers the plan shapes: an epic with a body, a child by
@@ -96,7 +98,8 @@ func TestApplyComposesSectionBodies(t *testing.T) {
 	if err := app.Apply(ctx, opts); err != nil {
 		t.Fatal(err)
 	}
-	want := "### Goal\n\nShip it\n\n### Done when\n\n- [ ] tests pass\n\n<!-- hew:apply key=line:1 -->"
+	want := "### Goal\n\nShip it\n\n### Done when\n\n- [ ] tests pass\n\n" +
+		fmt.Sprintf("<!-- hew:apply key=line:1 digest=%s -->", fileDigest([]byte(fixture)))
 	if got := f.byNumber(101).Body; got != want {
 		t.Errorf("body = %q, want %q", got, want)
 	}
@@ -161,10 +164,11 @@ func TestApplyResume(t *testing.T) {
 	// Pretend the epic was already created as #55 with provenance.
 	epicIssue := issue(55, "Epic: Voltgo support", "P1")
 	epicIssue.ID = "ID55"
-	epicIssue.Body = "### Goal\n\nstuff\n\n" + applyProvenance("epic1")
+	epicIssue.Body = "### Goal\n\nstuff\n\n" + conventions.ProvenanceMarker(conventions.ProvenanceApply, "epic1", fileDigest([]byte(applyFixture)))
 	f.issues = append(f.issues, epicIssue)
 	digest := fileDigest([]byte(applyFixture))
 	stateJSON, _ := json.Marshal(batchState{
+		Version: batchStateVersion,
 		Repo:    "o/r",
 		Digest:  digest,
 		Mapping: map[string]int{"epic1": 55},
@@ -380,8 +384,14 @@ func TestApplyRefusesUnboundState(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := app.Apply(ctx, opts)
-	if err == nil || !strings.Contains(err.Error(), "not a valid resume-state file") {
+	if err == nil || !strings.Contains(err.Error(), "written by an older hew") {
 		t.Fatalf("err = %v", err)
+	}
+	// The message has to name a way forward, and specifically has to say that
+	// the obvious one re-creates work, or an agent will silently duplicate a
+	// half-finished plan.
+	if !strings.Contains(err.Error(), "--state") || !strings.Contains(err.Error(), "created again") {
+		t.Errorf("error names no recovery: %v", err)
 	}
 	if len(f.calls) != 0 {
 		t.Errorf("API calls made despite unbound state: %v", f.calls)
@@ -394,12 +404,12 @@ func TestApplyRefusesMismatchedDigestOrRepo(t *testing.T) {
 		want  string
 	}{
 		"mismatched repo": {
-			state: batchState{Repo: "other/repo", Digest: fileDigest([]byte(applyFixture))},
-			want:  "is for repository",
+			state: batchState{Version: batchStateVersion, Repo: "other/repo", Digest: fileDigest([]byte(applyFixture))},
+			want:  "belongs to repository",
 		},
 		"mismatched digest": {
-			state: batchState{Repo: "o/r", Digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
-			want:  "is for a different plan or snapshot",
+			state: batchState{Version: batchStateVersion, Repo: "o/r", Digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
+			want:  "was written for a different plan",
 		},
 	}
 	for name, tc := range cases {
@@ -429,6 +439,7 @@ func TestApplyPoisonedStateCannotWireEdgesOnUnrelatedIssues(t *testing.T) {
 	// but issue #42 carries no provenance marker for "scaffold".
 	digest := fileDigest([]byte(applyFixture))
 	poisoned, _ := json.Marshal(batchState{
+		Version: batchStateVersion,
 		Repo:    "o/r",
 		Digest:  digest,
 		Mapping: map[string]int{"scaffold": 42},
@@ -438,7 +449,7 @@ func TestApplyPoisonedStateCannotWireEdgesOnUnrelatedIssues(t *testing.T) {
 	}
 
 	err := app.Apply(ctx, opts)
-	if err == nil || !strings.Contains(err.Error(), "does not carry provenance") {
+	if err == nil || !strings.Contains(err.Error(), "does not carry the hew provenance marker") {
 		t.Fatalf("err = %v, want missing provenance error", err)
 	}
 
@@ -450,11 +461,133 @@ func TestApplyPoisonedStateCannotWireEdgesOnUnrelatedIssues(t *testing.T) {
 	if len(target.BlockedBy) != 0 {
 		t.Errorf("unrelated issue #42 blockedBy was modified: %+v", target.BlockedBy)
 	}
+	// Asserted as an allowlist of one rather than a denylist of the edge
+	// calls: label bootstrapping writes to the repository too, so a denylist
+	// would stay green if verification were ever reordered after it.
+	assertOnlyReads(t, f)
+}
+
+// assertOnlyReads fails if the run made any call other than the issue reads
+// verification itself performs — the precise claim "before any GitHub
+// mutation", which a per-call denylist cannot make.
+func assertOnlyReads(t *testing.T, f *fakeClient) {
+	t.Helper()
 	for _, call := range f.calls {
-		if strings.HasPrefix(call, "AddSubIssue") || strings.HasPrefix(call, "AddBlockedBy") || strings.HasPrefix(call, "CreateIssue") {
-			t.Errorf("unexpected mutating call made: %s", call)
+		if !strings.HasPrefix(call, "GetIssue") {
+			t.Errorf("call made before verification rejected the state: %s", call)
 		}
 	}
+}
+
+// A state file from a future schema must say so rather than be reported as
+// corrupt or as "written by an older hew" — the version field exists so the
+// next change to this schema has an accurate message to give.
+func TestApplyRefusesANewerStateFileVersion(t *testing.T) {
+	f, app, opts := applySetup(t, applyFixture)
+	data, _ := json.Marshal(batchState{
+		Version: batchStateVersion + 1,
+		Repo:    "o/r",
+		Digest:  fileDigest([]byte(applyFixture)),
+		Mapping: map[string]int{"epic1": 101},
+	})
+	if err := os.WriteFile(opts.StatePath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := app.Apply(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "written by a newer hew") {
+		t.Fatalf("err = %v, want a newer-version rejection", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("API calls made despite an unreadable state file: %v", f.calls)
+	}
+}
+
+// --dry-run is documented as the pass to read before the real one, so it has
+// to reach the same verdict. It reads GitHub but writes nothing, so running
+// verification in dry run costs nothing and closes the gap where a dry run
+// reported "already created" for a mapping the real run would reject.
+func TestApplyDryRunReportsAPoisonedStateFile(t *testing.T) {
+	f, app, opts := applySetup(t, applyFixture)
+	opts.DryRun = true
+	poisoned, _ := json.Marshal(batchState{
+		Version: batchStateVersion,
+		Repo:    "o/r",
+		Digest:  fileDigest([]byte(applyFixture)),
+		Mapping: map[string]int{"scaffold": 42},
+	})
+	if err := os.WriteFile(opts.StatePath, poisoned, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := app.Apply(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "does not carry the hew provenance marker") {
+		t.Fatalf("dry run err = %v, want the same rejection the real run gives", err)
+	}
+	if out := app.Out.(interface{ String() string }).String(); strings.Contains(out, "already created: scaffold") {
+		t.Errorf("dry run vouched for the poisoned mapping:\n%s", out)
+	}
+	assertOnlyReads(t, f)
+}
+
+// The digest has to be taken over the file's actual contents. Asserting
+// against a hand-written wrong digest cannot show that: a fileDigest that
+// ignored its input entirely — hashing nothing, or the path — would satisfy
+// it and every positive test too, while letting state from one plan drive a
+// run of another. So this drives two genuinely different files through a
+// real run.
+func TestApplyRejectsStateFromADifferentPlanFile(t *testing.T) {
+	f, app, opts := applySetup(t, applyFixture)
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	before := len(f.issues)
+
+	// Same run, same repo, same state file — only the plan's contents move.
+	edited := applyFixture + `{"id":"late","title":"Added later","type":"task"}` + "\n"
+	if err := os.WriteFile(opts.File, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.calls = nil
+	err := app.Apply(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "was written for a different plan") {
+		t.Fatalf("err = %v, want a rejection naming the changed plan", err)
+	}
+	if len(f.issues) != before {
+		t.Errorf("issues created against a rejected state file: %d → %d", before, len(f.issues))
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("API calls made despite a rejected state file: %v", f.calls)
+	}
+}
+
+// The marker binds the entry key, not just "hew made this". Without that,
+// a state file could point one entry at the issue another entry created in
+// the same run — same repo, same digest, real provenance — and the edges
+// would land on the wrong issue.
+func TestApplyRejectsStateMappingAnEntryToAnotherEntrysIssue(t *testing.T) {
+	f, app, opts := applySetup(t, applyFixture)
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	// #101 is the issue this plan's "epic1" entry created, marker and all.
+	digest := fileDigest([]byte(applyFixture))
+	swapped, _ := json.Marshal(batchState{
+		Version: batchStateVersion,
+		Repo:    "o/r",
+		Digest:  digest,
+		Mapping: map[string]int{"scaffold": 101},
+	})
+	if err := os.WriteFile(opts.StatePath, swapped, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.calls = nil
+	err := app.Apply(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "does not carry the hew provenance marker") {
+		t.Fatalf("err = %v, want a rejection for the mismatched key", err)
+	}
+	if !strings.Contains(err.Error(), "scaffold") {
+		t.Errorf("error does not name the offending key: %v", err)
+	}
+	assertOnlyReads(t, f)
 }
 
 func TestApplyRefusesUnknownKeyOrMissingMappedIssue(t *testing.T) {
@@ -462,6 +595,7 @@ func TestApplyRefusesUnknownKeyOrMissingMappedIssue(t *testing.T) {
 		f, app, opts := applySetup(t, applyFixture)
 		digest := fileDigest([]byte(applyFixture))
 		data, _ := json.Marshal(batchState{
+			Version: batchStateVersion,
 			Repo:    "o/r",
 			Digest:  digest,
 			Mapping: map[string]int{"ghost": 99},
@@ -470,8 +604,8 @@ func TestApplyRefusesUnknownKeyOrMissingMappedIssue(t *testing.T) {
 			t.Fatal(err)
 		}
 		err := app.Apply(ctx, opts)
-		if err == nil || !strings.Contains(err.Error(), "unknown entry key") {
-			t.Fatalf("err = %v, want unknown entry key error", err)
+		if err == nil || !strings.Contains(err.Error(), "is not in this run's selection") {
+			t.Fatalf("err = %v, want unknown-key error", err)
 		}
 		if len(f.calls) != 0 {
 			t.Errorf("API calls made: %v", f.calls)
@@ -482,6 +616,7 @@ func TestApplyRefusesUnknownKeyOrMissingMappedIssue(t *testing.T) {
 		_, app, opts := applySetup(t, applyFixture)
 		digest := fileDigest([]byte(applyFixture))
 		data, _ := json.Marshal(batchState{
+			Version: batchStateVersion,
 			Repo:    "o/r",
 			Digest:  digest,
 			Mapping: map[string]int{"epic1": 999},
@@ -505,9 +640,9 @@ func TestApplyReadsAPartialStateFile(t *testing.T) {
 	// is skipped for the wrong reason.
 	digest := fileDigest([]byte(applyFixture))
 	cases := map[string]string{
-		"mapping key omitted": fmt.Sprintf(`{"repo":"o/r","digest":%q,"edges":{"parent:998->999":true}}`, digest),
-		"mapping is null":     fmt.Sprintf(`{"repo":"o/r","digest":%q,"mapping":null,"edges":{"parent:998->999":true}}`, digest),
-		"edges is null":       fmt.Sprintf(`{"repo":"o/r","digest":%q,"mapping":{},"edges":null}`, digest),
+		"mapping key omitted": fmt.Sprintf(`{"version":1,"repo":"o/r","digest":%q,"edges":{"parent:998->999":true}}`, digest),
+		"mapping is null":     fmt.Sprintf(`{"version":1,"repo":"o/r","digest":%q,"mapping":null,"edges":{"parent:998->999":true}}`, digest),
+		"edges is null":       fmt.Sprintf(`{"version":1,"repo":"o/r","digest":%q,"mapping":{},"edges":null}`, digest),
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {

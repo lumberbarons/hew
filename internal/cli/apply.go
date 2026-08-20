@@ -19,7 +19,9 @@ type ApplyOpts struct {
 	File string
 	// StatePath is where the entry-key→issue-number mapping and the edges
 	// already wired are persisted after every write, making a failed run
-	// resumable and a finished one a quiet no-op. Empty means
+	// resumable and an unchanged finished one a quiet no-op. Bound to the
+	// repository and a digest of the plan, so an edited plan or a state file
+	// from elsewhere is refused rather than trusted (#81). Empty means
 	// File + ".state.json".
 	StatePath string
 	// DryRun prints the plan without touching GitHub.
@@ -54,9 +56,13 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	}
 
 	digest := fileDigest(data)
-	state, err := loadBatchState(opts.StatePath, a.Repo.String(), digest)
+	state, err := loadBatchState(opts.StatePath, a.Repo.String(), digest, "plan")
 	if err != nil {
 		return err
+	}
+	validKeys := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		validKeys[e.Key()] = true
 	}
 
 	// Reported in the pass that runs before anything is written, and on the
@@ -64,13 +70,16 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	// fixing it is still free.
 	a.warnPlanCodeText(entries)
 
+	// Verification reads GitHub but writes nothing, so the dry run makes the
+	// same pass: the mode whose whole point is being read before the real run
+	// has to be able to show the failure the real run would hit (#81).
+	if err := a.verifyBatchState(ctx, state, conventions.ProvenanceApply, validKeys, "entry key"); err != nil {
+		return err
+	}
+
 	if opts.DryRun {
 		a.applyPlan(entries, state)
 		return nil
-	}
-
-	if err := a.verifyApplyState(ctx, entries, state); err != nil {
-		return err
 	}
 
 	if err := a.ensureLabels(ctx, planAreaLabels(entries)); err != nil {
@@ -90,29 +99,6 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 		a.printf("applied %s: %d created, %d dependencies wired\n", opts.File, created, wired)
 		a.printf("mapping saved to %s\n", opts.StatePath)
 	})
-}
-
-// verifyApplyState verifies that every issue in state.Mapping belongs to this
-// plan and carries the tool-generated provenance marker before any mutations
-// are executed against GitHub (#81).
-func (a *App) verifyApplyState(ctx context.Context, entries []plan.Entry, state *batchState) error {
-	validKeys := make(map[string]bool, len(entries))
-	for _, e := range entries {
-		validKeys[e.Key()] = true
-	}
-	for key, number := range state.Mapping {
-		if !validKeys[key] {
-			return fmt.Errorf("state file contains unknown entry key %q (issue #%d)", key, number)
-		}
-		issue, err := a.Client.GetIssue(ctx, number)
-		if err != nil {
-			return fmt.Errorf("verifying mapped issue #%d for %s: %w", number, key, err)
-		}
-		if !verifyApplyProvenance(issue.Body, key) {
-			return fmt.Errorf("mapped issue #%d does not carry provenance for %s", number, key)
-		}
-	}
-	return nil
 }
 
 // applyPlan prints what a real run would do.
@@ -159,7 +145,7 @@ func (a *App) applyCreate(ctx context.Context, entries []plan.Entry, state *batc
 			labels = append(labels, e.Type)
 		}
 		labels = append(labels, e.Areas...)
-		issue, err := a.Client.CreateIssue(ctx, applyTitle(e), applyBody(e), labels)
+		issue, err := a.Client.CreateIssue(ctx, applyTitle(e), applyBodyWithProvenance(e, state.Digest), labels)
 		if err != nil {
 			return created, fmt.Errorf("creating %s (rerun to resume): %w", e.Key(), err)
 		}
@@ -254,8 +240,9 @@ func (a *App) warnPlanCodeText(entries []plan.Entry) {
 }
 
 // applyBody composes structured section fields the same way the create
-// section flags do, appends the discovered-from link, and adds the tool-generated
-// provenance marker.
+// section flags do and appends the discovered-from link. This is the body a
+// human reads; the provenance marker is added separately so the code-text
+// warning scans prose rather than the tool's own bookkeeping.
 func applyBody(e plan.Entry) string {
 	body := e.Body
 	if !e.Sections.IsZero() {
@@ -269,7 +256,16 @@ func applyBody(e plan.Entry) string {
 			body = strings.TrimRight(body, "\n") + "\n\n" + link
 		}
 	}
-	marker := applyProvenance(e.Key())
+	return body
+}
+
+// applyBodyWithProvenance is what actually gets written: the composed body
+// plus the marker binding the issue to this entry and this plan file, which
+// is what lets a later run tell an issue it created from one a state file
+// merely points at (#81).
+func applyBodyWithProvenance(e plan.Entry, digest string) string {
+	marker := conventions.ProvenanceMarker(conventions.ProvenanceApply, e.Key(), digest)
+	body := applyBody(e)
 	if body == "" {
 		return marker
 	}

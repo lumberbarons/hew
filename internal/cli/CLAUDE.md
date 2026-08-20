@@ -10,11 +10,13 @@ The commands themselves, written against the `gh.Client` interface so `cmd/hew` 
 | `pr.go` | `pr`: infers the claimed issue, composes the body from it, enforces exactly one `Fixes #n`, derives the title from the issue type | Changing PR composition or issue inference |
 | `apply.go` | `apply`: walks a parsed `internal/plan` plan, creating issues then wiring dependency edges | Changing `apply` execution (schema and validation live in `internal/plan`) |
 | `migrate.go` | `migrate beads`: maps a parsed beads snapshot onto the conventions — priorities, types, deps, epics, in-progress state | Changing the beads migration |
-| `batch.go` | Shared machinery for `apply` and `migrate`: the checkpoint state file, throttled writes, label bootstrapping | Changing resume behavior or write throttling |
+| `batch.go` | Shared machinery for `apply` and `migrate`: the checkpoint state file and its repo/digest binding, the pre-flight verification that every mapped issue carries the provenance marker `internal/conventions` defines, throttled writes, label bootstrapping | Changing resume behavior, checkpoint trust, or write throttling |
 | `hooks.go` | `hooks install\|remove`: edits the project's `.claude/settings.json` in place, preserving unknown fields | Changing the SessionStart hook |
 | `exit.go` | Maps errors to the exit codes agent loops branch on (`2` usage, `3` claimed by someone else, `4` auth, `5` claimed by you), plus the `--repo` and issue-number argument parsers | Changing an exit code — it is contract |
 
-Tests run against `fakeClient`, never the network. `batch.go` has no test file of its own — it is covered through `apply` and `migrate`.
+Tests run against `fakeClient`, never the network. `batch.go` has no test file of its own — it is covered through `apply` and `migrate`; the provenance marker it verifies is unit-tested in `internal/conventions`.
+
+Checkpoint state is trusted local scratch, never a portable input. A state file is bound to the repository and to a digest of its source plan or snapshot, and every issue it maps must carry the provenance marker the batch writer stamped into the body it created — verified in one pass before any write, `--dry-run` included. Tests asserting "no mutation happened" must assert that *only* reads were made (`assertOnlyReads`), not that a list of specific mutating calls was absent: label bootstrapping writes too. See "Checkpoint binding" in DESIGN.md.
 
 | File | What | When to read |
 |---|---|---|

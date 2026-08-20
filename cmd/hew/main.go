@@ -568,11 +568,14 @@ from the section fields — where, problem or goal, fix or approach, done-when
 (a list, one checklist item each) — composed into the body template; body
 holds raw long-form text instead (mutually exclusive with sections). Creation
 is checkpointed after every write, so a failed run resumes without duplicates;
-dependency cycles between entries are rejected before anything is written.
+dependency cycles between entries are rejected before anything is written. The
+state file is local scratch bound to this repository and to a digest of the
+plan: edit the plan, move repositories, or bring a state file from elsewhere
+and it is refused rather than trusted.
 
 ` + conventions.CodeSpanGuidance,
 		Flags: append(globalFlags(),
-			&ucli.StringFlag{Name: "state", Usage: "resume-state `FILE` (default: <plan>.state.json)"},
+			&ucli.StringFlag{Name: "state", Usage: "resume-state `FILE`, bound to this repo and plan (default: <plan>.state.json)"},
 			&ucli.BoolFlag{Name: "dry-run", Usage: "print the plan without creating anything"},
 			&ucli.DurationFlag{Name: "throttle", Usage: "pause between writes", Value: 500 * time.Millisecond},
 		),
@@ -601,7 +604,7 @@ func migrateCmd() *ucli.Command {
 				Usage: "migrate a beads (bd) database: labels, deps, epics, in-progress state",
 				Flags: []ucli.Flag{
 					&ucli.StringFlag{Name: "file", Usage: "beads snapshot (default: <project>/.beads/issues.jsonl)"},
-					&ucli.StringFlag{Name: "state", Usage: "resume-state `FILE` (default: alongside the snapshot)"},
+					&ucli.StringFlag{Name: "state", Usage: "resume-state `FILE`, bound to this repo and snapshot (default: alongside the snapshot)"},
 					&ucli.BoolFlag{Name: "dry-run", Usage: "print the plan without creating anything"},
 					&ucli.BoolFlag{Name: "include-closed", Usage: "also migrate closed beads (create, comment, close)"},
 					&ucli.DurationFlag{Name: "throttle", Usage: "pause between writes", Value: 500 * time.Millisecond},
@@ -619,17 +622,13 @@ func migrateCmd() *ucli.Command {
 						}
 						file = filepath.Join(root, ".beads", "issues.jsonl")
 					}
-					state := cmd.String("state")
-					if state == "" {
-						state = filepath.Join(filepath.Dir(file), "github-migration.json")
-					}
 					app, err := buildApp(cmd)
 					if err != nil {
 						return err
 					}
 					return app.MigrateBeads(ctx, appcli.MigrateOpts{
 						File:          file,
-						StatePath:     state,
+						StatePath:     cmd.String("state"),
 						DryRun:        cmd.Bool("dry-run"),
 						IncludeClosed: cmd.Bool("include-closed"),
 						Throttle:      cmd.Duration("throttle"),

@@ -20,7 +20,8 @@ type MigrateOpts struct {
 	// File is the beads issues.jsonl snapshot.
 	File string
 	// StatePath is where the beadID→issue-number mapping is persisted
-	// after every create, making a failed run resumable.
+	// after every create, making a failed run resumable. Bound to the repository
+	// and a digest of the snapshot (#81).
 	StatePath string
 	// DryRun prints the plan without touching GitHub.
 	DryRun bool
@@ -84,18 +85,28 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 	}
 
 	digest := fileDigest(data)
-	state, err := loadBatchState(opts.StatePath, a.Repo.String(), digest)
+	state, err := loadBatchState(opts.StatePath, a.Repo.String(), digest, "snapshot")
 	if err != nil {
+		return err
+	}
+	// Validated against every bead in the snapshot, not just the selected
+	// ones: --include-closed changes the selection but not the file, so a
+	// mapping written by a run with the flag must not read as an unknown ID
+	// on a run without it.
+	validIDs := make(map[string]bool, len(all))
+	for _, b := range all {
+		validIDs[b.ID] = true
+	}
+
+	// Reads GitHub, writes nothing — so the dry run makes the same pass and
+	// can show the failure the real run would hit (#81).
+	if err := a.verifyBatchState(ctx, state, conventions.ProvenanceMigrate, validIDs, "bead ID"); err != nil {
 		return err
 	}
 
 	if opts.DryRun {
 		a.migrationPlan(selected, state.Mapping, skippedClosed)
 		return nil
-	}
-
-	if err := a.verifyMigrateState(ctx, selected, state); err != nil {
-		return err
 	}
 
 	if err := a.ensureLabels(ctx, beadAreaLabels(selected)); err != nil {
@@ -108,7 +119,7 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 		return err
 	}
 	wired, warned := a.migrateWire(ctx, selected, state.Mapping, opts)
-	closed := a.migrateClose(ctx, selected, state.Mapping, opts)
+	closed := a.migrateClose(ctx, selected, state, opts)
 
 	return a.emitResult(map[string]any{
 		"created": created, "wired": wired, "closed": closed,
@@ -121,29 +132,6 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 		}
 		a.printf("\nmapping saved to %s\n", opts.StatePath)
 	})
-}
-
-// verifyMigrateState verifies that every issue in state.Mapping belongs to this
-// snapshot and carries the tool-generated provenance marker before any mutations
-// are executed against GitHub (#81).
-func (a *App) verifyMigrateState(ctx context.Context, selected []beads.Bead, state *batchState) error {
-	validIDs := make(map[string]bool, len(selected))
-	for _, b := range selected {
-		validIDs[b.ID] = true
-	}
-	for id, number := range state.Mapping {
-		if !validIDs[id] {
-			return fmt.Errorf("state file contains unknown bead ID %q (issue #%d)", id, number)
-		}
-		issue, err := a.Client.GetIssue(ctx, number)
-		if err != nil {
-			return fmt.Errorf("verifying mapped issue #%d for %s: %w", number, id, err)
-		}
-		if !verifyBeadProvenance(issue.Body, id) {
-			return fmt.Errorf("mapped issue #%d does not carry provenance for %s", number, id)
-		}
-	}
-	return nil
 }
 
 // migrationPlan prints what a real run would do.
@@ -222,7 +210,7 @@ func (a *App) migrateCreate(ctx context.Context, selected []beads.Bead, state *b
 			title = conventions.EpicTitlePrefix + title
 		}
 
-		issue, err := a.Client.CreateIssue(ctx, title, beadBody(b), labels)
+		issue, err := a.Client.CreateIssue(ctx, title, beadBodyWithProvenance(b, state.Digest), labels)
 		if err != nil {
 			return created, fmt.Errorf("creating %s (rerun to resume): %w", b.ID, err)
 		}
@@ -291,13 +279,19 @@ func (a *App) migrateWire(ctx context.Context, selected []beads.Bead, state map[
 
 // migrateClose closes migrated beads that were closed, commenting the
 // close reason first. Tolerant: re-closing on resume just warns.
-func (a *App) migrateClose(ctx context.Context, selected []beads.Bead, state map[string]int, opts MigrateOpts) int {
+//
+// The provenance check repeats here rather than trusting the up-front pass:
+// commenting and closing is the most destructive thing migrate does, and the
+// mapping it reads includes entries this run added after that pass. Failing
+// closed on a mapping that cannot be vouched for skips one bead instead of
+// aborting a migration that is already part-written (#81).
+func (a *App) migrateClose(ctx context.Context, selected []beads.Bead, state *batchState, opts MigrateOpts) int {
 	closed := 0
 	for _, b := range selected {
 		if !b.Closed() {
 			continue
 		}
-		number, ok := state[b.ID]
+		number, ok := state.Mapping[b.ID]
 		if !ok {
 			continue
 		}
@@ -309,8 +303,8 @@ func (a *App) migrateClose(ctx context.Context, selected []beads.Bead, state map
 		if !issue.IsOpen() {
 			continue
 		}
-		if !verifyBeadProvenance(issue.Body, b.ID) {
-			a.warnf("closing #%d: missing provenance for %s", number, b.ID)
+		if !conventions.HasProvenanceMarker(issue.Body, conventions.ProvenanceMigrate, b.ID, state.Digest) {
+			a.warnf("not closing #%d: it does not carry the hew provenance marker for bead %s from this snapshot", number, b.ID)
 			continue
 		}
 		if b.CloseReason != "" {
@@ -326,6 +320,15 @@ func (a *App) migrateClose(ctx context.Context, selected []beads.Bead, state map
 		sleep(opts.Throttle)
 	}
 	return closed
+}
+
+// beadBodyWithProvenance is what actually gets written: the composed body
+// plus the marker binding the issue to this bead and this snapshot file.
+// The human-readable footer below is prose and stays prose — a person may
+// reword or delete it — so verification reads only the marker (#81).
+func beadBodyWithProvenance(b beads.Bead, digest string) string {
+	marker := conventions.ProvenanceMarker(conventions.ProvenanceMigrate, b.ID, digest)
+	return beadBody(b) + "\n\n" + marker
 }
 
 // beadBody assembles the issue body from the bead's prose fields, with a

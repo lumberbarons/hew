@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -44,6 +45,12 @@ func (a *App) ensureLabels(ctx context.Context, extras []gh.Label) error {
 	return nil
 }
 
+// batchStateVersion is the current checkpoint schema. It exists so a state
+// file this build cannot safely interpret is named as such instead of being
+// reported as corrupt: version 0 is any file written before checkpoints
+// carried a repository and source binding (#81).
+const batchStateVersion = 1
+
 // batchState is what a batch write resumes from: which source keys became
 // which issues, and which dependency edges were already wired. Edges are
 // checkpointed because re-attempting one is not free — GitHub answers a
@@ -52,6 +59,7 @@ func (a *App) ensureLabels(ctx context.Context, extras []gh.Label) error {
 // Checkpoints are bound to the target repository and the source file digest
 // so state from an unrelated repo, plan, or snapshot is rejected (#81).
 type batchState struct {
+	Version int             `json:"version"`
 	Repo    string          `json:"repo"`
 	Digest  string          `json:"digest"`
 	Mapping map[string]int  `json:"mapping"`
@@ -70,38 +78,24 @@ func edgeKey(kind plan.EdgeKind, from, to int) string {
 	return fmt.Sprintf("%s:%d->%d", kind, from, to)
 }
 
-// applyProvenance returns the tool-generated provenance marker embedded in
-// issues created by `hew apply`.
-func applyProvenance(key string) string {
-	return fmt.Sprintf("<!-- hew:apply key=%s -->", key)
-}
-
-// verifyApplyProvenance checks whether an issue body contains the provenance marker
-// for the given plan entry key.
-func verifyApplyProvenance(body, key string) bool {
-	return strings.Contains(body, applyProvenance(key))
-}
-
-// beadProvenance returns the tool-generated provenance marker embedded in
-// issues created by `hew migrate beads`.
-func beadProvenance(id string) string {
-	return fmt.Sprintf("Migrated from beads `%s`", id)
-}
-
-// verifyBeadProvenance checks whether an issue body contains the provenance marker
-// for the given bead ID.
-func verifyBeadProvenance(body, id string) bool {
-	return strings.Contains(body, beadProvenance(id))
+// restartHint is appended to every rejection. Naming the remedy matters more
+// here than usual: the output is read by agents, and the obvious move —
+// deleting the state file — silently re-creates everything the interrupted
+// run already created, which is the one outcome the checkpoint exists to
+// prevent.
+func restartHint(path string) string {
+	return fmt.Sprintf("pass --state with a new path to start a fresh run (every issue the interrupted run already created will be created again), or delete %s", path)
 }
 
 // loadBatchState reads a checkpoint file. A missing file is a fresh start; a
-// corrupt, unbound, or mismatched one aborts — treating it as empty would duplicate
-// every already-created issue, and using an unbound or mismatched one could mutate
-// unrelated issues (#81).
-func loadBatchState(path string, repo string, digest string) (*batchState, error) {
+// corrupt, unbound, or mismatched one aborts — treating it as empty would
+// duplicate every already-created issue, and using an unbound or mismatched
+// one could mutate unrelated issues (#81).
+func loadBatchState(path string, repo string, digest string, sourceNoun string) (*batchState, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return &batchState{
+			Version: batchStateVersion,
 			Repo:    repo,
 			Digest:  digest,
 			Mapping: map[string]int{},
@@ -113,16 +107,22 @@ func loadBatchState(path string, repo string, digest string) (*batchState, error
 	}
 	var state batchState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("%s is not a valid resume-state file: %w", path, err)
+		return nil, fmt.Errorf("%s is not a valid resume-state file: %w; %s", path, err, restartHint(path))
 	}
-	if state.Repo == "" || state.Digest == "" {
-		return nil, fmt.Errorf("%s is not a valid resume-state file: missing repository or digest binding", path)
+	switch {
+	case state.Version == 0 || state.Repo == "" || state.Digest == "":
+		return nil, fmt.Errorf("%s was written by an older hew and cannot be resumed safely: it records no repository or %s binding, so its issue numbers cannot be trusted; %s",
+			path, sourceNoun, restartHint(path))
+	case state.Version > batchStateVersion:
+		return nil, fmt.Errorf("%s was written by a newer hew (state version %d, this build understands %d); upgrade hew to resume it",
+			path, state.Version, batchStateVersion)
 	}
-	if state.Repo != repo {
-		return nil, fmt.Errorf("state file %s is for repository %q, not %q", path, state.Repo, repo)
+	if !strings.EqualFold(state.Repo, repo) {
+		return nil, fmt.Errorf("state file %s belongs to repository %q, not %q; %s", path, state.Repo, repo, restartHint(path))
 	}
 	if state.Digest != digest {
-		return nil, fmt.Errorf("state file %s is for a different plan or snapshot", path)
+		return nil, fmt.Errorf("state file %s was written for a different %s — the file's contents changed since the run that created it, and checkpoints are bound to those contents; restore the original %s to resume, or %s",
+			path, sourceNoun, sourceNoun, restartHint(path))
 	}
 	if state.Mapping == nil {
 		state.Mapping = map[string]int{}
@@ -131,6 +131,38 @@ func loadBatchState(path string, repo string, digest string) (*batchState, error
 		state.Edges = map[string]bool{}
 	}
 	return &state, nil
+}
+
+// verifyBatchState checks every mapping in a checkpoint against GitHub before
+// the caller mutates anything: the key must belong to this source file, and
+// the issue must carry the provenance marker this batch kind writes, bound to
+// this key and this source digest. Both commands run it as one pass up front
+// so a rejection costs no writes at all (#81).
+//
+// Mappings are walked in sorted order so a state file with more than one bad
+// entry fails on the same one every time — an unstable error message is a
+// bad bug report.
+func (a *App) verifyBatchState(ctx context.Context, state *batchState, kind string, valid map[string]bool, keyNoun string) error {
+	keys := make([]string, 0, len(state.Mapping))
+	for key := range state.Mapping {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		number := state.Mapping[key]
+		if !valid[key] {
+			return fmt.Errorf("state file maps %s %q to issue #%d, but %q is not in this run's selection — it was removed from the source, or a flag is filtering it out", keyNoun, key, number, key)
+		}
+		issue, err := a.Client.GetIssue(ctx, number)
+		if err != nil {
+			return fmt.Errorf("verifying mapped issue #%d for %s: %w", number, key, err)
+		}
+		if !conventions.HasProvenanceMarker(issue.Body, kind, key, state.Digest) {
+			return fmt.Errorf("refusing to modify issue #%d: it does not carry the hew provenance marker for %s %q from this source file, so this run did not create it", number, keyNoun, key)
+		}
+	}
+	return nil
 }
 
 func saveBatchState(path string, state *batchState) error {

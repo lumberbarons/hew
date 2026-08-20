@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/lumberbarons/hew/internal/conventions"
 )
 
 // migrationFixture covers the shapes seen in real beads databases: an
@@ -99,10 +101,11 @@ func TestMigrateBeadsResume(t *testing.T) {
 	// Pretend sc-epic was already migrated as #55 with provenance.
 	epicIssue := issue(55, "Epic: Voltgo support", "P2")
 	epicIssue.ID = "ID55"
-	epicIssue.Body = "Migrated from beads `sc-epic` (created 2026-05-01)"
+	epicIssue.Body = "Migrated from beads `sc-epic` (created 2026-05-01)\n\n" + conventions.ProvenanceMarker(conventions.ProvenanceMigrate, "sc-epic", fileDigest([]byte(migrationFixture)))
 	f.issues = append(f.issues, epicIssue)
 	digest := fileDigest([]byte(migrationFixture))
 	stateJSON, _ := json.Marshal(batchState{
+		Version: batchStateVersion,
 		Repo:    "o/r",
 		Digest:  digest,
 		Mapping: map[string]int{"sc-epic": 55},
@@ -318,7 +321,7 @@ func TestMigrateBeadsRefusesUnboundState(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := app.MigrateBeads(ctx, opts)
-	if err == nil || !strings.Contains(err.Error(), "not a valid resume-state file") {
+	if err == nil || !strings.Contains(err.Error(), "written by an older hew") {
 		t.Fatalf("err = %v", err)
 	}
 	if len(f.calls) != 0 {
@@ -332,12 +335,12 @@ func TestMigrateBeadsRefusesMismatchedDigestOrRepo(t *testing.T) {
 		want  string
 	}{
 		"mismatched repo": {
-			state: batchState{Repo: "other/repo", Digest: fileDigest([]byte(migrationFixture))},
-			want:  "is for repository",
+			state: batchState{Version: batchStateVersion, Repo: "other/repo", Digest: fileDigest([]byte(migrationFixture))},
+			want:  "belongs to repository",
 		},
 		"mismatched digest": {
-			state: batchState{Repo: "o/r", Digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
-			want:  "is for a different plan or snapshot",
+			state: batchState{Version: batchStateVersion, Repo: "o/r", Digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
+			want:  "was written for a different snapshot",
 		},
 	}
 	for name, tc := range cases {
@@ -372,6 +375,7 @@ func TestMigrateBeadsPoisonedStateCannotCommentOrClose(t *testing.T) {
 	// Poison the state file to map closed bead "sc-done" to issue #42.
 	digest := fileDigest([]byte(migrationFixture))
 	poisoned, _ := json.Marshal(batchState{
+		Version: batchStateVersion,
 		Repo:    "o/r",
 		Digest:  digest,
 		Mapping: map[string]int{"sc-done": 42},
@@ -381,7 +385,7 @@ func TestMigrateBeadsPoisonedStateCannotCommentOrClose(t *testing.T) {
 	}
 
 	err := app.MigrateBeads(ctx, opts)
-	if err == nil || !strings.Contains(err.Error(), "does not carry provenance") {
+	if err == nil || !strings.Contains(err.Error(), "does not carry the hew provenance marker") {
 		t.Fatalf("err = %v, want missing provenance error", err)
 	}
 
@@ -413,6 +417,7 @@ func TestMigrateBeadsPoisonedStateCannotWireEdges(t *testing.T) {
 	// Poison the state file to map bead "sc-1" to issue #42.
 	digest := fileDigest([]byte(migrationFixture))
 	poisoned, _ := json.Marshal(batchState{
+		Version: batchStateVersion,
 		Repo:    "o/r",
 		Digest:  digest,
 		Mapping: map[string]int{"sc-1": 42},
@@ -422,7 +427,7 @@ func TestMigrateBeadsPoisonedStateCannotWireEdges(t *testing.T) {
 	}
 
 	err := app.MigrateBeads(ctx, opts)
-	if err == nil || !strings.Contains(err.Error(), "does not carry provenance") {
+	if err == nil || !strings.Contains(err.Error(), "does not carry the hew provenance marker") {
 		t.Fatalf("err = %v, want missing provenance error", err)
 	}
 
@@ -440,6 +445,7 @@ func TestMigrateBeadsRefusesUnknownIDOrMissingMappedIssue(t *testing.T) {
 		f, app, opts := migrateSetup(t, migrationFixture)
 		digest := fileDigest([]byte(migrationFixture))
 		data, _ := json.Marshal(batchState{
+			Version: batchStateVersion,
 			Repo:    "o/r",
 			Digest:  digest,
 			Mapping: map[string]int{"ghost": 99},
@@ -448,7 +454,7 @@ func TestMigrateBeadsRefusesUnknownIDOrMissingMappedIssue(t *testing.T) {
 			t.Fatal(err)
 		}
 		err := app.MigrateBeads(ctx, opts)
-		if err == nil || !strings.Contains(err.Error(), "unknown bead ID") {
+		if err == nil || !strings.Contains(err.Error(), "is not in this run's selection") {
 			t.Fatalf("err = %v, want unknown bead ID error", err)
 		}
 		if len(f.calls) != 0 {
@@ -457,9 +463,10 @@ func TestMigrateBeadsRefusesUnknownIDOrMissingMappedIssue(t *testing.T) {
 	})
 
 	t.Run("mapped issue not on GitHub", func(t *testing.T) {
-		_, app, opts := migrateSetup(t, migrationFixture)
+		f, app, opts := migrateSetup(t, migrationFixture)
 		digest := fileDigest([]byte(migrationFixture))
 		data, _ := json.Marshal(batchState{
+			Version: batchStateVersion,
 			Repo:    "o/r",
 			Digest:  digest,
 			Mapping: map[string]int{"sc-epic": 999},
@@ -471,5 +478,151 @@ func TestMigrateBeadsRefusesUnknownIDOrMissingMappedIssue(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "verifying mapped issue #999") {
 			t.Fatalf("err = %v, want verifying mapped issue error", err)
 		}
+		assertOnlyReads(t, f)
 	})
+}
+
+// Regression for a checkpoint the tool wrote and then refused: --include-closed
+// changes which beads are selected but not the snapshot's contents, so a
+// mapping written with the flag must stay readable by a run without it.
+func TestMigrateBeadsResumesWithoutIncludeClosedAfterAFullRun(t *testing.T) {
+	f, app, opts := migrateSetup(t, migrationFixture)
+	opts.IncludeClosed = true
+	if err := app.MigrateBeads(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readState(t, opts.StatePath).Mapping["sc-done"]; !ok {
+		t.Fatal("the closed bead was never mapped, so the resume proves nothing")
+	}
+	before := len(f.issues)
+
+	opts.IncludeClosed = false
+	if err := app.MigrateBeads(ctx, opts); err != nil {
+		t.Fatalf("re-run without --include-closed: %v", err)
+	}
+	if len(f.issues) != before {
+		t.Errorf("re-run duplicated issues: %d → %d", before, len(f.issues))
+	}
+}
+
+// The digest must come from the snapshot's contents: a fileDigest that
+// ignored its input would satisfy every hand-written mismatch assertion while
+// letting one snapshot's state drive another's run.
+func TestMigrateBeadsRejectsStateFromADifferentSnapshot(t *testing.T) {
+	f, app, opts := migrateSetup(t, migrationFixture)
+	if err := app.MigrateBeads(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	before := len(f.issues)
+
+	edited := migrationFixture + `{"_type":"issue","id":"sc-late","title":"Added later","status":"open","priority":2,"issue_type":"task","created_at":"2026-06-01T00:00:00Z"}` + "\n"
+	if err := os.WriteFile(opts.File, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.calls = nil
+	err := app.MigrateBeads(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "was written for a different snapshot") {
+		t.Fatalf("err = %v, want a rejection naming the changed snapshot", err)
+	}
+	if len(f.issues) != before {
+		t.Errorf("issues created against a rejected state file: %d → %d", before, len(f.issues))
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("API calls made despite a rejected state file: %v", f.calls)
+	}
+}
+
+// The marker binds the bead ID, so a state file cannot point one bead at the
+// issue another bead produced in the same migration — repo, digest, and "hew
+// created this" all check out and only the identity is wrong.
+func TestMigrateBeadsRejectsStateMappingABeadToAnotherBeadsIssue(t *testing.T) {
+	f, app, opts := migrateSetup(t, migrationFixture)
+	if err := app.MigrateBeads(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	// #101 is sc-epic's issue, carrying sc-epic's marker.
+	swapped, _ := json.Marshal(batchState{
+		Version: batchStateVersion,
+		Repo:    "o/r",
+		Digest:  fileDigest([]byte(migrationFixture)),
+		Mapping: map[string]int{"sc-1": 101},
+	})
+	if err := os.WriteFile(opts.StatePath, swapped, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.calls = nil
+	err := app.MigrateBeads(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "does not carry the hew provenance marker") {
+		t.Fatalf("err = %v, want a rejection for the mismatched bead ID", err)
+	}
+	assertOnlyReads(t, f)
+}
+
+// migrateClose is the last gate before the two destructive calls. Reaching it
+// needs an issue that verifies at load and loses its marker before the close
+// pass — what a concurrent body edit looks like.
+func TestMigrateBeadsDoesNotCloseAnIssueThatLostItsProvenance(t *testing.T) {
+	f, app, opts := migrateSetup(t, migrationFixture)
+	opts.IncludeClosed = true
+	digest := fileDigest([]byte(migrationFixture))
+
+	target := issue(55, "Old fix", "P3", "bug")
+	target.ID = "ID55"
+	target.State = "OPEN" // it must be closable, or the guard is never reached
+	target.Body = "Migrated from beads `sc-done`\n\n" +
+		conventions.ProvenanceMarker(conventions.ProvenanceMigrate, "sc-done", digest)
+	f.issues = append(f.issues, target)
+	stateJSON, _ := json.Marshal(batchState{
+		Version: batchStateVersion,
+		Repo:    "o/r",
+		Digest:  digest,
+		Mapping: map[string]int{"sc-done": 55},
+	})
+	if err := os.WriteFile(opts.StatePath, stateJSON, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Someone rewrites the body between verification and the close pass.
+	f.onGetIssue = func(number int) {
+		if number == 55 {
+			f.byNumber(55).Body = "rewritten by hand"
+		}
+	}
+
+	if err := app.MigrateBeads(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.byNumber(55); !got.IsOpen() {
+		t.Error("closed an issue whose provenance no longer verified")
+	}
+	for _, call := range f.calls {
+		if strings.HasPrefix(call, "Comment 55") || strings.HasPrefix(call, "CloseIssue 55") {
+			t.Errorf("mutating call against the unverified issue: %s", call)
+		}
+	}
+	if warning := app.ErrOut.(interface{ String() string }).String(); !strings.Contains(warning, "not closing #55") {
+		t.Errorf("skipped the close without saying so: %q", warning)
+	}
+}
+
+func TestMigrateBeadsNoFileArg(t *testing.T) {
+	_, app, _ := migrateSetup(t, migrationFixture)
+	err := app.MigrateBeads(ctx, MigrateOpts{})
+	if err == nil || !strings.Contains(err.Error(), "usage:") {
+		t.Fatalf("err = %v, want a usage error", err)
+	}
+	if code := ExitCode(err); code != ExitUsage {
+		t.Errorf("exit code = %d, want %d", code, ExitUsage)
+	}
+}
+
+func TestMigrateBeadsDefaultStatePath(t *testing.T) {
+	_, app, opts := migrateSetup(t, migrationFixture)
+	opts.StatePath = ""
+	if err := app.MigrateBeads(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(filepath.Dir(opts.File), "github-migration.json")
+	if _, err := os.Stat(want); err != nil {
+		t.Errorf("no state file at the default path %s: %v", want, err)
+	}
 }
