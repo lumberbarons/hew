@@ -197,6 +197,35 @@ func TestPrimerStaticPrescribesDedupSequence(t *testing.T) {
 	}
 }
 
+// An agent that cannot see untriaged work in ready or prime will conclude the
+// queue is drained unless the primer says otherwise, so the exclusion has to
+// be stated alongside the command that reveals what was held back.
+func TestPrimerStaticStatesUntriagedExclusion(t *testing.T) {
+	line := primerLineContaining(t, "untriaged")
+	for _, want := range []string{"ready", "prime", "hew triage"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("untriaged guidance missing %q:\n%s", want, line)
+		}
+	}
+}
+
+// primerLineContaining returns the single primer line mentioning substr,
+// failing when zero or several match — scoping the assertion to one line is
+// what stops the command cheatsheet satisfying it by coincidence.
+func primerLineContaining(t *testing.T, substr string) string {
+	t.Helper()
+	var found []string
+	for _, line := range strings.Split(PrimerStatic, "\n") {
+		if strings.Contains(line, substr) {
+			found = append(found, line)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("want exactly one primer line containing %q, got %d:\n%s", substr, len(found), strings.Join(found, "\n"))
+	}
+	return found[0]
+}
+
 func TestClaudeSnippet(t *testing.T) {
 	// Every load-bearing claim in the snippet hew init writes into user
 	// repos: where work is tracked, the session-start command, and the

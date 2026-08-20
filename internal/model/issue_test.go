@@ -168,7 +168,7 @@ func TestReady(t *testing.T) {
 			i.BlockedBy = []Ref{{Number: 3, State: "CLOSED"}}
 			return i
 		}(),
-		open(9),                // untriaged, sorts last
+		open(9),                // untriaged, excluded
 		open(10, "P2", "task"), // same priority as #1, higher number, sorts after
 	}
 	got := Ready(issues)
@@ -176,9 +176,40 @@ func TestReady(t *testing.T) {
 	for _, i := range got {
 		nums = append(nums, i.Number)
 	}
-	want := []int{2, 1, 10, 8, 9}
+	want := []int{2, 1, 10, 8}
 	if !reflect.DeepEqual(nums, want) {
 		t.Errorf("Ready() = %v, want %v", nums, want)
+	}
+}
+
+func TestReadyExcludesUntriaged(t *testing.T) {
+	// Untriaged issues are the population anyone can create on a public
+	// repo, and ready feeds automatic agent paths. Label presence is
+	// permission-verified by GitHub, which is what makes triage state a
+	// forgery-resistant gate.
+	issues := []Issue{
+		open(1, "P2", "bug"),  // triaged, ready
+		open(2, "P1"),         // no type
+		open(3, "bug"),        // no priority
+		open(4),               // neither
+		open(5, "P3", "task"), // triaged, ready
+	}
+	var nums []int
+	for _, i := range Ready(issues) {
+		nums = append(nums, i.Number)
+	}
+	if !reflect.DeepEqual(nums, []int{1, 5}) {
+		t.Errorf("Ready() = %v, want [1 5]", nums)
+	}
+}
+
+func TestReadyExcludesUnlabeledEpic(t *testing.T) {
+	// Untriaged() exempts epics, so the untriaged gate is not what keeps an
+	// unlabeled epic out of ready — the epic exclusion still has to.
+	epic := open(1)
+	epic.SubIssuesTotal = 1
+	if got := Ready([]Issue{epic}); len(got) != 0 {
+		t.Errorf("Ready() = %v, want empty", got)
 	}
 }
 

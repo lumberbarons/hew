@@ -1,10 +1,9 @@
 # hew primer — lumberbarons/solar-controller
 Workflow: hew ready → hew start <n>.
 
-## Ready (3 of 14 open)
+## Ready (2 of 14 open)
 #117 P1 bug (tests)  Tautological assertions on state the code cannot modify
 #120 P2 enhancement  Voltgo BLE battery controller: scaffold, client, collector
-#9   P?              Drive-by report with no labels
 
 ## In progress (1)
 #124 P2 bug (tests)  /api/info verified by substring matching  @lumberbarons

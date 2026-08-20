@@ -97,7 +97,8 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
   for anything filed outside the tool — is *untriaged*, a normal state.
   `hew triage` lists them so a human or agent can label each via `set`; nothing is ever
   stamped with defaults automatically, since auto-labeling someone else's report
-  destroys information.
+  destroys information. Triage is also the gate on the automatic read paths — see
+  read-path normalization below.
 - **Contradictions** (two priority labels, an in-progress epic, a dependency cycle)
   are the only per-issue warnings `prime` emits; normalization still picks a
   deterministic answer in the meantime. Cycles matter most: their members all have
@@ -127,16 +128,29 @@ primer so agents know what they're looking at:
   excludes any issue with sub-issues.
 - Bodies render as-is. The template is scaffolding for `create`, never retrofitted
   onto issues written by others.
-- Untriaged issues do appear in `ready` (invisible work is the failure mode), sorted
-  after explicitly-prioritized work. `start` on an untriaged issue requires
+- Untriaged issues are excluded from the *automatic* paths, `ready` and `prime`, and
+  stay visible on the deliberate ones — `triage` lists them and `list` shows them,
+  sorted after explicitly-prioritized work. `start` on an untriaged issue requires
   `--priority` — claiming forces triage.
+
+  The reason is a trust boundary rather than tidiness. `prime` runs as a SessionStart
+  hook, so whatever it prints lands in an agent's context with no human in between,
+  and on a public repo anyone can file an issue whose title is an instruction. GitHub
+  silently drops labels from non-collaborators, so a priority and type label is
+  evidence a maintainer looked at the issue — permission-verified, not self-asserted,
+  which is what makes triage state a gate an outsider cannot forge. It costs
+  hew-created issues nothing: the write path labels them by construction.
+
+  There is deliberately no `--include-untriaged` escape hatch on `ready` or `prime`.
+  An agent loop — or an injected one — could pass it and reopen the surface itself;
+  `triage` and `list` are the escape hatches precisely because a human runs them.
 
 ## Command surface (v1)
 
 ```
 hew prime                      # session-start context (see below)
-hew ready                      # open, non-epic, zero *open* blockers; sorted
-                                  # P0→P4 then P?, oldest first within a priority
+hew ready                      # open, non-epic, triaged, zero *open* blockers;
+                                  # sorted P0→P4, oldest first within a priority
 hew list [--label X] [--epic N] [--state open|closed|all]
             [--bodies]           # with --json: body on every line — whole-tracker
                                   # dedup in a single call instead of a show per candidate.
@@ -477,7 +491,7 @@ any product code.
   measures ~640 tokens (tiktoken `o200k_base`; Claude's tokenizer typically runs
   slightly higher). The split is roughly half static, half live, so the ~600 target
   holds as long as live sections cap at top-N per section. Superseded in part by
-  the measurements below: live primers run 863–911 tokens, so the cap-at-top-N
+  the measurements below: live primers run 885–933 tokens, so the cap-at-top-N
   assumption did not hold on its own.
 - **Cycle rejection — partial; client-side check confirmed necessary.** Tested live
   with throwaway issues (deleted afterwards). The API rejects self-blocks (`Target
@@ -520,7 +534,7 @@ lumberbarons/solar-controller — 27 open issues:
 | `hew ready` | 538 | 3621 | 6.7x | gh issue list --json † |
 | `hew list` | 606 | 2120 | 3.5x | gh api graphql (open issues) |
 | `hew list --json` | 3017 | 2120 | 0.7x | gh api graphql (open issues) |
-| `hew prime` | 911 | 2120 | 2.3x | gh api graphql (open issues) |
+| `hew prime` | 933 | 2120 | 2.3x | gh api graphql (open issues) |
 | `hew show #123` | 175 | 341 | 1.9x | gh issue view --json + gh api graphql |
 | `hew epic status 137` | 130 | 308 | 2.4x | gh api graphql (epic + children) |
 
@@ -539,13 +553,16 @@ Findings, including the ones that don't flatter the tool:
   empty arrays, derived booleans, `createdAt` — where the lean query writes seven
   fields. The schema's stability is deliberate (agents parse it), but the token
   cost is a real regression against the tool's own claim, filed as #62.
-- **`prime` measures 863–911 tokens against its ~600 target.** The spike's ~640
-  was a mock; live primers on real repos run 40–50% over. Not the static half
-  either: the smaller fixture, at 10 open issues, still lands at 863. Filed
+- **`prime` measures 885–933 tokens against its ~600 target.** The spike's ~640
+  was a mock; live primers on real repos run 48–56% over. Not the static half
+  either: the smaller fixture, at 10 open issues, still lands at 885. Filed
   as #63. These fixtures predate the dedup-sequence lines added for #37, which
   take the static half from 650 to 691 tokens under the same encoding; since
   `prime` emits it verbatim, add 41 to every `prime` figure above until the next
-  capture.
+  capture. The figures already include the untriaged-exclusion line added for
+  #98 (+22), which was substituted into the fixtures' static half in place — the
+  live sections needed no re-capture, since neither fixture had an untriaged
+  issue reaching `ready`.
 
 ## Milestones
 
