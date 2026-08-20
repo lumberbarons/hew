@@ -22,6 +22,12 @@ checksum:
 changelog:
   sort: asc
   groups:
+    # Listed first and matched first: '^fix' also matches 'fix!:', so without
+    # this a breaking change is filed under Fixes and the release notes never
+    # say it broke anything.
+    - title: Breaking changes
+      regexp: '^\w+!:'
+      order: -1
     - title: Features
       regexp: '^feat'
       order: 0
