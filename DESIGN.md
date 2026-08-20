@@ -198,7 +198,11 @@ hew apply <plan.jsonl>         # batch-create from a JSONL plan: one entry per l
                                   # a parent issue, so epics with bodies work too.
                                   # Checkpointed after every create and every edge
                                   # wired → resumable without duplicates, and re-running
-                                  # a finished plan is a quiet no-op; --dry-run plans.
+                                  # an unchanged finished plan is a quiet no-op;
+                                  # --dry-run plans. The checkpoint is bound to the repo
+                                  # and a digest of the plan, and every issue it maps must
+                                  # carry apply's provenance marker — see "Checkpoint
+                                  # binding".
                                   # Plan-internal
                                   # dependency cycles are rejected up front — a
                                   # complete check, since pre-existing issues can't
@@ -213,7 +217,8 @@ hew migrate beads              # import a beads (bd) database from .beads/issues
                                   # in_progress→claim, close_reason→closing comment, with
                                   # a provenance footer. Open beads by default (real dbs
                                   # are >95% closed); --include-closed for full history.
-                                  # Resumable via a state file; --dry-run plans.
+                                  # Resumable via a state file bound to the repo and the
+                                  # snapshot digest; --dry-run plans.
 ```
 
 Global flags: `--json` (structured output, stable schema), `--repo owner/name`
@@ -344,6 +349,46 @@ typical repo.
   the response is to resume that work rather than to pick a different item; auth
   failure exits 4; etc.). The exit code is the signal agents branch on — a
   distinction worth acting on gets a code, not a `--json`-only field.
+
+## Checkpoint binding
+
+The batch writers (`apply`, `migrate beads`) checkpoint a source-key → issue-number
+mapping so an interrupted run resumes instead of duplicating. That file is ordinary
+repository content: it sits next to the plan or the beads snapshot, and anything an
+agent checks out can contain one. Treating it as an authoritative mapping meant a
+supplied state file could point an entry at any issue number and the tool would wire
+edges onto it, or comment on and close it (#81).
+
+So a checkpoint is trusted local scratch, never a portable input, and three things
+have to agree before a mapping is used:
+
+- **Repository.** The file records `owner/name`; a mismatch is refused. Compared
+  case-insensitively, since GitHub treats it that way and a differently-cased
+  `--repo` should not invalidate a real checkpoint.
+- **Source digest.** A sha256 over the exact bytes of the plan or snapshot. Editing
+  the source invalidates the checkpoint — deliberately: the mapping is keyed by
+  entries whose meaning the edit may have changed.
+- **Provenance marker.** Every issue a batch writer creates carries an HTML comment
+  binding the batch kind, the source key, and that same digest. Verification requires
+  all three, so a mapping cannot be redirected onto an issue the tool merely knows
+  about, nor onto a *different* issue the same run created.
+
+The digest is what makes the marker worth anything. A marker is public text, so
+anyone can copy one into an issue they control — but they cannot make an issue that
+was created from a different source file carry their digest. That is what closes the
+`migrate` case, where the snapshot and the state file both live in the repository and
+an attacker who supplies both satisfies the first two bindings for free.
+
+Verification is one pass up front, before any write, and `--dry-run` makes it too —
+it reads GitHub but writes nothing, and a dry run that vouched for a mapping the real
+run would reject is worse than no dry run. Failures are refusals, never warnings.
+Keys are escaped into the marker, because they come from the untrusted source file
+and an unescaped `-->` would let one entry mint provenance for another.
+
+The state file carries a schema `version`. Anything without one predates the binding
+and cannot be resumed safely; the error says so, and says that starting fresh
+re-creates whatever the interrupted run already created, since the alternative is an
+agent silently duplicating half a plan.
 
 ## Architecture
 

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -18,7 +19,9 @@ type ApplyOpts struct {
 	File string
 	// StatePath is where the entry-key→issue-number mapping and the edges
 	// already wired are persisted after every write, making a failed run
-	// resumable and a finished one a quiet no-op. Empty means
+	// resumable and an unchanged finished one a quiet no-op. Bound to the
+	// repository and a digest of the plan, so an edited plan or a state file
+	// from elsewhere is refused rather than trusted (#81). Empty means
 	// File + ".state.json".
 	StatePath string
 	// DryRun prints the plan without touching GitHub.
@@ -39,12 +42,11 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	if opts.StatePath == "" {
 		opts.StatePath = opts.File + ".state.json"
 	}
-	f, err := os.Open(opts.File)
+	data, err := os.ReadFile(opts.File)
 	if err != nil {
 		return genericErr("cannot read plan file: %v", err)
 	}
-	defer func() { _ = f.Close() }()
-	entries, err := plan.Parse(f)
+	entries, err := plan.Parse(bytes.NewReader(data))
 	if err != nil {
 		return genericErr("parsing %s: %v", opts.File, err)
 	}
@@ -53,15 +55,27 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 		return nil
 	}
 
-	state, err := loadBatchState(opts.StatePath)
+	digest := fileDigest(data)
+	state, err := loadBatchState(opts.StatePath, a.Repo.String(), digest, "plan")
 	if err != nil {
 		return err
+	}
+	validKeys := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		validKeys[e.Key()] = true
 	}
 
 	// Reported in the pass that runs before anything is written, and on the
 	// dry run that exists to be read first — so the plan can be fixed while
 	// fixing it is still free.
 	a.warnPlanCodeText(entries)
+
+	// Verification reads GitHub but writes nothing, so the dry run makes the
+	// same pass: the mode whose whole point is being read before the real run
+	// has to be able to show the failure the real run would hit (#81).
+	if err := a.verifyBatchState(ctx, state, conventions.ProvenanceApply, validKeys, "entry key"); err != nil {
+		return err
+	}
 
 	if opts.DryRun {
 		a.applyPlan(entries, state)
@@ -131,7 +145,7 @@ func (a *App) applyCreate(ctx context.Context, entries []plan.Entry, state *batc
 			labels = append(labels, e.Type)
 		}
 		labels = append(labels, e.Areas...)
-		issue, err := a.Client.CreateIssue(ctx, applyTitle(e), applyBody(e), labels)
+		issue, err := a.Client.CreateIssue(ctx, applyTitle(e), applyBodyWithProvenance(e, state.Digest), labels)
 		if err != nil {
 			return created, fmt.Errorf("creating %s (rerun to resume): %w", e.Key(), err)
 		}
@@ -226,7 +240,9 @@ func (a *App) warnPlanCodeText(entries []plan.Entry) {
 }
 
 // applyBody composes structured section fields the same way the create
-// section flags do, and appends the discovered-from link.
+// section flags do and appends the discovered-from link. This is the body a
+// human reads; the provenance marker is added separately so the code-text
+// warning scans prose rather than the tool's own bookkeeping.
 func applyBody(e plan.Entry) string {
 	body := e.Body
 	if !e.Sections.IsZero() {
@@ -241,6 +257,19 @@ func applyBody(e plan.Entry) string {
 		}
 	}
 	return body
+}
+
+// applyBodyWithProvenance is what actually gets written: the composed body
+// plus the marker binding the issue to this entry and this plan file, which
+// is what lets a later run tell an issue it created from one a state file
+// merely points at (#81).
+func applyBodyWithProvenance(e plan.Entry, digest string) string {
+	marker := conventions.ProvenanceMarker(conventions.ProvenanceApply, e.Key(), digest)
+	body := applyBody(e)
+	if body == "" {
+		return marker
+	}
+	return strings.TrimRight(body, "\n") + "\n\n" + marker
 }
 
 // planAreaLabels collects every distinct area label the plan uses, for the

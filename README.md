@@ -177,6 +177,17 @@ re-attempting edges that already landed; unknown fields, dangling
 references, and dependency cycles between entries are all rejected before
 anything is written.
 
+The state file is trusted local scratch, not an input you can hand around: it
+records the repository and a digest of the plan it was written for, and every
+issue it maps is checked for a marker `apply` embedded in the body it created.
+A state file from another repository or another plan, one written by an older
+hew, or one pointing at an issue this plan did not create is refused before
+any write — including under `--dry-run`, so the plan-only pass reaches the same
+verdict as the real one. Editing the plan between runs invalidates the
+checkpoint by design; if you need to change it mid-flight, start a fresh run
+with a new `--state` path and expect the entries already created to be created
+again. The same rules apply to `migrate beads` and its snapshot.
+
 ## Auto-triage in CI
 
 [`examples/auto-triage.yml`](examples/auto-triage.yml) is a copy-pasteable GitHub

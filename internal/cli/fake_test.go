@@ -34,6 +34,10 @@ type fakeClient struct {
 	// searchTotal, when larger than the match count, simulates a capped
 	// search response where the server reports more matches than returned.
 	searchTotal int
+	// onGetIssue runs after a GetIssue has captured its result, so a test can
+	// change the issue behind the tool's back — the concurrent edit that a
+	// re-check between two passes exists to catch.
+	onGetIssue func(number int)
 	// defaultBranch and openPRs are the pull-request half of the fake:
 	// created PRs land in openPRs keyed by head branch, so a second `pr` on
 	// the same branch sees the first one exactly as the API would.
@@ -165,7 +169,11 @@ func (f *fakeClient) GetIssue(ctx context.Context, number int) (model.Issue, err
 	if i == nil {
 		return model.Issue{}, fmt.Errorf("issue #%d not found in o/r", number)
 	}
-	return *i, nil
+	out := *i
+	if f.onGetIssue != nil {
+		f.onGetIssue(number)
+	}
+	return out, nil
 }
 
 // SearchIssues fakes best-match search as a case-insensitive substring
