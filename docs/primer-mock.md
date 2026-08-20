@@ -26,7 +26,8 @@ Conventions (enforced by the tool's write path):
 Output: one line per issue — #n priority type (areas) title [blocked by #m; epic done/total; in progress @user].
 list sorts ready work first, then claimed, blocked, epics. Prefer text output; --json on list commands emits NDJSON.
 
-Commands: ready | list [--label X --epic N --state open/closed/all --bodies (with --json)] | show <n> | search <terms> | triage |
+Commands: ready [--limit N (0 for all)] | list [--label X --epic N --state open/closed/all --bodies (with --json)] |
+show <n> | search <terms> | triage |
 create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
 start <n> [--priority Pn] | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |
