@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -39,12 +40,11 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	if opts.StatePath == "" {
 		opts.StatePath = opts.File + ".state.json"
 	}
-	f, err := os.Open(opts.File)
+	data, err := os.ReadFile(opts.File)
 	if err != nil {
 		return genericErr("cannot read plan file: %v", err)
 	}
-	defer func() { _ = f.Close() }()
-	entries, err := plan.Parse(f)
+	entries, err := plan.Parse(bytes.NewReader(data))
 	if err != nil {
 		return genericErr("parsing %s: %v", opts.File, err)
 	}
@@ -53,7 +53,8 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 		return nil
 	}
 
-	state, err := loadBatchState(opts.StatePath)
+	digest := fileDigest(data)
+	state, err := loadBatchState(opts.StatePath, a.Repo.String(), digest)
 	if err != nil {
 		return err
 	}
@@ -66,6 +67,10 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	if opts.DryRun {
 		a.applyPlan(entries, state)
 		return nil
+	}
+
+	if err := a.verifyApplyState(ctx, entries, state); err != nil {
+		return err
 	}
 
 	if err := a.ensureLabels(ctx, planAreaLabels(entries)); err != nil {
@@ -85,6 +90,29 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 		a.printf("applied %s: %d created, %d dependencies wired\n", opts.File, created, wired)
 		a.printf("mapping saved to %s\n", opts.StatePath)
 	})
+}
+
+// verifyApplyState verifies that every issue in state.Mapping belongs to this
+// plan and carries the tool-generated provenance marker before any mutations
+// are executed against GitHub (#81).
+func (a *App) verifyApplyState(ctx context.Context, entries []plan.Entry, state *batchState) error {
+	validKeys := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		validKeys[e.Key()] = true
+	}
+	for key, number := range state.Mapping {
+		if !validKeys[key] {
+			return fmt.Errorf("state file contains unknown entry key %q (issue #%d)", key, number)
+		}
+		issue, err := a.Client.GetIssue(ctx, number)
+		if err != nil {
+			return fmt.Errorf("verifying mapped issue #%d for %s: %w", number, key, err)
+		}
+		if !verifyApplyProvenance(issue.Body, key) {
+			return fmt.Errorf("mapped issue #%d does not carry provenance for %s", number, key)
+		}
+	}
+	return nil
 }
 
 // applyPlan prints what a real run would do.
@@ -226,7 +254,8 @@ func (a *App) warnPlanCodeText(entries []plan.Entry) {
 }
 
 // applyBody composes structured section fields the same way the create
-// section flags do, and appends the discovered-from link.
+// section flags do, appends the discovered-from link, and adds the tool-generated
+// provenance marker.
 func applyBody(e plan.Entry) string {
 	body := e.Body
 	if !e.Sections.IsZero() {
@@ -240,7 +269,11 @@ func applyBody(e plan.Entry) string {
 			body = strings.TrimRight(body, "\n") + "\n\n" + link
 		}
 	}
-	return body
+	marker := applyProvenance(e.Key())
+	if body == "" {
+		return marker
+	}
+	return strings.TrimRight(body, "\n") + "\n\n" + marker
 }
 
 // planAreaLabels collects every distinct area label the plan uses, for the

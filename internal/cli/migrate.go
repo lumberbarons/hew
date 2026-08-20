@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -44,12 +46,17 @@ var beadTypeLabels = map[string]string{
 // MigrateBeads imports a beads snapshot as GitHub issues: create in
 // history order, wire parents and blockers, then close what was closed.
 func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
-	f, err := os.Open(opts.File)
+	if opts.File == "" {
+		return usageErr("usage: hew migrate beads --file <issues.jsonl>")
+	}
+	if opts.StatePath == "" {
+		opts.StatePath = filepath.Join(filepath.Dir(opts.File), "github-migration.json")
+	}
+	data, err := os.ReadFile(opts.File)
 	if err != nil {
 		return genericErr("cannot read beads snapshot: %v", err)
 	}
-	defer func() { _ = f.Close() }()
-	all, err := beads.Parse(f)
+	all, err := beads.Parse(bytes.NewReader(data))
 	if err != nil {
 		return genericErr("parsing %s: %v", opts.File, err)
 	}
@@ -76,7 +83,8 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 		return nil
 	}
 
-	state, err := loadBatchState(opts.StatePath)
+	digest := fileDigest(data)
+	state, err := loadBatchState(opts.StatePath, a.Repo.String(), digest)
 	if err != nil {
 		return err
 	}
@@ -84,6 +92,10 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 	if opts.DryRun {
 		a.migrationPlan(selected, state.Mapping, skippedClosed)
 		return nil
+	}
+
+	if err := a.verifyMigrateState(ctx, selected, state); err != nil {
+		return err
 	}
 
 	if err := a.ensureLabels(ctx, beadAreaLabels(selected)); err != nil {
@@ -109,6 +121,29 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 		}
 		a.printf("\nmapping saved to %s\n", opts.StatePath)
 	})
+}
+
+// verifyMigrateState verifies that every issue in state.Mapping belongs to this
+// snapshot and carries the tool-generated provenance marker before any mutations
+// are executed against GitHub (#81).
+func (a *App) verifyMigrateState(ctx context.Context, selected []beads.Bead, state *batchState) error {
+	validIDs := make(map[string]bool, len(selected))
+	for _, b := range selected {
+		validIDs[b.ID] = true
+	}
+	for id, number := range state.Mapping {
+		if !validIDs[id] {
+			return fmt.Errorf("state file contains unknown bead ID %q (issue #%d)", id, number)
+		}
+		issue, err := a.Client.GetIssue(ctx, number)
+		if err != nil {
+			return fmt.Errorf("verifying mapped issue #%d for %s: %w", number, id, err)
+		}
+		if !verifyBeadProvenance(issue.Body, id) {
+			return fmt.Errorf("mapped issue #%d does not carry provenance for %s", number, id)
+		}
+	}
+	return nil
 }
 
 // migrationPlan prints what a real run would do.
@@ -272,6 +307,10 @@ func (a *App) migrateClose(ctx context.Context, selected []beads.Bead, state map
 			continue
 		}
 		if !issue.IsOpen() {
+			continue
+		}
+		if !verifyBeadProvenance(issue.Body, b.ID) {
+			a.warnf("closing #%d: missing provenance for %s", number, b.ID)
 			continue
 		}
 		if b.CloseReason != "" {

@@ -96,10 +96,18 @@ func TestMigrateBeadsIncludeClosed(t *testing.T) {
 
 func TestMigrateBeadsResume(t *testing.T) {
 	f, app, opts := migrateSetup(t, migrationFixture)
-	// Pretend sc-epic was already migrated as #55.
-	f.issues = append(f.issues, issue(55, "Epic: Voltgo support", "P2"))
-	f.issues[len(f.issues)-1].ID = "ID55"
-	if err := os.WriteFile(opts.StatePath, []byte(`{"sc-epic": 55}`+"\n"), 0o644); err != nil {
+	// Pretend sc-epic was already migrated as #55 with provenance.
+	epicIssue := issue(55, "Epic: Voltgo support", "P2")
+	epicIssue.ID = "ID55"
+	epicIssue.Body = "Migrated from beads `sc-epic` (created 2026-05-01)"
+	f.issues = append(f.issues, epicIssue)
+	digest := fileDigest([]byte(migrationFixture))
+	stateJSON, _ := json.Marshal(batchState{
+		Repo:    "o/r",
+		Digest:  digest,
+		Mapping: map[string]int{"sc-epic": 55},
+	})
+	if err := os.WriteFile(opts.StatePath, stateJSON, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := app.MigrateBeads(ctx, opts); err != nil {
@@ -299,4 +307,169 @@ func TestMigrateBeadsJSON(t *testing.T) {
 	if got.Created != 3 || got.Wired != 2 || len(got.Mapping) != 3 {
 		t.Errorf("summary = %+v", got)
 	}
+}
+
+// A state file without repository or digest binding must abort, not be
+// trusted — that would allow mutating unrelated issues from untrusted state (#81).
+func TestMigrateBeadsRefusesUnboundState(t *testing.T) {
+	f, app, opts := migrateSetup(t, migrationFixture)
+	legacy := `{"sc-epic":101,"sc-1":102,"sc-2":103}` + "\n"
+	if err := os.WriteFile(opts.StatePath, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := app.MigrateBeads(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "not a valid resume-state file") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("API calls made despite unbound state: %v", f.calls)
+	}
+}
+
+func TestMigrateBeadsRefusesMismatchedDigestOrRepo(t *testing.T) {
+	cases := map[string]struct {
+		state batchState
+		want  string
+	}{
+		"mismatched repo": {
+			state: batchState{Repo: "other/repo", Digest: fileDigest([]byte(migrationFixture))},
+			want:  "is for repository",
+		},
+		"mismatched digest": {
+			state: batchState{Repo: "o/r", Digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
+			want:  "is for a different plan or snapshot",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f, app, opts := migrateSetup(t, migrationFixture)
+			data, _ := json.Marshal(tc.state)
+			if err := os.WriteFile(opts.StatePath, data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			err := app.MigrateBeads(ctx, opts)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			if len(f.calls) != 0 {
+				t.Errorf("API calls made despite mismatched state: %v", f.calls)
+			}
+		})
+	}
+}
+
+// Regression test for #81: a poisoned migration state mapping a closed bead
+// to an unrelated open issue must NOT comment on or close that issue.
+func TestMigrateBeadsPoisonedStateCannotCommentOrClose(t *testing.T) {
+	f, app, opts := migrateSetup(t, migrationFixture)
+	opts.IncludeClosed = true
+	// Issue #42 is an existing open issue in the repository.
+	target := issue(42, "Unrelated open issue", "P1", "bug")
+	target.State = "OPEN"
+	target.Body = "Do not close me"
+	f.issues = append(f.issues, target)
+
+	// Poison the state file to map closed bead "sc-done" to issue #42.
+	digest := fileDigest([]byte(migrationFixture))
+	poisoned, _ := json.Marshal(batchState{
+		Repo:    "o/r",
+		Digest:  digest,
+		Mapping: map[string]int{"sc-done": 42},
+	})
+	if err := os.WriteFile(opts.StatePath, poisoned, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := app.MigrateBeads(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "does not carry provenance") {
+		t.Fatalf("err = %v, want missing provenance error", err)
+	}
+
+	// Issue #42 must remain OPEN, uncommented, and unmutated.
+	checkTarget := f.byNumber(42)
+	if checkTarget.State != "OPEN" {
+		t.Errorf("unrelated issue #42 was closed: state=%s", checkTarget.State)
+	}
+	if len(f.comments[42]) != 0 {
+		t.Errorf("unrelated issue #42 received comments: %v", f.comments[42])
+	}
+	for _, call := range f.calls {
+		if strings.HasPrefix(call, "CloseIssue") || strings.HasPrefix(call, "Comment") || strings.HasPrefix(call, "CreateIssue") {
+			t.Errorf("unexpected mutating call made: %s", call)
+		}
+	}
+}
+
+// Regression test for #81: a poisoned migration state mapping a bead
+// to an unrelated issue must NOT wire dependency or parent edges on it.
+func TestMigrateBeadsPoisonedStateCannotWireEdges(t *testing.T) {
+	f, app, opts := migrateSetup(t, migrationFixture)
+	// Issue #42 is an existing issue in the repository.
+	target := issue(42, "Unrelated issue", "P2", "task")
+	target.State = "OPEN"
+	target.Body = "Unrelated issue body"
+	f.issues = append(f.issues, target)
+
+	// Poison the state file to map bead "sc-1" to issue #42.
+	digest := fileDigest([]byte(migrationFixture))
+	poisoned, _ := json.Marshal(batchState{
+		Repo:    "o/r",
+		Digest:  digest,
+		Mapping: map[string]int{"sc-1": 42},
+	})
+	if err := os.WriteFile(opts.StatePath, poisoned, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := app.MigrateBeads(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "does not carry provenance") {
+		t.Fatalf("err = %v, want missing provenance error", err)
+	}
+
+	checkTarget := f.byNumber(42)
+	if checkTarget.Parent != nil {
+		t.Errorf("unrelated issue #42 parent was modified: %+v", checkTarget.Parent)
+	}
+	if len(checkTarget.BlockedBy) != 0 {
+		t.Errorf("unrelated issue #42 blockedBy was modified: %+v", checkTarget.BlockedBy)
+	}
+}
+
+func TestMigrateBeadsRefusesUnknownIDOrMissingMappedIssue(t *testing.T) {
+	t.Run("unknown bead ID in state", func(t *testing.T) {
+		f, app, opts := migrateSetup(t, migrationFixture)
+		digest := fileDigest([]byte(migrationFixture))
+		data, _ := json.Marshal(batchState{
+			Repo:    "o/r",
+			Digest:  digest,
+			Mapping: map[string]int{"ghost": 99},
+		})
+		if err := os.WriteFile(opts.StatePath, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := app.MigrateBeads(ctx, opts)
+		if err == nil || !strings.Contains(err.Error(), "unknown bead ID") {
+			t.Fatalf("err = %v, want unknown bead ID error", err)
+		}
+		if len(f.calls) != 0 {
+			t.Errorf("API calls made: %v", f.calls)
+		}
+	})
+
+	t.Run("mapped issue not on GitHub", func(t *testing.T) {
+		_, app, opts := migrateSetup(t, migrationFixture)
+		digest := fileDigest([]byte(migrationFixture))
+		data, _ := json.Marshal(batchState{
+			Repo:    "o/r",
+			Digest:  digest,
+			Mapping: map[string]int{"sc-epic": 999},
+		})
+		if err := os.WriteFile(opts.StatePath, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := app.MigrateBeads(ctx, opts)
+		if err == nil || !strings.Contains(err.Error(), "verifying mapped issue #999") {
+			t.Fatalf("err = %v, want verifying mapped issue error", err)
+		}
+	})
 }

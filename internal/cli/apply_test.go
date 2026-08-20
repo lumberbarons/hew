@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -30,15 +31,19 @@ func applySetup(t *testing.T, fixture string) (*fakeClient, *App, ApplyOpts) {
 	return f, app, ApplyOpts{File: file, StatePath: filepath.Join(dir, "state.json")}
 }
 
-// readState reads a checkpoint file the way a resume does, so a test that
-// asserts on it fails when the on-disk shape drifts from what load expects.
+// readState reads a checkpoint file directly as JSON, so a test can
+// inspect what was persisted.
 func readState(t *testing.T, path string) *batchState {
 	t.Helper()
-	state, err := loadBatchState(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("reading %s: %v", path, err)
 	}
-	return state
+	var state batchState
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatalf("unmarshaling %s: %v", path, err)
+	}
+	return &state
 }
 
 func TestApplyCreatesAndWires(t *testing.T) {
@@ -91,7 +96,7 @@ func TestApplyComposesSectionBodies(t *testing.T) {
 	if err := app.Apply(ctx, opts); err != nil {
 		t.Fatal(err)
 	}
-	want := "### Goal\n\nShip it\n\n### Done when\n\n- [ ] tests pass"
+	want := "### Goal\n\nShip it\n\n### Done when\n\n- [ ] tests pass\n\n<!-- hew:apply key=line:1 -->"
 	if got := f.byNumber(101).Body; got != want {
 		t.Errorf("body = %q, want %q", got, want)
 	}
@@ -153,10 +158,18 @@ func TestApplyWarnsAboutUnmarkedCodeTextPerEntry(t *testing.T) {
 
 func TestApplyResume(t *testing.T) {
 	f, app, opts := applySetup(t, applyFixture)
-	// Pretend the epic was already created as #55.
-	f.issues = append(f.issues, issue(55, "Epic: Voltgo support", "P1"))
-	f.issues[len(f.issues)-1].ID = "ID55"
-	if err := os.WriteFile(opts.StatePath, []byte(`{"epic1": 55}`+"\n"), 0o644); err != nil {
+	// Pretend the epic was already created as #55 with provenance.
+	epicIssue := issue(55, "Epic: Voltgo support", "P1")
+	epicIssue.ID = "ID55"
+	epicIssue.Body = "### Goal\n\nstuff\n\n" + applyProvenance("epic1")
+	f.issues = append(f.issues, epicIssue)
+	digest := fileDigest([]byte(applyFixture))
+	stateJSON, _ := json.Marshal(batchState{
+		Repo:    "o/r",
+		Digest:  digest,
+		Mapping: map[string]int{"epic1": 55},
+	})
+	if err := os.WriteFile(opts.StatePath, stateJSON, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := app.Apply(ctx, opts); err != nil {
@@ -358,27 +371,129 @@ func TestApplyResumeRetriesAFailedEdge(t *testing.T) {
 	}
 }
 
-// State files written before edges were checkpointed are a bare key→number
-// map. A batch mid-flight across an upgrade must resume from one, not read
-// it as "nothing created yet" and duplicate everything.
-func TestApplyReadsALegacyStateFile(t *testing.T) {
+// A state file without repository or digest binding must abort, not be
+// trusted — that would allow mutating unrelated issues from untrusted state (#81).
+func TestApplyRefusesUnboundState(t *testing.T) {
 	f, app, opts := applySetup(t, applyFixture)
 	legacy := `{"epic1":101,"scaffold":102,"line:3":103}` + "\n"
 	if err := os.WriteFile(opts.StatePath, []byte(legacy), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.Apply(ctx, opts); err != nil {
+	err := app.Apply(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "not a valid resume-state file") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("API calls made despite unbound state: %v", f.calls)
+	}
+}
+
+func TestApplyRefusesMismatchedDigestOrRepo(t *testing.T) {
+	cases := map[string]struct {
+		state batchState
+		want  string
+	}{
+		"mismatched repo": {
+			state: batchState{Repo: "other/repo", Digest: fileDigest([]byte(applyFixture))},
+			want:  "is for repository",
+		},
+		"mismatched digest": {
+			state: batchState{Repo: "o/r", Digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
+			want:  "is for a different plan or snapshot",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f, app, opts := applySetup(t, applyFixture)
+			data, _ := json.Marshal(tc.state)
+			if err := os.WriteFile(opts.StatePath, data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			err := app.Apply(ctx, opts)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			if len(f.calls) != 0 {
+				t.Errorf("API calls made despite mismatched state: %v", f.calls)
+			}
+		})
+	}
+}
+
+// Regression test for #81: a poisoned state file mapping a plan entry to an
+// existing unrelated issue must be rejected before wiring any parent or dependency edges.
+func TestApplyPoisonedStateCannotWireEdgesOnUnrelatedIssues(t *testing.T) {
+	f, app, opts := applySetup(t, applyFixture)
+	// Issue #42 is an existing issue in the repo ("Existing dep").
+	// Poison the state file to claim "scaffold" was already created as #42,
+	// but issue #42 carries no provenance marker for "scaffold".
+	digest := fileDigest([]byte(applyFixture))
+	poisoned, _ := json.Marshal(batchState{
+		Repo:    "o/r",
+		Digest:  digest,
+		Mapping: map[string]int{"scaffold": 42},
+	})
+	if err := os.WriteFile(opts.StatePath, poisoned, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range f.calls {
-		if strings.HasPrefix(c, "CreateIssue") {
-			t.Errorf("legacy state ignored, issues recreated: %v", f.calls)
-			break
+
+	err := app.Apply(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "does not carry provenance") {
+		t.Fatalf("err = %v, want missing provenance error", err)
+	}
+
+	// Issue #42 must NOT have any parent or blocker edges wired to it.
+	target := f.byNumber(42)
+	if target.Parent != nil {
+		t.Errorf("unrelated issue #42 parent was modified: %+v", target.Parent)
+	}
+	if len(target.BlockedBy) != 0 {
+		t.Errorf("unrelated issue #42 blockedBy was modified: %+v", target.BlockedBy)
+	}
+	for _, call := range f.calls {
+		if strings.HasPrefix(call, "AddSubIssue") || strings.HasPrefix(call, "AddBlockedBy") || strings.HasPrefix(call, "CreateIssue") {
+			t.Errorf("unexpected mutating call made: %s", call)
 		}
 	}
-	if got := readState(t, opts.StatePath).Mapping["epic1"]; got != 101 {
-		t.Errorf("legacy mapping lost: %v", got)
-	}
+}
+
+func TestApplyRefusesUnknownKeyOrMissingMappedIssue(t *testing.T) {
+	t.Run("unknown key in state", func(t *testing.T) {
+		f, app, opts := applySetup(t, applyFixture)
+		digest := fileDigest([]byte(applyFixture))
+		data, _ := json.Marshal(batchState{
+			Repo:    "o/r",
+			Digest:  digest,
+			Mapping: map[string]int{"ghost": 99},
+		})
+		if err := os.WriteFile(opts.StatePath, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := app.Apply(ctx, opts)
+		if err == nil || !strings.Contains(err.Error(), "unknown entry key") {
+			t.Fatalf("err = %v, want unknown entry key error", err)
+		}
+		if len(f.calls) != 0 {
+			t.Errorf("API calls made: %v", f.calls)
+		}
+	})
+
+	t.Run("mapped issue not on GitHub", func(t *testing.T) {
+		_, app, opts := applySetup(t, applyFixture)
+		digest := fileDigest([]byte(applyFixture))
+		data, _ := json.Marshal(batchState{
+			Repo:    "o/r",
+			Digest:  digest,
+			Mapping: map[string]int{"epic1": 999},
+		})
+		if err := os.WriteFile(opts.StatePath, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := app.Apply(ctx, opts)
+		if err == nil || !strings.Contains(err.Error(), "verifying mapped issue #999") {
+			t.Fatalf("err = %v, want verifying mapped issue error", err)
+		}
+	})
 }
 
 // A state file need not carry both halves, and JSON has two ways to say so:
@@ -388,10 +503,11 @@ func TestApplyReadsALegacyStateFile(t *testing.T) {
 func TestApplyReadsAPartialStateFile(t *testing.T) {
 	// The recorded edge is between issues this plan never names, so nothing
 	// is skipped for the wrong reason.
+	digest := fileDigest([]byte(applyFixture))
 	cases := map[string]string{
-		"mapping key omitted": `{"edges":{"parent:998->999":true}}`,
-		"mapping is null":     `{"mapping":null,"edges":{"parent:998->999":true}}`,
-		"edges is null":       `{"mapping":{},"edges":null}`,
+		"mapping key omitted": fmt.Sprintf(`{"repo":"o/r","digest":%q,"edges":{"parent:998->999":true}}`, digest),
+		"mapping is null":     fmt.Sprintf(`{"repo":"o/r","digest":%q,"mapping":null,"edges":{"parent:998->999":true}}`, digest),
+		"edges is null":       fmt.Sprintf(`{"repo":"o/r","digest":%q,"mapping":{},"edges":null}`, digest),
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {
