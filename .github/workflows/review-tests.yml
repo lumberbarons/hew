@@ -1,8 +1,30 @@
 name: review-tests
 
+# The review runs once per PR, not once per push. Reviewing on `synchronize`
+# pays for a full re-derivation of every finding on each commit, including the
+# commits that exist only to fix what the last review reported; a follow-up pass
+# does occasionally surface something the first missed, but not reliably enough
+# to be worth a review per push. Draft PRs are skipped entirely, so the single
+# run lands when the PR is marked ready (or opened non-draft). Push a large
+# batch of new tests after that and want another pass? Ask for one, either by
+# commenting `@claude review tests` on the PR or with
+# `gh workflow run review-tests.yml -f pr=<number>`.
+#
+# The comment trigger is the phrase, not a bare `@claude` mention: that leaves
+# the plain mention free for a general-purpose assistant workflow later, so
+# asking Claude an unrelated question on a PR doesn't launch a test review. Only
+# comments from the repo owner, members, and collaborators trigger a run —
+# anyone can comment on a public repo, and each run spends API credits.
 on:
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number to review again
+        required: true
 
 permissions:
   contents: read
@@ -10,16 +32,51 @@ permissions:
   id-token: write
 
 concurrency:
-  group: review-tests-${{ github.event.pull_request.number }}
+  group: review-tests-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
   cancel-in-progress: true
 
 jobs:
   review-tests:
-    if: github.event.pull_request.draft == false
+    # A comment asking for a review is honoured even on a draft — the ask is
+    # explicit, so the draft skip that applies to automatic runs doesn't.
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       contains(github.event.comment.body, '@claude review tests') &&
+       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
     steps:
+      # `issue_comment` and `workflow_dispatch` runs carry the base repository's
+      # secrets, unlike a `pull_request` run from a fork, which gets none. So a
+      # comment asking for a review on a fork PR would be the classic pwn-request
+      # shape: this workflow's API key in the environment, the fork's code in the
+      # workspace, and a review that reads that code. Fork PRs can't get an
+      # automatic review either (no secrets, no API key), so decline them here
+      # and keep the answer the same however the review was asked for.
+      - name: check the PR is reviewable
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          fork=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" \
+            --json isCrossRepository --jq .isCrossRepository)
+          if [ "$fork" = "true" ]; then
+            echo "reviewable=false" >> "$GITHUB_OUTPUT"
+            echo "PR $PR_NUMBER comes from a fork — declining to review it with this workflow's secrets."
+          else
+            echo "reviewable=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: steps.guard.outputs.reviewable == 'true'
         with:
+          # Explicit head ref: a re-review asked for by comment or dispatch
+          # would otherwise check out the default branch, not the PR.
+          ref: refs/pull/${{ env.PR_NUMBER }}/head
           fetch-depth: 1
 
       # The workflow always runs so it reports a status on every PR, but the
@@ -28,10 +85,12 @@ jobs:
       # would leave the check permanently pending on PRs that touch no tests.
       - name: detect scoped test changes
         id: scope
+        if: steps.guard.outputs.reviewable == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          changed=$(gh pr diff "${{ github.event.pull_request.number }}" \
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          changed=$(gh pr diff "$PR_NUMBER" \
             --repo "${{ github.repository }}" --name-only)
           if printf '%s\n' "$changed" | grep -qE '(_test\.go$|^internal/render/testdata/)'; then
             echo "has_tests=true" >> "$GITHUB_OUTPUT"
@@ -47,10 +106,11 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
             REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
+            PR NUMBER: ${{ env.PR_NUMBER }}
+            COMMIT: ${{ steps.scope.outputs.sha }}
 
             Scope:
-            - Run `gh pr diff ${{ github.event.pull_request.number }} --name-only` and keep
+            - Run `gh pr diff ${{ env.PR_NUMBER }} --name-only` and keep
               only test files: `*_test.go` and files under `internal/render/testdata/`.
               Ignore files the PR deletes.
             - If the scope is only `internal/render/testdata/` files, add the
@@ -66,18 +126,20 @@ jobs:
             not to flag, pattern collapsing, the finding cap, and the REFERENCE.md output
             format.
 
-            Focus: run `gh pr diff ${{ github.event.pull_request.number }}` and prioritize
+            Focus: run `gh pr diff ${{ env.PR_NUMBER }}` and prioritize
             findings on lines this PR adds or modifies. For pre-existing code in the scoped
             files that this PR does not touch, report only P1 findings.
 
-            Posting: check for an earlier review comment of yours with
-            `gh pr view ${{ github.event.pull_request.number }} --comments`, then post the
-            report as a single PR comment using
-            `gh pr comment ${{ github.event.pull_request.number }} --edit-last --create-if-none`.
-            Carry forward earlier findings that still apply rather than re-deriving them,
-            drop findings the PR has since resolved, and add new ones. If there are no
-            findings, the comment is a one-line "no findings" note. This review is advisory:
-            commenting is the only output — never request changes or fail the job.
+            Posting: post the report as a single PR comment using
+            `gh pr comment ${{ env.PR_NUMBER }} --edit-last --create-if-none`, which
+            replaces any earlier report of yours in place rather than adding a comment.
+            This is a one-shot review of the whole branch — derive every finding fresh from
+            the current state of the scoped files, and do not read the PR's comment thread
+            to carry findings forward. Name the reviewed commit
+            (${{ steps.scope.outputs.sha }}) in the report so a reader can tell whether
+            later pushes have moved past it. If there are no findings, the comment is a
+            one-line "no findings" note. This review is advisory: commenting is the only
+            output — never request changes or fail the job.
           claude_args: |
             --max-turns 40
-            --allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*)"
