@@ -177,7 +177,7 @@ func TestPrime(t *testing.T) {
 	d := PrimeData{
 		Repo:       "lumberbarons/solar-controller",
 		Ready:      model.Ready(issues),
-		ReadyTotal: 3,
+		ReadyTotal: 2, // the fixture's third ready-shaped issue is untriaged
 		OpenTotal:  14,
 		InProgress: []model.Issue{inProgress},
 		Epics:      []model.Issue{epic},

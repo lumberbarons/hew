@@ -272,13 +272,21 @@ func SortForList(issues []Issue) {
 	})
 }
 
-// Ready returns open, non-epic, unclaimed issues with zero open blockers,
-// sorted by priority. Untriaged issues are included (invisible work is the
-// failure mode) and sort after explicitly-prioritized work via P?.
+// Ready returns open, non-epic, unclaimed, triaged issues with zero open
+// blockers, sorted by priority.
+//
+// Untriaged issues are excluded because ready feeds the automatic paths —
+// `hew ready` and the primer — where issue text reaches an agent with no
+// human in between. Anyone can open an issue on a public repo, but GitHub
+// drops labels from non-collaborators, so a priority and type label is
+// evidence that a maintainer saw the issue. That makes triage state a
+// forgery-resistant gate, and it costs hew-created issues nothing: the write
+// path labels them by construction. The work is not hidden — `hew triage`
+// and `hew list` still show it, and the primer carries the count.
 func Ready(issues []Issue) []Issue {
 	var out []Issue
 	for _, i := range issues {
-		if !i.IsOpen() || i.IsEpic() || i.Claimed() {
+		if !i.IsOpen() || i.IsEpic() || i.Claimed() || i.Untriaged() {
 			continue
 		}
 		if len(i.OpenBlockers()) > 0 {
@@ -290,12 +298,14 @@ func Ready(issues []Issue) []Issue {
 	return out
 }
 
-// InProgressIssues returns open issues carrying the in-progress label,
-// sorted by priority.
+// InProgressIssues returns open, triaged issues carrying the in-progress
+// label, sorted by priority. Untriaged non-epics are excluded because this
+// list feeds the automatic primer path; epics remain exempt from triage and
+// are surfaced here so the in-progress-epic contradiction stays visible.
 func InProgressIssues(issues []Issue) []Issue {
 	var out []Issue
 	for _, i := range issues {
-		if i.IsOpen() && i.InProgress() {
+		if i.IsOpen() && i.InProgress() && !i.Untriaged() {
 			out = append(out, i)
 		}
 	}

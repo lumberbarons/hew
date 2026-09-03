@@ -112,7 +112,7 @@ func primeCmd() *ucli.Command {
 func readyCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:  "ready",
-		Usage: "open, non-epic issues with zero open blockers, priority-sorted",
+		Usage: "open, non-epic, triaged issues with zero open blockers, priority-sorted",
 		Flags: []ucli.Flag{
 			&ucli.IntFlag{
 				Name:  "limit",

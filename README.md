@@ -68,7 +68,7 @@ If any command exits `4`, authenticate first with `gh auth login`.
 
 ```
 hew prime                      # session-start context for agents
-hew ready [--limit N]          # open, non-epic, zero open blockers; P0→P4 then P?
+hew ready [--limit N]          # open, non-epic, triaged, zero open blockers; P0→P4
                                   # capped at 30 by default (0 for all); truncation warns
 hew list [--label X] [--epic N] [--state open|closed|all]
             [--bodies]           # with --json: body on every line, dedup in one call
@@ -218,6 +218,13 @@ rationale comment. What it deliberately cannot do is the interesting part:
 
 Issue bodies are untrusted input; the permission scope and the allowlist are the
 mitigation, not the prompt's instructions.
+
+The same assumption shapes the read path: `ready` and `prime` run automatically —
+`prime` as a SessionStart hook — so they show triaged issues only. GitHub drops
+labels from non-collaborators, which makes a priority and type label evidence that
+a maintainer saw the issue, and evidence a stranger cannot forge. Anything
+unlabelled stays visible to people through `hew triage` and `hew list`, and the
+primer reports how much is waiting.
 
 ## Design
 
