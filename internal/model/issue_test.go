@@ -235,6 +235,18 @@ func TestInProgressEpicsUntriagedLists(t *testing.T) {
 	}
 }
 
+func TestInProgressExcludesUntriaged(t *testing.T) {
+	issues := []Issue{
+		open(1, "P2", "bug", "in-progress"), // triaged, included
+		open(2, "P1", "in-progress"),        // missing type
+		open(3, "task", "in-progress"),      // missing priority
+	}
+	got := InProgressIssues(issues)
+	if len(got) != 1 || got[0].Number != 1 {
+		t.Errorf("InProgressIssues() = %v, want [#1]", got)
+	}
+}
+
 func TestUntriagedIssuesOldestFirst(t *testing.T) {
 	issues := []Issue{open(9), open(3), open(7, "P1", "bug")}
 	got := UntriagedIssues(issues)

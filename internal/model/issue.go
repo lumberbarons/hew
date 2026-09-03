@@ -298,12 +298,14 @@ func Ready(issues []Issue) []Issue {
 	return out
 }
 
-// InProgressIssues returns open issues carrying the in-progress label,
-// sorted by priority.
+// InProgressIssues returns open, triaged issues carrying the in-progress
+// label, sorted by priority. Untriaged non-epics are excluded because this
+// list feeds the automatic primer path; epics remain exempt from triage and
+// are surfaced here so the in-progress-epic contradiction stays visible.
 func InProgressIssues(issues []Issue) []Issue {
 	var out []Issue
 	for _, i := range issues {
-		if i.IsOpen() && i.InProgress() {
+		if i.IsOpen() && i.InProgress() && !i.Untriaged() {
 			out = append(out, i)
 		}
 	}
