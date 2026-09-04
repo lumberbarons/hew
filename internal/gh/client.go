@@ -102,6 +102,9 @@ type Client interface {
 	// implementations resolve node IDs internally, so callers never juggle
 	// two identifier families.
 	CloseIssue(ctx context.Context, number int, reason CloseReason) error
+	// ReopenIssue reopens a closed issue. There is no reason enum to pass:
+	// GitHub records the reopen itself as the state reason.
+	ReopenIssue(ctx context.Context, number int) error
 	// AddBlockedBy marks number as blocked by blockingNumber.
 	AddBlockedBy(ctx context.Context, number, blockingNumber int) error
 	RemoveBlockedBy(ctx context.Context, number, blockingNumber int) error

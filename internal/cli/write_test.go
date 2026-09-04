@@ -681,6 +681,120 @@ func TestCloseReportsExistingCloseState(t *testing.T) {
 	}
 }
 
+// TestReopen covers #40: reopen is close's inverse, so the reason comment and
+// the state change land in one call the same way close's do.
+func TestReopen(t *testing.T) {
+	closed := issue(1, "Work", "P2", "bug")
+	closed.State = "CLOSED"
+	closed.StateReason = "NOT_PLANNED"
+	f := newFake(closed)
+	app, out, _ := newApp(f)
+	if err := app.Reopen(ctx, 1, "#24 stalled; picking this back up"); err != nil {
+		t.Fatal(err)
+	}
+	i := f.byNumber(1)
+	if i.State != "OPEN" || i.StateReason != "REOPENED" {
+		t.Errorf("state = %s %s", i.State, i.StateReason)
+	}
+	if !reflect.DeepEqual(f.comments[1], []string{"#24 stalled; picking this back up"}) {
+		t.Errorf("comments = %v", f.comments[1])
+	}
+	if !strings.Contains(out.String(), "reopened #1") {
+		t.Errorf("output = %q", out.String())
+	}
+}
+
+// A reopened issue carries no label surgery, so it rejoins the normal read
+// path: list shows it again with whatever labels it already had.
+func TestReopenRestoresIssueToList(t *testing.T) {
+	closed := issue(1, "Work", "P2", "bug")
+	closed.State = "CLOSED"
+	closed.StateReason = "NOT_PLANNED"
+	f := newFake(closed)
+	app, out, _ := newApp(f)
+	if err := app.List(ctx, ListOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "#1") {
+		t.Fatalf("closed issue listed before reopen: %q", out.String())
+	}
+	if err := app.Reopen(ctx, 1, "back on the plate"); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := app.List(ctx, ListOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "#1") || !strings.Contains(out.String(), "Work") {
+		t.Errorf("reopened issue missing from list: %q", out.String())
+	}
+}
+
+// Reopening an open issue is the state the caller asked for, so it reports
+// that and stops — erroring would make an idempotent retry look like a
+// failure, and commenting would leave a stray note on an untouched issue.
+func TestReopenOpenIssueIsANoOp(t *testing.T) {
+	f := newFake(issue(1, "Work", "P2", "bug"))
+	app, out, _ := newApp(f)
+	if err := app.Reopen(ctx, 1, "r"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "#1 is already open") {
+		t.Errorf("output = %q", out.String())
+	}
+	if len(f.comments[1]) != 0 {
+		t.Errorf("no-op reopen still commented: %v", f.comments[1])
+	}
+	assertOnlyReads(t, f)
+}
+
+func TestReopenValidation(t *testing.T) {
+	closed := issue(1, "Work", "P2", "bug")
+	closed.State = "CLOSED"
+	f := newFake(closed)
+	app, _, _ := newApp(f)
+	exitCode(t, app.Reopen(ctx, 1, ""), ExitUsage)
+	if len(f.calls) != 0 || len(f.comments[1]) != 0 {
+		t.Errorf("refused reopen still touched the API: calls=%v comments=%v", f.calls, f.comments[1])
+	}
+	// A failed pre-read is reported as-is: nothing has been written yet, so
+	// there is no partial state to describe.
+	f.failOn["GetIssue"] = errors.New("read boom")
+	if err := app.Reopen(ctx, 1, "r"); err == nil || !strings.Contains(err.Error(), "read boom") {
+		t.Errorf("err = %v", err)
+	}
+	// A failed comment likewise: the state change never ran.
+	delete(f.failOn, "GetIssue")
+	f.failOn["Comment"] = errors.New("comment boom")
+	if err := app.Reopen(ctx, 1, "r"); err == nil || !strings.Contains(err.Error(), "comment boom") {
+		t.Errorf("err = %v", err)
+	}
+	if f.byNumber(1).State != "CLOSED" {
+		t.Errorf("state = %s, want CLOSED", f.byNumber(1).State)
+	}
+}
+
+// The reason comment posts before the state change, so a failure between the
+// two has to say the comment already landed — a bare retry would post it
+// twice, exactly as close's does.
+func TestReopenReportsPostedCommentWhenReopenFails(t *testing.T) {
+	closed := issue(1, "Work", "P2", "bug")
+	closed.State = "CLOSED"
+	f := newFake(closed)
+	f.failOn["ReopenIssue"] = errors.New("boom")
+	app, _, _ := newApp(f)
+	err := app.Reopen(ctx, 1, "back on")
+	if err == nil || !strings.Contains(err.Error(), "posted the reason comment on #1") {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "a retry will comment again") {
+		t.Errorf("err = %v", err)
+	}
+	if f.byNumber(1).State != "CLOSED" {
+		t.Errorf("state = %s, want CLOSED", f.byNumber(1).State)
+	}
+}
+
 func TestBlock(t *testing.T) {
 	f := newFake(issue(1, "A", "P2", "bug"), issue(2, "B", "P2", "bug"))
 	app, out, _ := newApp(f)

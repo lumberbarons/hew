@@ -488,6 +488,39 @@ func (a *App) Close(ctx context.Context, number int, reason string, completed bo
 	return a.reportMutation(ctx, number, "closed #%d (%s)\n", number, formatStateReason(string(stateReason)))
 }
 
+// Reopen is close's inverse: comment the reason, reopen the issue. Closing
+// comments routinely encode the condition to reopen on ("reopen only if #24
+// stalls"), and acting on one should keep close's comment-plus-state-change
+// shape rather than degrade to a bare state flip. No label surgery — the
+// issue rejoins list/triage/ready with the labels it already had, and normal
+// retriage applies.
+func (a *App) Reopen(ctx context.Context, number int, reason string) error {
+	if reason == "" {
+		return usageErr("--reason is required")
+	}
+	issue, err := a.Client.GetIssue(ctx, number)
+	if err != nil {
+		return err
+	}
+	if issue.IsOpen() {
+		// The requested state already holds, so this is not an error to
+		// report: erroring would make an idempotent retry look like a
+		// failure. Commenting is skipped with it — the note would document a
+		// reopen that never happened.
+		a.printf("#%d is already open\n", number)
+		return nil
+	}
+	if err := a.Client.Comment(ctx, number, reason); err != nil {
+		return err
+	}
+	if err := a.Client.ReopenIssue(ctx, number); err != nil {
+		// The reason comment already posted; flag it so a retry isn't read as
+		// a clean redo — re-running would post the comment a second time.
+		return fmt.Errorf("posted the reason comment on #%d but reopening it failed (a retry will comment again): %w", number, err)
+	}
+	return a.reportMutation(ctx, number, "reopened #%d\n", number)
+}
+
 // Block adds a native dependency after a transitive client-side cycle
 // check — GitHub itself only rejects self-blocks and direct two-issue
 // cycles. It refuses a closed target unless allowClosed is set; a closed

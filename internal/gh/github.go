@@ -413,6 +413,19 @@ func (g *GitHub) CloseIssue(ctx context.Context, number int, reason CloseReason)
 	return wrapErr(g.gql.DoWithContext(ctx, query, vars, &struct{}{}))
 }
 
+func (g *GitHub) ReopenIssue(ctx context.Context, number int) error {
+	id, err := g.nodeID(ctx, number)
+	if err != nil {
+		return err
+	}
+	query := `
+	mutation($id: ID!) {
+		reopenIssue(input: {issueId: $id}) { clientMutationId }
+	}`
+	vars := map[string]any{"id": id}
+	return wrapErr(g.gql.DoWithContext(ctx, query, vars, &struct{}{}))
+}
+
 func (g *GitHub) AddBlockedBy(ctx context.Context, number, blockingNumber int) error {
 	return g.dependencyMutation(ctx, "addBlockedBy", number, blockingNumber)
 }
