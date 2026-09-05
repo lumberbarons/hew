@@ -29,11 +29,19 @@ type Style struct {
 	on bool
 }
 
-// ColorEnabled decides whether output to w carries color. FORCE_COLOR=1
-// opts back in unconditionally (tests, pagers that can render it, pipes);
-// otherwise color needs the standard opt-out contract unset — NO_COLOR
-// unset, TERM not "dumb" — and w to be a real terminal.
+// ColorEnabled decides whether output to w carries color: the environment
+// contract applied to whether w is a real terminal.
 func ColorEnabled(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return colorFromEnv(ok && term.IsTerminal(int(f.Fd())))
+}
+
+// colorFromEnv applies the environment contract to the TTY decision.
+// FORCE_COLOR=1 opts back in unconditionally (tests, pagers that can render
+// it, pipes); otherwise color needs the standard opt-out contract unset —
+// NO_COLOR unset, TERM not "dumb" — on top of a real terminal. It is split
+// from the TTY probe so the contract is testable without one.
+func colorFromEnv(isTTY bool) bool {
 	if os.Getenv("FORCE_COLOR") == "1" {
 		return true
 	}
@@ -43,11 +51,7 @@ func ColorEnabled(w io.Writer) bool {
 	if os.Getenv("TERM") == "dumb" {
 		return false
 	}
-	f, ok := w.(*os.File)
-	if !ok {
-		return false
-	}
-	return term.IsTerminal(int(f.Fd()))
+	return isTTY
 }
 
 // StyleFor converts the precomputed color decision into a Style. The

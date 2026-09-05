@@ -10,33 +10,37 @@ import (
 	"github.com/lumberbarons/hew/internal/model"
 )
 
-func TestColorEnabledContract(t *testing.T) {
-	// FORCE_COLOR=1 opts back in unconditionally — off a TTY, past NO_COLOR.
-	t.Run("force color wins", func(t *testing.T) {
-		t.Setenv("FORCE_COLOR", "1")
-		t.Setenv("NO_COLOR", "1")
-		t.Setenv("TERM", "dumb")
-		var buf bytes.Buffer
-		if !ColorEnabled(&buf) {
-			t.Error("FORCE_COLOR=1 must enable color even against NO_COLOR/TERM=dumb")
-		}
-	})
-	t.Run("no color opts out", func(t *testing.T) {
-		t.Setenv("FORCE_COLOR", "")
-		t.Setenv("NO_COLOR", "anything")
-		t.Setenv("TERM", "xterm-256color")
-		if ColorEnabled(neverTTYFile(t)) {
-			t.Error("NO_COLOR must disable color regardless of value")
-		}
-	})
-	t.Run("dumb term disables", func(t *testing.T) {
-		t.Setenv("FORCE_COLOR", "")
-		t.Setenv("NO_COLOR", "")
-		t.Setenv("TERM", "dumb")
-		if ColorEnabled(neverTTYFile(t)) {
-			t.Error("TERM=dumb must disable color")
-		}
-	})
+// The environment contract, driven against a TTY decision of both
+// polarities — the opt-outs only mean anything when the writer is a
+// terminal, so testing them off a TTY would prove nothing.
+func TestColorFromEnvContract(t *testing.T) {
+	for _, tt := range []struct {
+		name              string
+		force, noCol, trm string
+		isTTY, want       bool
+	}{
+		{"tty with a clean env colors", "", "", "xterm-256color", true, true},
+		{"NO_COLOR opts out on a tty", "", "1", "xterm-256color", true, false},
+		{"NO_COLOR opts out whatever its value", "", "0", "xterm-256color", true, false},
+		{"TERM=dumb opts out on a tty", "", "", "dumb", true, false},
+		{"FORCE_COLOR beats NO_COLOR and dumb", "1", "1", "dumb", true, true},
+		{"FORCE_COLOR opts back in off a tty", "1", "", "xterm-256color", false, true},
+		{"only FORCE_COLOR=1 counts", "true", "", "xterm-256color", false, false},
+		{"no tty, clean env, stays plain", "", "", "xterm-256color", false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("FORCE_COLOR", tt.force)
+			t.Setenv("NO_COLOR", tt.noCol)
+			t.Setenv("TERM", tt.trm)
+			if got := colorFromEnv(tt.isTTY); got != tt.want {
+				t.Errorf("colorFromEnv(%v) = %v, want %v", tt.isTTY, got, tt.want)
+			}
+		})
+	}
+}
+
+// ColorEnabled is the contract above wired to a probe of the writer.
+func TestColorEnabledProbesTheWriter(t *testing.T) {
 	t.Run("non-terminal file disables", func(t *testing.T) {
 		t.Setenv("FORCE_COLOR", "")
 		t.Setenv("NO_COLOR", "")
@@ -52,6 +56,15 @@ func TestColorEnabledContract(t *testing.T) {
 		var buf bytes.Buffer
 		if ColorEnabled(&buf) {
 			t.Error("a non-file writer cannot be a terminal")
+		}
+	})
+	t.Run("env contract still reaches ColorEnabled", func(t *testing.T) {
+		t.Setenv("FORCE_COLOR", "1")
+		t.Setenv("NO_COLOR", "1")
+		t.Setenv("TERM", "dumb")
+		var buf bytes.Buffer
+		if !ColorEnabled(&buf) {
+			t.Error("FORCE_COLOR=1 must enable color even against NO_COLOR/TERM=dumb")
 		}
 	})
 }
@@ -170,6 +183,35 @@ func TestPrimeColored(t *testing.T) {
 	var buf bytes.Buffer
 	Prime(&buf, "Workflow: hew ready → hew start <n>.", d, StyleFor(true))
 	checkGolden(t, "prime_color", buf.Bytes())
+}
+
+// EpicStatus formats its rollup and child lines itself rather than going
+// through lines(), so its colored output needs its own golden — a child
+// line that lost its style would be invisible to every other test here.
+func TestEpicStatusColored(t *testing.T) {
+	epic := model.Issue{
+		Number: 137, Title: "Epic: Voltgo", State: "OPEN", CreatedAt: ts(5),
+		Labels:         []string{"P2"},
+		SubIssuesTotal: 3, SubIssuesCompleted: 1,
+	}
+	children := []model.Issue{
+		{Number: 120, Title: "Open child", State: "OPEN", Labels: []string{"P1", "bug"}},
+		{Number: 121, Title: "Done child", State: "CLOSED", Labels: []string{"P2", "task"}},
+	}
+	var buf bytes.Buffer
+	EpicStatus(&buf, epic, children, StyleFor(true))
+	checkGolden(t, "epic_status_color", buf.Bytes())
+	// Pinned to the palette constants as well as the golden, so a changed
+	// color cannot be re-baselined silently by `go test -update`.
+	if !strings.Contains(buf.String(), sgrAmber+"#120"+sgrReset) {
+		t.Errorf("child number not amber:\n%q", buf.String())
+	}
+	if !strings.Contains(buf.String(), sgrGreen+"P1"+sgrReset) {
+		t.Errorf("child priority not green:\n%q", buf.String())
+	}
+	if !strings.Contains(buf.String(), sgrDim+"1/3"+sgrReset) {
+		t.Errorf("epic rollup not dimmed:\n%q", buf.String())
+	}
 }
 
 // The hostile-text guard still holds under color: sanitization runs before
