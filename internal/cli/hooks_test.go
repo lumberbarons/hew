@@ -289,3 +289,115 @@ func TestFindProjectRootNotARepo(t *testing.T) {
 		t.Error("expected error outside a repository")
 	}
 }
+
+// externalTarget writes a valid settings file outside the project root —
+// the kind of file a malicious checkout would aim a symlink at, standing in
+// for a global agent configuration.
+func externalTarget(t *testing.T) (dir string, file string, before []byte) {
+	t.Helper()
+	dir = t.TempDir()
+	file = filepath.Join(dir, "settings.json")
+	before = []byte(`{"permissions":{"allow":["Bash(rm:*)"]}}` + "\n")
+	if err := os.WriteFile(file, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir, file, before
+}
+
+// linkOutside plants one of the two symlink shapes the fix has to refuse:
+// the directory hew owns replaced by a link, or the settings file itself.
+// The target is absolute unless relative is set, which exercises the ../
+// escape rather than the absolute one.
+func linkOutside(t *testing.T, root string, agent HookAgent, shape string, dir, file string, relative bool) {
+	t.Helper()
+	settings := hooksPath(root, agent)
+	parent := filepath.Dir(settings)
+	dest, from := dir, filepath.Dir(parent)
+	if shape == "file" {
+		dest, from = file, parent
+	}
+	if relative {
+		rel, err := filepath.Rel(from, dest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dest = rel
+	}
+	switch shape {
+	case "dir":
+		if err := os.Symlink(dest, parent); err != nil {
+			t.Fatal(err)
+		}
+	case "file":
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(dest, settings); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestHooksRefuseSymlinkedSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		agent    HookAgent
+		shape    string
+		relative bool
+	}{
+		{"claude dir", HookAgentClaude, "dir", false},
+		{"claude file", HookAgentClaude, "file", false},
+		{"claude dir relative", HookAgentClaude, "dir", true},
+		{"claude file relative", HookAgentClaude, "file", true},
+		{"codex dir", HookAgentCodex, "dir", false},
+		{"codex file", HookAgentCodex, "file", false},
+	} {
+		for _, op := range []string{"install", "remove"} {
+			t.Run(tc.name+" "+op, func(t *testing.T) {
+				app, _, root := hooksApp(t)
+				dir, file, before := externalTarget(t)
+				linkOutside(t, root, tc.agent, tc.shape, dir, file, tc.relative)
+
+				var err error
+				if op == "install" {
+					err = app.HooksInstall(root, tc.agent)
+				} else {
+					err = app.HooksRemove(root, tc.agent)
+				}
+				if err == nil {
+					t.Fatalf("%s followed a symlinked %s", op, tc.shape)
+				}
+				if !strings.Contains(err.Error(), "symlink") {
+					t.Errorf("error does not name the cause: %v", err)
+				}
+
+				after, readErr := os.ReadFile(file)
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				if !bytes.Equal(before, after) {
+					t.Errorf("external target modified:\n%s", after)
+				}
+			})
+		}
+	}
+}
+
+// A symlink that stays inside the checkout is refused too: hew owns these
+// paths, so anything standing in for one is a redirect it did not choose.
+func TestHooksRefuseSymlinkInsideProject(t *testing.T) {
+	app, _, root := hooksApp(t)
+	inside := filepath.Join(root, "elsewhere")
+	if err := os.MkdirAll(inside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(inside, filepath.Join(root, ".claude")); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.HooksInstall(root, HookAgentClaude); err == nil {
+		t.Fatal("install followed a symlink inside the project")
+	}
+	if _, err := os.Stat(filepath.Join(inside, "settings.json")); !os.IsNotExist(err) {
+		t.Errorf("wrote through the symlink: %v", err)
+	}
+}
