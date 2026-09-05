@@ -11,7 +11,7 @@ The commands themselves, written against the `gh.Client` interface so `cmd/hew` 
 | `apply.go` | `apply`: walks a parsed `internal/plan` plan, creating issues then wiring dependency edges | Changing `apply` execution (schema and validation live in `internal/plan`) |
 | `migrate.go` | `migrate beads`: maps a parsed beads snapshot onto the conventions — priorities, types, deps, epics, in-progress state | Changing the beads migration |
 | `batch.go` | Shared machinery for `apply` and `migrate`: the checkpoint state file and its repo/digest binding, the pre-flight verification that every mapped issue carries the provenance marker `internal/conventions` defines, throttled writes, label bootstrapping | Changing resume behavior, checkpoint trust, or write throttling |
-| `hooks.go` | `hooks install\|remove`: edits the project's `.claude/settings.json` in place, preserving unknown fields | Changing the SessionStart hook |
+| `hooks.go` | `hooks install\|remove`: edits the project's `.claude/settings.json` (claude) or `.codex/hooks.json` (codex) in place, preserving unknown fields; for opencode, writes/removes the whole `.opencode/plugins/hew-prime.js` plugin (go:embed asset in `opencode/`), marker-guarded | Changing the session-start hook |
 | `exit.go` | Maps errors to the exit codes agent loops branch on (`2` usage, `3` claimed by someone else, `4` auth, `5` claimed by you), plus the `--repo` and issue-number argument parsers | Changing an exit code — it is contract |
 
 Tests run against `fakeClient`, never the network. `batch.go` has no test file of its own — it is covered through `apply` and `migrate`; the provenance marker it verifies is unit-tested in `internal/conventions`.
@@ -27,5 +27,5 @@ Checkpoint state is trusted local scratch, never a portable input. A state file 
 | `pr_test.go` | Covers `pr.go`: body composition, `Fixes #n` handling, branch and claim inference | Changing the `pr` command |
 | `apply_test.go` | Covers `apply.go` and its half of `batch.go`: plan execution, resume, dependency wiring | Changing `apply` |
 | `migrate_test.go` | Covers `migrate.go` and its half of `batch.go`: beads mapping, resume | Changing the beads migration |
-| `hooks_test.go` | Covers `hooks.go`: settings merge, idempotent install, removal | Changing the SessionStart hook |
+| `hooks_test.go` | Covers `hooks.go`: settings merge, idempotent install, removal, opencode plugin install/remove/prune | Changing the session-start hook |
 | `exit_test.go` | Covers `exit.go`: the error-to-exit-code mapping and the argument parsers | Changing an exit code |
