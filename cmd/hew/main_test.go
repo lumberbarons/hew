@@ -280,6 +280,25 @@ func TestClosedOverrideFlagReachesCommand(t *testing.T) {
 	}
 }
 
+// TestHookFormatFlagReachesCommand: the cursor hook install writes
+// `hew prime --hook-format cursor`, so the flag must actually reach prime's
+// options — a flag declared but never read would leave Cursor parsing bare
+// primer text and dropping it as a JSON error.
+func TestHookFormatFlagReachesCommand(t *testing.T) {
+	app := root()
+	var got string
+	findCommand(t, app, "prime").Action = func(_ context.Context, cmd *ucli.Command) error {
+		got = cmd.String("hook-format")
+		return nil
+	}
+	if err := app.Run(context.Background(), []string{"hew", "prime", "--hook-format", "cursor"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got != "cursor" {
+		t.Errorf("hook-format = %q, want cursor", got)
+	}
+}
+
 // TestDoneWhenTakesItemsVerbatim covers #47: --done-when values are prose, so
 // a comma inside one is punctuation, not a separator. urfave's default slice
 // splitting turned a single item into several, silently corrupting the

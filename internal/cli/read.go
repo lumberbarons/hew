@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"slices"
 	"strings"
@@ -179,9 +180,27 @@ func (a *App) Triage(ctx context.Context) error {
 	return a.emitList(untriaged, "no untriaged issues", render.List)
 }
 
+// PrimeOpts re-targets the primer's output at a caller with its own
+// format, such as an agent hook whose stdout contract is not text.
+type PrimeOpts struct {
+	// HookFormat is the session-start hook format to emit. Empty is the
+	// plain text primer; "cursor" JSON-encodes the primer into the
+	// additional_context field Cursor's sessionStart hook reads.
+	HookFormat string
+}
+
 // Prime emits the session-start context: static conventions, live state,
-// contradictions.
-func (a *App) Prime(ctx context.Context) error {
+// contradictions. prime never reads stdin — Cursor writes its sessionStart
+// payload there, and ignoring it is what keeps that JSON out of the primer.
+func (a *App) Prime(ctx context.Context, opts PrimeOpts) error {
+	if opts.HookFormat != "" && opts.HookFormat != "cursor" {
+		return usageErr("--hook-format must be cursor")
+	}
+	if opts.HookFormat != "" && a.JSON {
+		// The hook path is machine-to-machine: plain text always, whatever
+		// the terminal says, and never the --json schema.
+		return usageErr("--hook-format and --json are alternatives")
+	}
 	issues, err := a.Client.ListIssues(ctx, openStates)
 	if err != nil {
 		return err
@@ -199,6 +218,11 @@ func (a *App) Prime(ctx context.Context) error {
 	}
 	if len(d.Ready) > primeReadyCap {
 		d.Ready = d.Ready[:primeReadyCap]
+	}
+	if opts.HookFormat == "cursor" {
+		var buf bytes.Buffer
+		render.Prime(&buf, conventions.PrimerStatic, d, render.Style{})
+		return render.CursorHookJSON(a.Out, buf.String())
 	}
 	return a.emitPrime(conventions.PrimerStatic, d)
 }

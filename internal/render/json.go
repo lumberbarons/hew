@@ -167,6 +167,15 @@ func JSONPrime(w io.Writer, d PrimeData) error {
 	return writeJSON(w, out)
 }
 
+// CursorHookJSON writes the primer as the JSON object Cursor's sessionStart
+// hook reads: its stdout must be valid JSON — bare primer text fails the
+// parse — and the context travels in additional_context. The spelling is
+// snake_case on purpose: Cursor ignores Claude Code's camelCase
+// additionalContext field.
+func CursorHookJSON(w io.Writer, primer string) error {
+	return json.NewEncoder(w).Encode(map[string]string{"additional_context": primer})
+}
+
 // EpicStatusJSON pairs an epic with its resolved children.
 type EpicStatusJSON struct {
 	Epic     IssueJSON   `json:"epic"`

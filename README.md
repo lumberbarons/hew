@@ -37,7 +37,7 @@ repository is detected from the git remote (`--repo owner/name` overrides).
 
 ```sh
 hew init          # bootstrap the label set in a repo; prints a CLAUDE.md snippet
-hew hooks install <claude|codex|opencode> # agent session-start hook running `hew prime`
+hew hooks install <claude|codex|cursor|opencode> # agent session-start hook running `hew prime`
 hew prime         # session-start context: conventions + ready work + live state
 hew ready         # what should I work on? (priority-sorted, zero open blockers)
 hew start 42      # claim it: assign @me + in-progress (refuses claimed work: exit 3,
@@ -48,14 +48,22 @@ hew pr            # draft PR for the claimed issue, body composed, "Fixes #42" e
 
 ## Session-start agents
 
-`hew prime` works with Claude Code, Codex, and opencode. Choose the agent
-explicitly:
+`hew prime` works with Claude Code, Codex, Cursor, and opencode. Choose the
+agent explicitly:
 
 - **Claude Code:** `hew hooks install claude` adds a SessionStart hook to the
   project's `.claude/settings.json`.
 - **Codex:** `hew hooks install codex` adds the equivalent hook to the
   project's `.codex/hooks.json`. Codex requires project hooks to be trusted;
   review and enable it with `/hooks`.
+- **Cursor:** `hew hooks install cursor` adds a `sessionStart` hook to the
+  project's `.cursor/hooks.json`. Cursor's stdout contract differs from the
+  others': the hook must print valid JSON and the primer travels in the
+  `additional_context` field (snake_case — Cursor ignores Claude Code's
+  camelCase `additionalContext`), so the installed command is
+  `hew prime --hook-format cursor`, which JSON-encodes the primer. Don't copy
+  a Claude or Codex hook entry verbatim: bare `hew prime` text fails Cursor's
+  JSON parse and the primer never lands.
 - **opencode:** `hew hooks install opencode` writes an auto-discovered plugin
   to `.opencode/plugins/hew-prime.js`; it injects the primer into system
   context, so it is present before the first turn without appearing in chat.
@@ -124,8 +132,8 @@ hew apply <plan.jsonl> [--dry-run] [--state F] [--throttle D]
                                  # checkpointed and resumable (see "Plan files")
                                  # defaults: --state <plan>.state.json, --throttle 500ms
 hew init
-hew hooks install|remove <claude|codex|opencode>
-                              # add/remove a SessionStart hook running `hew prime`
+hew hooks install|remove <claude|codex|cursor|opencode>
+                              # add/remove a session-start hook running `hew prime`
                               # in the selected agent's project configuration;
                               # preserves the rest of the file; needs a git repo
 hew migrate beads [--file F] [--state F] [--throttle D]
