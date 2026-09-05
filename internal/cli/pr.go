@@ -11,6 +11,7 @@ import (
 	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/model"
+	"github.com/lumberbarons/hew/internal/render"
 )
 
 // PROpts are the pr command's inputs. Every section is optional: the point
@@ -86,7 +87,7 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 		a.warnf("branch %s has no %s prefix", head, strings.Join(conventions.BranchPrefixes, "|"))
 	}
 	if len(issue.Assignees) > 0 && !slices.Contains(issue.Assignees, viewer) {
-		a.warnf("#%d is claimed by @%s, not you", issue.Number, strings.Join(issue.Assignees, " @"))
+		a.warnf("#%d is claimed by @%s, not you", issue.Number, render.SanitizeInline(strings.Join(issue.Assignees, " @")))
 	}
 
 	body, err := a.composePRBody(opts, issue)

@@ -616,6 +616,23 @@ func TestPRWarnsWhenTheIssueIsSomeoneElsesClaim(t *testing.T) {
 	}
 }
 
+// #107: the claim warning prints GitHub-derived logins outside the renderer.
+func TestPRClaimWarningNeutralizesHostileAssignee(t *testing.T) {
+	other := issue(30, "their work")
+	other.Assignees = []string{"someone" + hostile}
+	f := newFake(other)
+	app, _, errOut := newApp(f)
+	onBranch(app, "feat/30-their-work")
+
+	if err := app.PR(context.Background(), PROpts{Sections: sections("", "", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	assertNeutralized(t, "foreign-claim warning", errOut.String())
+	if !strings.Contains(errOut.String(), "claimed by @someone") {
+		t.Errorf("sanitizing dropped the login text: %q", errOut.String())
+	}
+}
+
 func TestPRWarnsWhenTestingIsOmitted(t *testing.T) {
 	f := newFake(claimed(30, "one"))
 	app, _, errOut := newApp(f)
