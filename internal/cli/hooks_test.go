@@ -2,12 +2,21 @@ package cli
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// opencodePluginHarness drives the embedded plugin under node. It lives
+// outside the asset so the file hew installs stays exactly what opencode
+// loads, with no test scaffolding in it.
+//
+//go:embed testdata/opencode_plugin_harness.mjs
+var opencodePluginHarness []byte
 
 func hooksApp(t *testing.T) (*App, *bytes.Buffer, string) {
 	t.Helper()
@@ -246,7 +255,11 @@ func TestHooksInstallOpencode(t *testing.T) {
 	if err := app.HooksInstall(root, HookAgentOpencode); err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile(opencodePluginPath(root))
+	// Spelled out rather than composed from hookPathParts: this exact path
+	// is the one opencode auto-discovers, and a test that asks the code
+	// under test where it wrote would follow a typo straight into a plugin
+	// opencode never loads.
+	got, err := os.ReadFile(filepath.Join(root, ".opencode", "plugins", "hew-prime.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,17 +396,111 @@ func TestHooksRemoveOpencodeRefusesForeignFile(t *testing.T) {
 	}
 }
 
-// The plugin must reach the model through system context, invisibly and
-// before the first turn — never as a rendered chat message.
-func TestOpencodePluginAsset(t *testing.T) {
-	src := string(opencodePlugin)
-	for _, want := range []string{opencodeMarker, "session.created", "experimental.chat.system.transform", "output.system.push", "hew prime"} {
-		if !strings.Contains(src, want) {
-			t.Errorf("plugin source missing %q", want)
+// stripJSComments drops // line comments so a token that appears only in the
+// asset's header prose cannot satisfy a search for runtime behavior — the
+// header mentions `hew prime` and system context in English. The asset has no
+// block comments and no // inside a string, regex or template literal, which
+// is what lets this stay a line-oriented scan; TestOpencodePluginRuns is the
+// check that does not depend on reading the source at all.
+func stripJSComments(src string) string {
+	var code strings.Builder
+	for line := range strings.SplitSeq(src, "\n") {
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		code.WriteString(line)
+		code.WriteString("\n")
+	}
+	return code.String()
+}
+
+// The marker lives in the header comment on purpose: it is what install and
+// remove use to tell hew's plugin from a user's own file of the same name.
+func TestOpencodePluginCarriesMarker(t *testing.T) {
+	if !strings.Contains(string(opencodePlugin), opencodeMarker) {
+		t.Errorf("plugin source missing the %q marker", opencodeMarker)
+	}
+}
+
+// A source-level guard against the injection route regressing to a chat
+// message. TestOpencodePluginRuns proves the primer reaches system context;
+// it cannot prove nothing *else* also sends it to the transcript.
+func TestOpencodePluginDoesNotPrompt(t *testing.T) {
+	if strings.Contains(stripJSComments(string(opencodePlugin)), "session.prompt") {
+		t.Error("plugin must inject via system context, not session.prompt")
+	}
+}
+
+// TestOpencodePluginRuns executes the asset under node the way opencode does,
+// against a stub shell runner, so the claim the grep above can only gesture at
+// — the primer reaches the model as system context, once per session, before
+// the first turn — is actually exercised. A syntax error fails here too.
+//
+// The asset ships as .js and is copied to .mjs to run: with no package.json
+// beside it node parses a .js file as CommonJS, and a CommonJS parse accepts
+// syntax an ESM parse rejects, so `node --check hew-prime.js` is not a gate.
+func TestOpencodePluginRuns(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	dir := t.TempDir()
+	plugin := filepath.Join(dir, "hew-prime.mjs")
+	if err := os.WriteFile(plugin, opencodePlugin, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	harness := filepath.Join(dir, "harness.mjs")
+	if err := os.WriteFile(harness, opencodePluginHarness, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(node, harness, plugin)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("plugin failed to run: %v\n%s", err, stderr.String())
+	}
+	var got struct {
+		Created     []string `json:"created"`
+		Cached      []string `json:"cached"`
+		Lazy        []string `json:"lazy"`
+		Anonymous   []string `json:"anonymous"`
+		AfterDelete []string `json:"afterDelete"`
+		Calls       []struct {
+			Command string `json:"command"`
+			Cwd     string `json:"cwd"`
+		} `json:"calls"`
+	}
+	if err := json.Unmarshal(stdout, &got); err != nil {
+		t.Fatalf("harness output not JSON: %v\n%s", err, stdout)
+	}
+	// The primer itself, trimmed, is what lands in system context.
+	for _, tc := range []struct {
+		name string
+		got  []string
+	}{
+		{"announced session", got.Created},
+		{"same session again", got.Cached},
+		{"session never announced", got.Lazy},
+		{"session announced again after deletion", got.AfterDelete},
+	} {
+		if len(tc.got) != 1 || tc.got[0] != "PRIMER-SENTINEL" {
+			t.Errorf("%s: system context = %q, want [PRIMER-SENTINEL]", tc.name, tc.got)
 		}
 	}
-	if strings.Contains(src, "client.session.prompt") {
-		t.Error("plugin must inject via system context, not session.prompt")
+	if len(got.Anonymous) != 0 {
+		t.Errorf("transform without a session contributed %q", got.Anonymous)
+	}
+	// Three sessions were primed — s1, the unannounced one, and s1 again
+	// once deletion evicted it — and the cached second transform of s1 adds
+	// no fourth: `hew prime` runs once per session, in the worktree.
+	if len(got.Calls) != 3 {
+		t.Errorf("hew prime ran %d times, want 3 (once per session): %+v", len(got.Calls), got.Calls)
+	}
+	for _, call := range got.Calls {
+		if call.Command != primeHookCommand || call.Cwd != "/stub/worktree" {
+			t.Errorf("plugin ran %q in %q, want %q in the worktree", call.Command, call.Cwd, primeHookCommand)
+		}
 	}
 }
 
