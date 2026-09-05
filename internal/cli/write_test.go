@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/gh"
@@ -23,6 +25,31 @@ func exitCode(t *testing.T, err error, want int) {
 	}
 	if exitErr.Code != want {
 		t.Errorf("exit code = %d (%s), want %d", exitErr.Code, exitErr.Message, want)
+	}
+}
+
+// hostile is what a GitHub user can put in any free-text field: an SGR
+// colour change, an OSC 52 clipboard write, a bare CR that overwrites the
+// line already printed, a C1 CSI both as valid UTF-8 and as a raw byte, a
+// newline that forges a line of its own, and a DEL. Command-level progress
+// and warning messages bypass the renderer, so they need the same assertion
+// against the same surface (#107).
+const hostile = "a\x1b[31mb\x1b]52;c;aGVsbG8=\x07c\rd\x9be\u009bf\ng\x7fh"
+
+// assertNeutralized fails when output still carries anything a terminal
+// would act on. Newline is the CLI's own formatting.
+func assertNeutralized(t *testing.T, label, s string) {
+	t.Helper()
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		switch {
+		case r == utf8.RuneError && size == 1:
+			t.Errorf("%s: invalid UTF-8 byte %#x at offset %d in %q", label, s[i], i, s)
+		case r == '\n':
+		case unicode.IsControl(r):
+			t.Errorf("%s: control character %#x at offset %d in %q", label, r, i, s)
+		}
+		i += size
 	}
 }
 
@@ -392,6 +419,72 @@ func TestStartRaceWarning(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "claim may have raced") {
 		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+// #107: the messages below bypass the renderer, so their GitHub-derived
+// titles and logins need sanitizing at the call site.
+func TestStartNeutralizesHostileTitle(t *testing.T) {
+	f := newFake(issue(1, "Work "+hostile, "P2", "bug"))
+	app, out, errOut := newApp(f)
+	if err := app.Start(ctx, 1, "", false); err != nil {
+		t.Fatal(err)
+	}
+	assertNeutralized(t, "start success line", out.String())
+	assertNeutralized(t, "start warnings", errOut.String())
+	// Neutralized, not dropped: the offending title stays visible.
+	if !strings.Contains(out.String(), "started #1: Work ") {
+		t.Errorf("sanitizing dropped the title text: %q", out.String())
+	}
+}
+
+func TestClaimRefusalNeutralizesHostileAssignee(t *testing.T) {
+	assigned := issue(1, "Taken", "P2", "bug")
+	assigned.Assignees = []string{"other" + hostile}
+	f := newFake(assigned)
+	app, _, errOut := newApp(f)
+	err := app.Start(ctx, 1, "", false)
+	exitCode(t, err, ExitClaimed)
+	assertNeutralized(t, "claim refusal message", err.Error())
+	assertNeutralized(t, "claim refusal warnings", errOut.String())
+}
+
+func TestOwnClaimRefusalNeutralizesHostileAssignee(t *testing.T) {
+	mine := issue(1, "Mine", "P2", "bug")
+	mine.Assignees = []string{"me", "other" + hostile}
+	f := newFake(mine)
+	app, _, errOut := newApp(f)
+	err := app.Start(ctx, 1, "", false)
+	exitCode(t, err, ExitClaimedByYou)
+	assertNeutralized(t, "own-claim refusal message", err.Error())
+	assertNeutralized(t, "own-claim refusal warnings", errOut.String())
+}
+
+func TestStartRaceWarningNeutralizesHostileAssignee(t *testing.T) {
+	f := newFake(issue(1, "Work", "P2", "bug"))
+	f.rivalOnAssign = "rival" + hostile
+	app, _, errOut := newApp(f)
+	if err := app.Start(ctx, 1, "", false); err != nil {
+		t.Fatal(err)
+	}
+	assertNeutralized(t, "race warning", errOut.String())
+	if !strings.Contains(errOut.String(), "claim may have raced") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+func TestReopenNeutralizesHostileReleasedClaimant(t *testing.T) {
+	closed := issue(1, "Work", "P2", "bug", model.InProgressLabel)
+	closed.State = "CLOSED"
+	closed.Assignees = []string{"alice" + hostile}
+	f := newFake(closed)
+	app, out, _ := newApp(f)
+	if err := app.Reopen(ctx, 1, "r"); err != nil {
+		t.Fatal(err)
+	}
+	assertNeutralized(t, "reopen message", out.String())
+	if !strings.Contains(out.String(), "released @alice") {
+		t.Errorf("sanitizing dropped the login text: %q", out.String())
 	}
 }
 

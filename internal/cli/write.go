@@ -203,7 +203,7 @@ func (a *App) claimRefusal(ctx context.Context, issue model.Issue) error {
 		// In-progress with nobody assigned: no claimant to attribute.
 		return &ExitError{Code: ExitClaimed, Message: fmt.Sprintf("#%d already claimed (in-progress); pick the next ready item or --force", issue.Number)}
 	}
-	who := "assigned to @" + strings.Join(issue.Assignees, " @")
+	who := "assigned to @" + render.SanitizeInline(strings.Join(issue.Assignees, " @"))
 	viewer, err := a.Client.Viewer(ctx)
 	switch {
 	case err != nil:
@@ -273,9 +273,9 @@ func (a *App) Start(ctx context.Context, number int, priorityFlag string, force 
 		return err
 	}
 	if len(after.Assignees) != 1 || after.Assignees[0] != viewer {
-		a.warnf("claim may have raced: #%d now assigned to @%s", number, strings.Join(after.Assignees, " @"))
+		a.warnf("claim may have raced: #%d now assigned to @%s", number, render.SanitizeInline(strings.Join(after.Assignees, " @")))
 	}
-	return a.emitMutation(after, "started #%d: %s\n", number, issue.Title)
+	return a.emitMutation(after, "started #%d: %s\n", number, render.SanitizeInline(issue.Title))
 }
 
 // SetOpts are the retriage/edit inputs; zero values mean "leave alone".
@@ -556,7 +556,7 @@ func (a *App) releaseClaim(ctx context.Context, issue model.Issue) (string, erro
 	if err := a.Client.RemoveAssignees(ctx, issue.Number, issue.Assignees); err != nil {
 		return "", err
 	}
-	return "@" + strings.Join(issue.Assignees, " and @") + "'s stale claim", nil
+	return "@" + render.SanitizeInline(strings.Join(issue.Assignees, " and @")) + "'s stale claim", nil
 }
 
 // Block adds a native dependency after a transitive client-side cycle

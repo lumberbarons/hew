@@ -11,6 +11,7 @@ import (
 	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/model"
+	"github.com/lumberbarons/hew/internal/render"
 )
 
 // PROpts are the pr command's inputs. Every section is optional: the point
@@ -86,7 +87,7 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 		a.warnf("branch %s has no %s prefix", head, strings.Join(conventions.BranchPrefixes, "|"))
 	}
 	if len(issue.Assignees) > 0 && !slices.Contains(issue.Assignees, viewer) {
-		a.warnf("#%d is claimed by @%s, not you", issue.Number, strings.Join(issue.Assignees, " @"))
+		a.warnf("#%d is claimed by @%s, not you", issue.Number, render.SanitizeInline(strings.Join(issue.Assignees, " @")))
 	}
 
 	body, err := a.composePRBody(opts, issue)
@@ -117,8 +118,10 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 		Fixes: issue.Number, Head: head, Base: base, Title: title,
 	}, func() {
 		// The summary an agent branches on, then the URL a human clicks; the
-		// create response always carries one, so it is not conditional.
-		a.printf("created %s #%d for #%d: %s\n", kind, created.Number, issue.Number, title)
+		// create response always carries one, so it is not conditional. title
+		// may carry the issue's own (GitHub-derived) text via PRTitle, so it
+		// needs the same neutralizing the JSON/API copy does not.
+		a.printf("created %s #%d for #%d: %s\n", kind, created.Number, issue.Number, render.SanitizeInline(title))
 		a.printf("%s\n", created.URL)
 	})
 }

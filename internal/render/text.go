@@ -21,10 +21,12 @@ import (
 // and a single-byte replacement keeps the column alignment honest.
 const controlReplacement = '?'
 
-// sanitizeInline neutralizes every control character in a value rendered on
+// SanitizeInline neutralizes every control character in a value rendered on
 // one line. Newline and tab go too: neither is formatting there, and a
-// newline would let a hostile title forge a line of its own.
-func sanitizeInline(s string) string { return sanitize(s, false) }
+// newline would let a hostile title forge a line of its own. Exported so
+// command-level messages that bypass the renderer (start's title echo,
+// guard and warning logins) route through the same sanitizer.
+func SanitizeInline(s string) string { return sanitize(s, false) }
 
 // sanitizeBlock is the multi-line form, for issue and comment bodies: the
 // newlines and tabs carrying the markdown's shape survive, everything else is
@@ -62,7 +64,7 @@ func meta(i model.Issue) string {
 		parts = append(parts, t)
 	}
 	if areas := i.Areas(); len(areas) > 0 {
-		parts = append(parts, "("+sanitizeInline(strings.Join(areas, ","))+")")
+		parts = append(parts, "("+SanitizeInline(strings.Join(areas, ","))+")")
 	}
 	return strings.Join(parts, " ")
 }
@@ -70,7 +72,7 @@ func meta(i model.Issue) string {
 // Line renders one issue as `#n meta  title`, unaligned. Under a color
 // style the number is amber and the priority green.
 func Line(i model.Issue, s Style) string {
-	return fmt.Sprintf("%s %s  %s", s.numPadded(i.Number, len(strconv.Itoa(i.Number))), s.metaPadded(meta(i), len(meta(i))), sanitizeInline(i.Title))
+	return fmt.Sprintf("%s %s  %s", s.numPadded(i.Number, len(strconv.Itoa(i.Number))), s.metaPadded(meta(i), len(meta(i))), SanitizeInline(i.Title))
 }
 
 // lineOpts tweak List output per caller.
@@ -97,7 +99,7 @@ func annotations(i model.Issue) string {
 	if i.Claimed() {
 		claim := "in progress"
 		if len(i.Assignees) > 0 {
-			claim += " @" + sanitizeInline(strings.Join(i.Assignees, " @"))
+			claim += " @" + SanitizeInline(strings.Join(i.Assignees, " @"))
 		}
 		parts = append(parts, claim)
 	}
@@ -123,12 +125,12 @@ func lines(w io.Writer, issues []model.Issue, opts lineOpts, s Style) {
 		}
 	}
 	for idx, i := range issues {
-		fmt.Fprintf(w, "%s %s  %s", s.numPadded(i.Number, numWidth), s.metaPadded(metas[idx], metaWidth), sanitizeInline(i.Title))
+		fmt.Fprintf(w, "%s %s  %s", s.numPadded(i.Number, numWidth), s.metaPadded(metas[idx], metaWidth), SanitizeInline(i.Title))
 		if opts.progress && i.IsEpic() {
 			fmt.Fprintf(w, "  %s", s.dim(fmt.Sprintf("%d/%d", i.SubIssuesCompleted, i.SubIssuesTotal)))
 		}
 		if opts.assignees && len(i.Assignees) > 0 {
-			fmt.Fprintf(w, "  %s", s.dim("@"+sanitizeInline(strings.Join(i.Assignees, " @"))))
+			fmt.Fprintf(w, "  %s", s.dim("@"+SanitizeInline(strings.Join(i.Assignees, " @"))))
 		}
 		if opts.state && !i.IsOpen() {
 			fmt.Fprint(w, "  ", s.dim("[closed]"))
@@ -163,13 +165,13 @@ func Show(w io.Writer, i model.Issue, s Style) {
 	if i.StateReason != "" {
 		state += " (" + strings.ToLower(i.StateReason) + ")"
 	}
-	line := fmt.Sprintf("state: %s  created: %s", sanitizeInline(state), i.CreatedAt.Format("2006-01-02"))
+	line := fmt.Sprintf("state: %s  created: %s", SanitizeInline(state), i.CreatedAt.Format("2006-01-02"))
 	if len(i.Assignees) > 0 {
-		line += fmt.Sprintf("  assignee: @%s", sanitizeInline(strings.Join(i.Assignees, " @")))
+		line += fmt.Sprintf("  assignee: @%s", SanitizeInline(strings.Join(i.Assignees, " @")))
 	}
 	fmt.Fprintln(w, s.dim(line))
 	if i.Parent != nil {
-		fmt.Fprintf(w, "parent: %s %s\n", s.num(i.Parent.Number), sanitizeInline(i.ParentTitle))
+		fmt.Fprintf(w, "parent: %s %s\n", s.num(i.Parent.Number), SanitizeInline(i.ParentTitle))
 	}
 	if len(i.BlockedBy) > 0 {
 		fmt.Fprintf(w, "blocked by: %s\n", refList(i.BlockedBy, s))
@@ -189,7 +191,7 @@ func Show(w io.Writer, i model.Issue, s Style) {
 		}
 		fmt.Fprintln(w, s.dim(header))
 		for _, c := range i.Comments {
-			fmt.Fprintf(w, "  @%s (%s): %s\n", sanitizeInline(c.Author),
+			fmt.Fprintf(w, "  @%s (%s): %s\n", SanitizeInline(c.Author),
 				c.CreatedAt.Format("2006-01-02"), sanitizeBlock(strings.TrimSpace(c.Body)))
 		}
 	}
@@ -213,7 +215,7 @@ func EpicStatus(w io.Writer, epic model.Issue, children []model.Issue, s Style) 
 		if !child.IsOpen() {
 			mark = "✓"
 		}
-		fmt.Fprintf(w, "  %s %s %s  %s\n", mark, s.numPadded(child.Number, len(strconv.Itoa(child.Number))), s.metaPadded(meta(child), len(meta(child))), sanitizeInline(child.Title))
+		fmt.Fprintf(w, "  %s %s %s  %s\n", mark, s.numPadded(child.Number, len(strconv.Itoa(child.Number))), s.metaPadded(meta(child), len(meta(child))), SanitizeInline(child.Title))
 	}
 }
 
@@ -261,7 +263,7 @@ type PrimeData struct {
 // Prime renders the session-start primer: static conventions, live state,
 // contradictions. Sections are omitted when empty.
 func Prime(w io.Writer, static string, d PrimeData, s Style) {
-	fmt.Fprintf(w, "# hew primer — %s\n", sanitizeInline(d.Repo))
+	fmt.Fprintf(w, "# hew primer — %s\n", SanitizeInline(d.Repo))
 	fmt.Fprintln(w, static)
 	fmt.Fprintf(w, "\n## Ready (%d of %d open)\n", d.ReadyTotal, d.OpenTotal)
 	if len(d.Ready) == 0 {

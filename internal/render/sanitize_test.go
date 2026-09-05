@@ -55,8 +55,8 @@ func TestSanitizeInline(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := sanitizeInline(tt.in); got != tt.want {
-				t.Errorf("sanitizeInline(%q) = %q, want %q", tt.in, got, tt.want)
+			if got := SanitizeInline(tt.in); got != tt.want {
+				t.Errorf("SanitizeInline(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}
