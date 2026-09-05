@@ -465,8 +465,11 @@ agent silently duplicating half a plan.
   installs to `$HOME/.local/bin` (`INSTALL_DIR` overrides; never sudo), printing a
   PATH hint when needed. `go install .../cmd/hew@latest` remains the
   toolchain-native alternative. The `publish-install` workflow mirrors `install.sh`
-  to the `gh-pages` branch (GitHub Pages source) whenever it changes, so the
-  stable URL always serves the same content as `main`.
+  and `site/index.html` to the `gh-pages` branch (GitHub Pages source) whenever
+  either changes, so the stable install URL and the landing page at
+  https://lumberbarons.github.io/hew/ always serve the same content as `main`.
+  The landing page is a single self-contained HTML file — no build step, no
+  external assets.
 
 ## Spike results (2026-07-10)
 
