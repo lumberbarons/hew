@@ -118,8 +118,10 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 		Fixes: issue.Number, Head: head, Base: base, Title: title,
 	}, func() {
 		// The summary an agent branches on, then the URL a human clicks; the
-		// create response always carries one, so it is not conditional.
-		a.printf("created %s #%d for #%d: %s\n", kind, created.Number, issue.Number, title)
+		// create response always carries one, so it is not conditional. title
+		// may carry the issue's own (GitHub-derived) text via PRTitle, so it
+		// needs the same neutralizing the JSON/API copy does not.
+		a.printf("created %s #%d for #%d: %s\n", kind, created.Number, issue.Number, render.SanitizeInline(title))
 		a.printf("%s\n", created.URL)
 	})
 }

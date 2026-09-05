@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -630,6 +631,27 @@ func TestPRClaimWarningNeutralizesHostileAssignee(t *testing.T) {
 	assertNeutralized(t, "foreign-claim warning", errOut.String())
 	if !strings.Contains(errOut.String(), "claimed by @someone") {
 		t.Errorf("sanitizing dropped the login text: %q", errOut.String())
+	}
+}
+
+// #107: the derived title carries the issue's own (GitHub-derived) text, and
+// the success line prints it outside the renderer. The API call and --json
+// still get the raw title — only the printed line is neutralized.
+func TestPRCreationLineNeutralizesHostileTitle(t *testing.T) {
+	f := newFake(claimed(30, "Work "+hostile, "P2", "enhancement"))
+	app, out, _ := newApp(f)
+	onBranch(app, "feat/x")
+
+	if err := app.PR(context.Background(), PROpts{Sections: sections("", "", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	assertNeutralized(t, "PR creation line", out.String())
+	if !strings.Contains(out.String(), "created draft PR #501 for #30: feat: Work ") {
+		t.Errorf("sanitizing dropped the title text: %q", out.String())
+	}
+	want := fmt.Sprintf("%q", "feat: Work "+hostile)
+	if call := createdPR(t, f); !strings.Contains(call, want) {
+		t.Errorf("sanitizing the printed line corrupted the API call's title: %s", call)
 	}
 }
 
