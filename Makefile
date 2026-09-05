@@ -8,8 +8,9 @@ help: ## Show this help
 		sort | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-8s %s\n", $$1, $$2}'
 
-build: ## Compile all packages
-	go build ./...
+build: ## Build the hew binary into dist/
+	mkdir -p dist
+	go build -o dist/hew ./cmd/hew
 
 test: ## Run the full test suite with the race detector
 	go test -race ./...
