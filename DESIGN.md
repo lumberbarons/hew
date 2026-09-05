@@ -82,12 +82,13 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
   command like `go vet`) are left to the convention.
 - **Workflow**: `ready` → `start` → branch (`feat/`|`fix/`|`chore/`) → PR with
   `Fixes #n`. Closing via PR is the norm; `close` is for wontfix/duplicate.
-- **One dedup sequence**: three read paths can answer "does this already exist?",
-  so the primer prescribes the order rather than leaving an agent to choose.
-  `search` first — server-side, cheap, spans open and closed. `list --json
-  --bodies --state all` when exhaustiveness matters or the search index may be
-  stale: one call, every body, both states. `show <n>` only to read a specific
-  candidate the first two surfaced. Then `create --discovered-from <n>`.
+- **One dedup sequence, two populations**: the read paths that can answer
+  "does this already exist?" split along the triage boundary. `search` first —
+  server-side, cheap, spans open and closed, and returns triaged issues only.
+  `triage --search <terms>` is the same search over the untriaged queue, both
+  states, for the scoped triage agent or when the user explicitly asks.
+  `show <n>` only to read a specific candidate the first two surfaced. Then
+  `create --discovered-from <n>`.
 - **Claiming is guarded**: `start` refuses an issue that is already assigned or
   `in-progress` and exits with a distinct code, so an agent loop moves on to the
   next ready item instead of doubling up. GitHub has no conditional writes, so the
@@ -95,9 +96,9 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
   remains (see open questions).
 - **Untriaged, not broken**: an issue missing its priority or type label — typical
   for anything filed outside the tool — is *untriaged*, a normal state.
-  `hew triage` lists them so a human or agent can label each via `set`; nothing is ever
+  `hew triage` lists them so a human can label each via `set`; nothing is ever
   stamped with defaults automatically, since auto-labeling someone else's report
-  destroys information. Triage is also the gate on the automatic read paths — see
+  destroys information. Triage state gates every list-shaped read — see
   read-path normalization below.
 - **Contradictions** (two priority labels, an in-progress epic, a dependency cycle)
   are the only per-issue warnings `prime` emits; normalization still picks a
@@ -128,22 +129,37 @@ primer so agents know what they're looking at:
   excludes any issue with sub-issues.
 - Bodies render as-is. The template is scaffolding for `create`, never retrofitted
   onto issues written by others.
-- Untriaged issues are excluded from the *automatic* paths, `ready` and `prime`, and
-  stay visible on the deliberate ones — `triage` lists them and `list` shows them,
-  sorted after explicitly-prioritized work. `start` on an untriaged issue requires
-  `--priority` — claiming forces triage.
+- Untriaged issues are excluded from every list-shaped read except `triage`
+  itself: `ready`, `prime`, `list`, and `search` all omit them, in any state
+  combination, with no flag to re-include. `show <n>` reads one issue by
+  number — the deliberate retrieval path the auto-triage workflow uses to
+  read the issue that just arrived — and `triage` emits the queue, oldest
+  first, or search matches over it with `--search`. `start` on an untriaged
+  issue still requires `--priority` — claiming forces triage.
 
   The reason is a trust boundary rather than tidiness. `prime` runs as a SessionStart
-  hook, so whatever it prints lands in an agent's context with no human in between,
-  and on a public repo anyone can file an issue whose title is an instruction. GitHub
-  silently drops labels from non-collaborators, so a priority and type label is
-  evidence a maintainer looked at the issue — permission-verified, not self-asserted,
-  which is what makes triage state a gate an outsider cannot forge. It costs
-  hew-created issues nothing: the write path labels them by construction.
+  hook, so whatever it prints lands in an agent's context with no human in between;
+  `list` and `search` are the dedup paths an agent reaches for on its own
+  initiative, flags included. On a public repo anyone can file an issue whose
+  title is an instruction, and a body too — the untriaged surface is the larger
+  half of that vector. GitHub silently drops labels from non-collaborators, so a
+  priority and type label is evidence a maintainer looked at the issue —
+  permission-verified, not self-asserted, which is what makes triage state a gate
+  an outsider cannot forge. It costs hew-created issues nothing: the write path
+  labels them by construction.
 
-  There is deliberately no `--include-untriaged` escape hatch on `ready` or `prime`.
-  An agent loop — or an injected one — could pass it and reopen the surface itself;
-  `triage` and `list` are the escape hatches precisely because a human runs them.
+  There is deliberately no `--include-untriaged` escape hatch on any of the
+  excluding commands. An agent loop — or an injected one — could pass it and
+  reopen the surface itself. What a denial can key on is a command, not a
+  convention an agent is asked to honour, so `triage` is the sole emitter and
+  the primer instructs agents never to run it unless the user explicitly asks:
+  triage is human-initiated, and asking first is the tell that separates
+  legitimate triage from an agent reaching for unvetted text on its own. A
+  harness with a deny mechanism enforces the same boundary mechanically —
+  `README.md` documents the recommended `permissions.deny` entries, one per
+  flag arrangement, and `cmd/hew` keeps a regression test that every valid
+  spelling of the command matches them; `hooks install` deliberately writes
+  no such block itself.
 
 ## Command surface (v1)
 
@@ -152,19 +168,27 @@ hew prime                      # session-start context (see below)
 hew ready                      # open, non-epic, triaged, zero *open* blockers;
                                   # sorted P0→P4, oldest first within a priority
 hew list [--label X] [--epic N] [--state open|closed|all]
-            [--bodies]           # with --json: body on every line — whole-tracker
+            [--bodies]           # with --json: body on every line — triaged-tracker
                                   # dedup in a single call instead of a show per candidate.
+                                  # Untriaged issues are omitted in every state — the
+                                  # untriaged half of dedup lives behind triage --search.
                                   # --state defaults to open (both states under --epic:
                                   # progress means seeing what is done too); --state all
-                                  # is what makes --bodies exhaustive. --closed is a
-                                  # back-compat alias for --state closed; passing both
-                                  # is a usage error, not a precedence rule
-hew show <n>                   # detail: body, deps, parent, children, recent comments
-hew search <terms>             # repo-scoped text search over open+closed issues in
-                                  # best-match order — the dedupe step before filing
-                                  # discovered work ("already fixed" answers the question
-                                  # as well as "already filed"); results capped, warns
-                                  # on truncation instead of paging through
+                                  # spans both; --closed is a back-compat alias for
+                                  # --state closed; passing both is a usage error, not a
+                                  # precedence rule
+hew show <n>                   # detail: body, deps, parent, children, recent comments;
+                                  # reads an untriaged issue by number — the deliberate
+                                  # retrieval path, never gated
+hew search <terms>             # repo-scoped text search over open+closed, triaged
+                                  # issues in best-match order — the dedupe step before
+                                  # filing discovered work ("already fixed" answers the
+                                  # question as well as "already filed"); results capped,
+                                  # warns on truncation instead of paging through, and
+                                  # when none of the matches it saw was triaged it says
+                                  # so — scoped to the fetched page, never claiming
+                                  # unseen matches are untriaged — and names
+                                  # hew triage --search
 
 hew create --type bug|enhancement|task [--priority P0..P4] [--area X]
               [--blocked-by N...] [--parent N] [--discovered-from N]
@@ -177,8 +201,13 @@ hew start <n> [--priority P0..P4] [--force]
                                   # exit 5 when the claimant is you — resume that
                                   # work); --force steals; untriaged issues
                                   # require --priority (claim = triage)
-hew triage                     # untriaged issues (missing priority/type), oldest
-                                  # first — work through them with `set`
+hew triage [--search <terms>] # untriaged issues (missing priority/type), oldest
+                                  # first — work through them with `set`. The sole
+                                  # emitter of untriaged content, the unit a harness
+                                  # deny list keys on; never run except on the user's
+                                  # explicit request. --search constrains it to search
+                                  # matches over untriaged titles and bodies, both
+                                  # states — the untriaged half of dedup.
 hew set <n> [--priority P0..P4] [--type bug|enhancement|task] [--add-area X]
            [--remove-area X] [--parent N | --no-parent] [--title "..."]
            [--body-file F] [--closed]
@@ -575,7 +604,7 @@ lumberbarons/solar-controller — 27 open issues:
 | `hew ready` | 538 | 3621 | 6.7x | gh issue list --json † |
 | `hew list` | 606 | 2120 | 3.5x | gh api graphql (open issues) |
 | `hew list --json` | 3017 | 2120 | 0.7x | gh api graphql (open issues) |
-| `hew prime` | 933 | 2120 | 2.3x | gh api graphql (open issues) |
+| `hew prime` | 1161 | 2120 | 1.8x | gh api graphql (open issues) |
 | `hew show #123` | 175 | 341 | 1.9x | gh issue view --json + gh api graphql |
 | `hew epic status 137` | 130 | 308 | 2.4x | gh api graphql (epic + children) |
 
@@ -594,16 +623,16 @@ Findings, including the ones that don't flatter the tool:
   empty arrays, derived booleans, `createdAt` — where the lean query writes seven
   fields. The schema's stability is deliberate (agents parse it), but the token
   cost is a real regression against the tool's own claim, filed as #62.
-- **`prime` measures 885–933 tokens against its ~600 target.** The spike's ~640
-  was a mock; live primers on real repos run 48–56% over. Not the static half
-  either: the smaller fixture, at 10 open issues, still lands at 885. Filed
-  as #63. These fixtures predate the dedup-sequence lines added for #37, which
-  take the static half from 650 to 691 tokens under the same encoding; since
-  `prime` emits it verbatim, add 41 to every `prime` figure above until the next
-  capture. The figures already include the untriaged-exclusion line added for
-  #98 (+22), which was substituted into the fixtures' static half in place — the
-  live sections needed no re-capture, since neither fixture had an untriaged
-  issue reaching `ready`.
+- **`prime` measures 1113–1161 tokens against its ~600 target.** The spike's ~640
+  was a mock; live primers on real repos run 86–94% over. Not the static half
+  either: the smaller fixture, at 10 open issues, still lands at 1113. Filed
+  as #63. These figures reflect the current static half substituted into the
+  fixtures' prime files in place — the live sections needed no re-capture,
+  since neither fixture's list output carries an untriaged row to lose. The
+  substitution also folds in the lines the previous note priced as addenda
+  (+41 for #37, +22 for #98); the triage boundary added for #102 grows the
+  static half by 39 tokens (854 → 893 under o200k_base), against #63's budget
+  as stated in the issue.
 
 ## Milestones
 

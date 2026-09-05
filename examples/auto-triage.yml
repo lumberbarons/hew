@@ -66,11 +66,12 @@ jobs:
                carries both a priority and a type label, stop without commenting — it is
                already triaged.
 
-            2. Look for duplicates: run `hew search` two or three times with different
-               keyword sets drawn from the issue (searching covers open and closed), then
-               `hew show` the plausible matches. A duplicate reports the same underlying
-               problem, not merely the same area or feature. If you confirm one and it is
-               older, run
+            2. Look for duplicates: run `hew search` and `hew triage --search` two or
+               three times with different keyword sets drawn from the issue (both cover
+               open and closed; search covers triaged issues, `triage --search` the
+               untriaged ones), then `hew show` the plausible matches. A duplicate
+               reports the same underlying problem, not merely the same area or feature.
+               If you confirm one and it is older, run
                `hew close ${{ github.event.issue.number }} --duplicate-of <m>` and stop
                — closing as a duplicate is the whole triage.
 
@@ -103,4 +104,4 @@ jobs:
             #${{ github.event.issue.number }} and the duplicate target.
           claude_args: |
             --max-turns 25
-            --allowedTools "Bash(hew show:*),Bash(hew search:*),Bash(hew list:*),Bash(hew set:*),Bash(hew close:*),Bash(gh label list:*),Bash(gh issue comment:*)"
+            --allowedTools "Bash(hew show:*),Bash(hew search:*),Bash(hew triage:*),Bash(hew list:*),Bash(hew set:*),Bash(hew close:*),Bash(gh label list:*),Bash(gh issue comment:*)"

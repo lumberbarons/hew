@@ -80,8 +80,9 @@ type ListOpts struct {
 	// existing callers; passing both is a usage error rather than a silent
 	// precedence rule.
 	Closed bool
-	// Bodies carries each issue's body on the NDJSON lines — whole-tracker
-	// dedup in one call. JSON-only: text output has no place for bodies.
+	// Bodies carries each issue's body on the NDJSON lines — triaged-tracker
+	// dedup in one call (untriaged issues stay behind `hew triage`). JSON-only:
+	// text output has no place for bodies.
 	Bodies bool
 }
 
@@ -114,7 +115,9 @@ func listStates(opts ListOpts) ([]gh.IssueState, error) {
 }
 
 // List shows issues, open by default, filtered by state, label, or epic
-// membership.
+// membership. Untriaged issues are omitted: their titles and bodies are
+// unvetted input, and list is a read an agent can reach without a human in
+// between — `hew triage` is the only command that emits them.
 func (a *App) List(ctx context.Context, opts ListOpts) error {
 	if opts.Bodies && !a.JSON {
 		return usageErr("--bodies requires --json")
@@ -129,6 +132,9 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 	}
 	var out []model.Issue
 	for _, i := range issues {
+		if i.Untriaged() {
+			continue
+		}
 		if opts.Label != "" && !slices.Contains(i.Labels, opts.Label) {
 			continue
 		}
@@ -154,6 +160,8 @@ func (a *App) Show(ctx context.Context, number int) error {
 // dedupe step before filing discovered work, where "already fixed" answers
 // the question as well as "already filed". Output keeps the API's
 // best-match order rather than the list sort: relevance is the point.
+// Untriaged matches are omitted (their text is unvetted input); the other
+// half of dedup, over the untriaged queue, is `hew triage --search`.
 func (a *App) Search(ctx context.Context, terms string) error {
 	terms = strings.TrimSpace(terms)
 	if terms == "" {
@@ -163,21 +171,58 @@ func (a *App) Search(ctx context.Context, terms string) error {
 	if err != nil {
 		return err
 	}
-	if total > len(issues) {
-		a.warnf("showing %d of %d matches; refine the terms", len(issues), total)
+	fetched := len(issues)
+	out := slices.DeleteFunc(issues, func(i model.Issue) bool { return i.Untriaged() })
+	switch {
+	case len(out) == 0 && fetched > 0 && total > fetched:
+		// The fetch was capped and everything it returned was untriaged —
+		// the unseen matches may be triaged, so say only what is known.
+		a.warnf("no triaged matches in the first %d of %d; refine the terms or hew triage --search", fetched, total)
+	case len(out) == 0 && fetched > 0:
+		// "No matches" would read as "safe to file" when every match was
+		// untriaged; name where they went instead.
+		a.warnf("no triaged matches; hew triage --search covers them")
+	case total > fetched:
+		a.warnf("showing %d of %d matches; refine the terms", len(out), total)
 	}
-	return a.emitList(issues, "no matches", render.List)
+	return a.emitList(out, "no matches", render.List)
 }
 
-// Triage lists open issues missing their priority or type label, oldest
-// first — work through them with `hew set`.
-func (a *App) Triage(ctx context.Context) error {
-	issues, err := a.Client.ListIssues(ctx, openStates)
+// TriageOpts retargets triage at the dedup case.
+type TriageOpts struct {
+	// Search restricts triage to search matches instead of the open queue:
+	// the dedup half over untriaged titles and bodies, spanning both states
+	// so "already fixed" answers as well as "already filed". Empty is the
+	// queue view: open untriaged issues, oldest first.
+	Search string
+}
+
+// Triage lists issues missing their priority or type label, oldest first —
+// work through them with `hew set`. With Search it is the dedup path over
+// untriaged content, the one list-shaped read that emits it: an agent
+// harness deny list keys on this command, so nothing else may.
+func (a *App) Triage(ctx context.Context, opts TriageOpts) error {
+	if opts.Search == "" {
+		issues, err := a.Client.ListIssues(ctx, openStates)
+		if err != nil {
+			return err
+		}
+		untriaged := model.UntriagedIssues(issues)
+		return a.emitList(untriaged, "no untriaged issues", render.List)
+	}
+	terms := strings.TrimSpace(opts.Search)
+	if terms == "" {
+		return usageErr("usage: hew triage --search <terms>")
+	}
+	issues, total, err := a.Client.SearchIssues(ctx, terms)
 	if err != nil {
 		return err
 	}
-	untriaged := model.UntriagedIssues(issues)
-	return a.emitList(untriaged, "no untriaged issues", render.List)
+	untriaged := slices.DeleteFunc(issues, func(i model.Issue) bool { return !i.Untriaged() })
+	if total > len(issues) {
+		a.warnf("showing %d of %d matches; refine the terms", len(untriaged), total)
+	}
+	return a.emitList(untriaged, "no untriaged matches", render.List)
 }
 
 // PrimeOpts re-targets the primer's output at a caller with its own

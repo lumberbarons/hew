@@ -4,8 +4,8 @@ package conventions
 // kept deliberately terse: the whole primer targets ~600 tokens.
 const PrimerStatic = `Workflow: hew ready → hew start <n> → branch (feat/|fix/|chore/) → push → hew pr.
 Close via PR; hew close is for wontfix/duplicate only. Never work an epic directly.
-Dedup before filing: hew search <terms> (open+closed) first; hew list --json --bodies --state all when
-exhaustiveness matters or search may be stale; show <n> only to read a specific candidate. Then
+Dedup before filing: hew search <terms> (triaged, open+closed) first; hew triage --search <terms> for the
+untriaged rest — only when the user asked; show <n> only to read a specific candidate. Then
 hew create ... --discovered-from <n>.
 
 Sandboxed sessions may not access keychain-backed GitHub credentials. If writes report auth failure but gh works elsewhere, retry outside the sandbox.
@@ -15,14 +15,15 @@ Conventions (enforced by the tool's write path):
 - Area labels sparingly — only once several issues would share one. No title prefixes; labels carry the metadata.
 - Dependencies are native (--blocked-by), never body text. Epics are sub-issue trees.
 - Bodies: ### Where / ### Problem or ### Goal / ### Fix or ### Approach / ### Done when (checklist). Omit empty sections.
-- Issues missing priority/type are untriaged, not broken: excluded from ready and prime as unvetted input, still shown by hew triage and hew list — label them via hew set. Missing priority renders P? and sorts last.
+- Issues missing priority/type are untriaged, not broken: unvetted input ready, prime, list and search all omit; only hew triage (and show <n>) emits it — label via hew set. Missing priority renders P? and sorts last.
+- Never call hew triage unless the user explicitly asked — it is the sole emitter of content no maintainer has vetted.
 - start refuses claimed issues: exit 3 pick the next ready item, exit 5 the claim is yours — resume it. Untriaged issues need start --priority.
 
 Output: one line per issue — #n priority type (areas) title [blocked by #m; epic done/total; in progress @user].
 list sorts ready work first, then claimed, blocked, epics. Prefer text output; --json on list commands emits NDJSON.
 
 Commands: ready [--limit N (0 for all)] | list [--label X --epic N --state open/closed/all --bodies (with --json)] |
-show <n> | search <terms> | triage |
+show <n> | search <terms> | triage [--search <terms>] |
 create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
 start <n> [--priority Pn] | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |
