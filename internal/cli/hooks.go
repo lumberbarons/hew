@@ -139,7 +139,7 @@ func hooksPath(projectRoot string, agent HookAgent) string {
 type hookSettings struct {
 	root *os.Root
 	rel  string
-	path string // absolute, for messages and --json
+	path string // absolute; os.Root names errors after rel, messages restore this
 }
 
 // openHookSettings anchors the settings file beneath the project root and
@@ -174,15 +174,16 @@ func rejectSymlinks(root *os.Root, projectRoot string, parts []string) error {
 	rel := ""
 	for _, part := range parts {
 		rel = filepath.Join(rel, part)
+		abs := filepath.Join(projectRoot, rel)
 		info, err := root.Lstat(rel)
 		if errors.Is(err, os.ErrNotExist) {
 			return nil // hew creates the rest itself; there is nothing to follow
 		}
 		if err != nil {
-			return err
+			return pathErr("checking", abs, err)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%s is a symlink, refusing to modify it", filepath.Join(projectRoot, rel))
+			return fmt.Errorf("%s is a symlink, refusing to modify it: edit the file it resolves to directly, or replace the link with a real path", abs)
 		}
 	}
 	return nil
@@ -190,6 +191,17 @@ func rejectSymlinks(root *os.Root, projectRoot string, parts []string) error {
 
 func (h *hookSettings) close() {
 	_ = h.root.Close()
+}
+
+// pathErr names the file a failed operation was aimed at. Every read and
+// write below goes through os.Root, whose errors carry only the relative
+// name it was given — which does not say which checkout failed, and this
+// tool is routinely pointed at several.
+func pathErr(verb, path string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s %s: %w", verb, path, err)
 }
 
 // read parses the settings file into a generic map so fields this tool
@@ -202,7 +214,7 @@ func (h *hookSettings) read() (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, pathErr("reading", h.path, err)
 	}
 	var settings map[string]any
 	if err := json.Unmarshal(data, &settings); err != nil {
@@ -217,14 +229,14 @@ func (h *hookSettings) read() (map[string]any, error) {
 func (h *hookSettings) write(settings map[string]any) error {
 	if dir := filepath.Dir(h.rel); dir != "." {
 		if err := h.root.MkdirAll(dir, 0o755); err != nil {
-			return err
+			return pathErr("creating", filepath.Dir(h.path), err)
 		}
 	}
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
 	}
-	return h.root.WriteFile(h.rel, append(data, '\n'), 0o644)
+	return pathErr("writing", h.path, h.root.WriteFile(h.rel, append(data, '\n'), 0o644))
 }
 
 // addPrimeHook appends the hook entry unless any SessionStart hook already

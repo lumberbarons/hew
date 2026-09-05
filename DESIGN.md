@@ -227,7 +227,10 @@ hew apply <plan.jsonl>         # batch-create from a JSONL plan: one entry per l
 hew init                       # bootstrap labels in a repo; print CLAUDE.md snippet
 hew hooks install|remove <claude|codex>
                                   # SessionStart hook running `hew prime` in the selected
-                                  # agent's project configuration
+                                  # agent's project configuration. Refuses a symlinked
+                                  # directory or settings file — a checkout is untrusted
+                                  # input, so hew never writes through a link it did not
+                                  # create, and says so rather than silently redirecting.
 hew migrate beads              # import a beads (bd) database from .beads/issues.jsonl
                                   # (parsed raw — no bd dependency): P0-P4 and types map
                                   # to labels, blocks→blocked-by, parent-child→sub-issues,
