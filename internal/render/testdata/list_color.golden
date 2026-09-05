@@ -1,0 +1,7 @@
+[38;2;242;169;59m#120[0m [38;2;95;214;139mP2[0m enhancement  Voltgo BLE battery controller: scaffold, client, collector
+[38;2;242;169;59m#117[0m [38;2;95;214;139mP1[0m bug (tests)  Tautological assertions on state the code cannot modify
+[38;2;242;169;59m#9  [0m [38;2;95;214;139mP?[0m              Drive-by report with no labels
+[38;2;242;169;59m#55 [0m [38;2;95;214;139mP3[0m task         Closed one[38;2;110;125;113m  [closed][0m
+[38;2;242;169;59m#121[0m [38;2;95;214;139mP2[0m enhancement  Voltgo client for tests[38;2;110;125;113m  [blocked by #120][0m
+[38;2;242;169;59m#137[0m [38;2;95;214;139mP2[0m              Epic: Voltgo[38;2;110;125;113m  [epic 2/6][0m
+[38;2;242;169;59m#124[0m [38;2;95;214;139mP2[0m bug          Claimed one[38;2;110;125;113m  [in progress @lumberbarons][0m

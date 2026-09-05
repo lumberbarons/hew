@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"strings"
@@ -24,6 +25,30 @@ func TestReadyListsSorted(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	if len(lines) != 2 || !strings.HasPrefix(lines[0], "#2") || !strings.HasPrefix(lines[1], "#1") {
 		t.Errorf("Ready output:\n%s", out.String())
+	}
+}
+
+// The TTY decision is precomputed into App.Color; text output honors it,
+// and the --json stream ignores it — ANSI and NDJSON never mix.
+func TestReadyColorizedOnTTY(t *testing.T) {
+	f := newFake(issue(1, "Normal work", "P2", "bug"))
+	app, out, _ := newApp(f)
+	app.Color = true
+	if err := app.Ready(ctx, ReadyOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "\x1b[38;2;242;169;59m") ||
+		!strings.Contains(out.String(), "\x1b[38;2;95;214;139m") {
+		t.Errorf("colorized ready expected:\n%s", out.String())
+	}
+
+	var jsonOut bytes.Buffer
+	app.Out, app.JSON = &jsonOut, true
+	if err := app.Ready(ctx, ReadyOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(jsonOut.String(), "\x1b[") {
+		t.Errorf("--json must never carry ANSI:\n%s", jsonOut.String())
 	}
 }
 

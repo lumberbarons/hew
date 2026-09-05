@@ -358,6 +358,14 @@ typical repo.
   `list` sorts ready work first, then claimed, blocked, epics — one call answers
   both "what's actionable" and "what's stuck on what" (solar-controller dogfood
   feedback, 2026-07-11).
+- Text output colorizes on a TTY only, with the landing page's palette: issue
+  numbers amber `#f2a93b`, priorities green `#5fd68b`, secondary text dim
+  `#6e7d71` — truecolor SGR wrapped around semantic spans only, so column
+  alignment is computed on the plain strings. The decision is made once in
+  `main` against the real stdout (`internal/render.ColorEnabled`): color
+  requires a TTY, `TERM` not `dumb`, and `NO_COLOR` unset — `FORCE_COLOR=1`
+  opts back in, for tests and pagers. `--json`, pipes, and every golden test
+  stay byte-identical.
 - `--json` everywhere, with a flat schema (deps as number arrays, not
   `{nodes:[...]}` wrappers — hide GraphQL shapes from consumers). List-shaped
   output is NDJSON, one compact object per line: a truncated JSON array is

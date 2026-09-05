@@ -111,7 +111,7 @@ func hostileIssue() model.Issue { return hostileIssueWith(hostile) }
 
 func TestShow_NeutralizesHostileFields(t *testing.T) {
 	var buf bytes.Buffer
-	Show(&buf, hostileIssue())
+	Show(&buf, hostileIssue(), Style{})
 	assertNeutralized(t, "Show", buf.String())
 	// Neutralized, not dropped: the read path never hides what GitHub holds.
 	if !strings.Contains(buf.String(), "?[31m") {
@@ -125,7 +125,7 @@ func TestShow_NeutralizesHostileFields(t *testing.T) {
 }
 
 func TestLine_NeutralizesHostileTitle(t *testing.T) {
-	assertNeutralized(t, "Line", Line(hostileIssue()))
+	assertNeutralized(t, "Line", Line(hostileIssue(), Style{}))
 }
 
 func TestList_NeutralizesHostileFields(t *testing.T) {
@@ -133,9 +133,9 @@ func TestList_NeutralizesHostileFields(t *testing.T) {
 		name  string
 		write func(w *bytes.Buffer, issues []model.Issue)
 	}{
-		{"List", func(w *bytes.Buffer, issues []model.Issue) { List(w, issues) }},
-		{"ListWithAssignees", func(w *bytes.Buffer, issues []model.Issue) { ListWithAssignees(w, issues) }},
-		{"EpicList", func(w *bytes.Buffer, issues []model.Issue) { EpicList(w, issues) }},
+		{"List", func(w *bytes.Buffer, issues []model.Issue) { List(w, issues, Style{}) }},
+		{"ListWithAssignees", func(w *bytes.Buffer, issues []model.Issue) { ListWithAssignees(w, issues, Style{}) }},
+		{"EpicList", func(w *bytes.Buffer, issues []model.Issue) { EpicList(w, issues, Style{}) }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
@@ -151,7 +151,7 @@ func TestList_NeutralizesHostileAnnotations(t *testing.T) {
 	claimed.Labels = append(claimed.Labels, "in-progress")
 	claimed.State = "CLOSED"
 	var buf bytes.Buffer
-	List(&buf, []model.Issue{claimed})
+	List(&buf, []model.Issue{claimed}, Style{})
 	assertNeutralized(t, "List annotations", buf.String())
 }
 
@@ -162,7 +162,7 @@ func TestEpicStatus_NeutralizesHostileChildTitle(t *testing.T) {
 		SubIssues: []model.Ref{{Number: 42, State: "OPEN"}},
 	}
 	var buf bytes.Buffer
-	EpicStatus(&buf, epic, []model.Issue{hostileIssue()})
+	EpicStatus(&buf, epic, []model.Issue{hostileIssue()}, Style{})
 	assertNeutralized(t, "EpicStatus", buf.String())
 }
 
@@ -175,7 +175,7 @@ func TestPrime_NeutralizesHostileFields(t *testing.T) {
 			Number: 7, Title: "Epic: " + hostile, State: "OPEN", CreatedAt: ts(1),
 			Labels: []string{"P2"}, SubIssuesTotal: 1, SubIssues: []model.Ref{{Number: 42, State: "OPEN"}},
 		}},
-	})
+	}, Style{})
 	assertNeutralized(t, "Prime", buf.String())
 }
 
