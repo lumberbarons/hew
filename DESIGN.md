@@ -440,7 +440,7 @@ agent silently duplicating half a plan.
 
 ## Build & distribution
 
-- **CI** (GitHub Actions, actions pinned by SHA at their latest versions): one
+- **CI** (GitHub Actions, actions pinned by SHA at their latest versions): a
   workflow triggered on PRs and pushes to `main`, running `golangci-lint` and the
   full test suite (`go test -race -coverprofile ./...`), plus `shellcheck` on
   `install.sh` — the one thing strangers pipe into bash gets linted like everything
@@ -459,12 +459,14 @@ agent silently duplicating half a plan.
   file as a GitHub Release. Release notes come from goreleaser's changelog grouping
   over commit prefixes (`feat:`/`fix:`/`docs:`/...), which we already write.
 - **install.sh** at the repo root, usable as
-  `curl -fsSL https://raw.githubusercontent.com/lumberbarons/hew/main/install.sh | bash`:
+  `curl -fsSL https://lumberbarons.github.io/hew/install.sh | bash`:
   detects OS/arch via `uname`, resolves the latest release through the GitHub API,
   downloads the matching archive, verifies it against the checksums file, and
   installs to `$HOME/.local/bin` (`INSTALL_DIR` overrides; never sudo), printing a
   PATH hint when needed. `go install .../cmd/hew@latest` remains the
-  toolchain-native alternative.
+  toolchain-native alternative. The `publish-install` workflow mirrors `install.sh`
+  to the `gh-pages` branch (GitHub Pages source) whenever it changes, so the
+  stable URL always serves the same content as `main`.
 
 ## Spike results (2026-07-10)
 
