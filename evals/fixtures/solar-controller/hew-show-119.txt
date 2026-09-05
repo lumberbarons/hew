@@ -1,0 +1,24 @@
+#119 P2 enhancement  Proper auth: login flow with sessions for the web UI, API keys for automation
+state: open  created: 2026-07-10
+
+### Goal
+
+Follows the interim bearer-token gate from sctl-dsx/sctl-kcb (PR #116). A static shared token has no UI integration (setting `auth.token` breaks the SPA), no revocation, and encourages long-lived credentials in scrape configs and shell history. Replace it with a real auth layer.
+
+### Approach
+
+- **Config**: an operator-set password stored as a bcrypt/argon2 hash in config (e.g. `auth.passwordHash`), plus optional static API keys (`auth.apiKeys`) for Prometheus/automation. Keep plaintext `auth.token` working during a deprecation window or drop it before the first release with auth enabled.
+- **Backend** (`internal/app`): `POST /api/auth/login` validating the password and issuing an HttpOnly, `SameSite=Strict` session cookie (`Secure` when TLS is enabled); `POST /api/auth/logout`; session store in memory with expiry/refresh. Auth middleware accepts either a valid session cookie or an API key bearer token; `/metrics` accepts API keys. Rate-limit or backoff failed login attempts.
+- **Frontend** (`site/`): login page, 401 responses redirect to it, auth state handling, logout control. No credentials in `localStorage` — rely on the session cookie.
+- **Docs**: README config section and upgrade note replacing the `auth.token` guidance.
+
+### Done when
+
+- [ ] With auth configured, an unauthenticated `PATCH /api/epever/*` returns 401
+- [ ] Logging in via the web UI works end-to-end (login page → authenticated dashboard → logout)
+- [ ] Prometheus can scrape `/metrics` with a configured API key
+- [ ] Failed logins are rate-limited
+- [ ] The login endpoint never returns whether the password vs. the account was wrong
+
+---
+_Migrated from bead `sctl-wm5`._

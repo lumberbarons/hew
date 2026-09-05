@@ -1,0 +1,30 @@
+#82 P3 task  Document the agent trust boundary for tracker content
+state: open  created: 2026-08-15
+blocked by: #102 (closed)
+
+### Where
+
+`README.md`, `DESIGN.md`
+
+### Problem
+
+Filed originally as "Issue titles can prompt-inject the automatic agent primer", and rescoped once that vector closed. #98 excluded untriaged issues from `ready` and `prime`, and #100 hardens the triage decision against payloads a maintainer cannot see, so the primer no longer carries unvetted text. The delimited "untrusted data section" this issue first proposed is no longer worth building: it would spend primer tokens against #63's budget without stopping an agent from acting on instructions it can already read.
+
+What remains is documentation, and it is not a formality. The trust model is now real and enforced in code, but it is written down only across a merged PR body and scattered design notes. A user cannot configure their own agent correctly from that, and a guarantee nobody has stated plainly is one a later change erodes by accident.
+
+### Approach
+
+State the boundary once, properly:
+
+- Tracker content is untrusted input to agents. `ready` and `prime` show triaged issues only. Label presence is permission-verified by GitHub — a non-collaborator's labels are silently dropped — which is what makes triage state a gate an outsider cannot forge, and it costs hew-created issues nothing because the write path labels them by construction.
+- The recommended `permissions.deny` entry for `hew triage`, and why it is a recommendation rather than something `hooks install` writes: silently restricting the user's agent from a hook installer is surprising, and settings writes are exactly where #84 lives.
+- The two-tier allowlist: a general coding agent versus a minimally-scoped triage agent. `examples/auto-triage.yml` is already the worked example of the second tier — an agent whose entire job is reading untrusted issues, kept safe by permission scope and tool allowlist rather than by its prompt.
+
+Blocked by #102, which creates the boundary these docs describe. Writing them first would document a guarantee the code does not yet make.
+
+### Done when
+
+- [ ] `README.md` states that tracker content is untrusted input to agents, and names which commands are safe for an agent to run unattended
+- [ ] the recommended `permissions.deny` entry for `hew triage` is documented, with the reason `hooks install` does not write it
+- [ ] the two-tier allowlist split is documented, pointing at `examples/auto-triage.yml` as the scoped-agent example
+- [ ] `DESIGN.md` records the trust boundary alongside the read-path normalization rules

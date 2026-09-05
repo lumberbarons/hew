@@ -30,28 +30,20 @@ pr [--for N --testing "..." --what "..." --why "..." --title "..." --ready] (dra
 close <n> --reason "..." [--completed | --duplicate-of M] | reopen <n> --reason "..." |
 block <n> --on <m> | unblock <n> --from <m> |
 epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n>] |
-apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew apply --help). All take --json.`
+apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew apply --help). All take --json.
 
-// ClaudeSnippet is what `hew init` prints for the repo's CLAUDE.md: the
-// point of prime is that the snippet stays this short.
-const ClaudeSnippet = `## Issue tracking
-
-Work is tracked in GitHub Issues via the ` + "`hew`" + ` CLI.
-Run ` + "`hew prime`" + ` at session start — it prints the conventions,
-the ready work, and current state. When in doubt: ` + "`hew ready`" + `.
-
-## Ready (24 of 27 open)
-#117 P1 bug (tests)           Tautological assertions on state the code under test cannot modify
-#166 P1 task (ci)             Release workflow publishes artifacts without running tests or lint
-#167 P1 task (ci)             No vulnerability or security scanning of Go code and dependencies
+## Ready (13 of 14 open)
 #118 P2 enhancement (web-ui)  Support simple bearer-token auth in the web UI, prompting only when the backend requires it
 #119 P2 enhancement           Proper auth: login flow with sessions for the web UI, API keys for automation
-#123 P2 task                  Wire voltgo into config and app bootstrap
-#124 P2 bug (tests)           /api/info verified by substring matching with colliding fixtures
 #125 P2 bug (tests)           Data race on receivedAuth in TestPublishWithBearerToken
 #126 P2 bug (tests)           Tests claim scenarios never exercised (ControllerRegistration, factory RemoteWrite mislabel)
 #127 P2 bug (tests)           MQTT timeout and error tests verify nothing about those branches
-… 14 more: hew ready
+#128 P2 bug (tests)           Mock-recorded side effects never asserted (SetMetrics, register failures, lastStatus, SNS payloads)
+#129 P2 task (tests)          Cover publisher enabled paths (Solace publish/close, SNS NewPublisher, MQTT constructor)
+#130 P2 task (tests)          Add coverage for epever client, configurer handlers, and PrometheusCollector (zero-coverage files)
+#143 P2 task (tests,ci)       Raise backend coverage threshold to 90%
+#133 P3 task (tests)          Epever decoding tested only with non-discriminating inputs
+… 3 more: hew ready
 
-## Epics
-#137 P2 enhancement  Epic: Voltgo BLE battery controller support  3/6
+## In progress (1)
+#187 P2 enhancement  Support multiple Voltgo batteries across config, backend, and web UI  @lumberbarons

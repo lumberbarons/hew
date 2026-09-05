@@ -1,8 +1,8 @@
 {
   "repo": "lumberbarons/solar-controller",
-  "capturedAt": "2026-07-29T22:50:20Z",
+  "capturedAt": "2026-09-05T23:50:33Z",
   "hewVersion": "hew version dev",
-  "openIssues": 27,
+  "openIssues": 14,
   "truncated": false,
   "entries": [
     {
@@ -220,17 +220,17 @@
       ]
     },
     {
-      "command": "show #123",
+      "command": "show #119",
       "perIssue": false,
       "hew": {
         "argv": [
           "hew",
           "show",
-          "123",
+          "119",
           "--repo",
           "lumberbarons/solar-controller"
         ],
-        "file": "hew-show-123.txt"
+        "file": "hew-show-119.txt"
       },
       "baselines": [
         {
@@ -243,13 +243,13 @@
                 "gh",
                 "issue",
                 "view",
-                "123",
+                "119",
                 "--repo",
                 "lumberbarons/solar-controller",
                 "--json",
                 "number,title,body,state,stateReason,createdAt,labels,assignees,comments"
               ],
-              "file": "gh-issue-view-123.json"
+              "file": "gh-issue-view-119.json"
             },
             {
               "argv": [
@@ -263,9 +263,9 @@
                 "-F",
                 "query=@cmd/tokens/queries/issue-deps.graphql",
                 "-F",
-                "number=123"
+                "number=119"
               ],
-              "file": "gh-graphql-issue-deps-123.json"
+              "file": "gh-graphql-issue-deps-119.json"
             }
           ]
         },
@@ -279,53 +279,13 @@
                 "gh",
                 "issue",
                 "view",
-                "123",
+                "119",
                 "--repo",
                 "lumberbarons/solar-controller",
                 "--json",
                 "number,title,body,state,stateReason,createdAt,labels,assignees,comments"
               ],
-              "file": "gh-issue-view-123.json"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "command": "epic status 137",
-      "perIssue": false,
-      "hew": {
-        "argv": [
-          "hew",
-          "epic",
-          "status",
-          "137",
-          "--repo",
-          "lumberbarons/solar-controller"
-        ],
-        "file": "hew-epic-status-137.txt"
-      },
-      "baselines": [
-        {
-          "name": "gh api graphql (epic + children)",
-          "partial": false,
-          "note": "",
-          "captures": [
-            {
-              "argv": [
-                "gh",
-                "api",
-                "graphql",
-                "-F",
-                "owner=lumberbarons",
-                "-F",
-                "name=solar-controller",
-                "-F",
-                "query=@cmd/tokens/queries/epic.graphql",
-                "-F",
-                "number=137"
-              ],
-              "file": "gh-graphql-epic-137.json"
+              "file": "gh-issue-view-119.json"
             }
           ]
         }
