@@ -7,9 +7,52 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/lumberbarons/hew/internal/model"
 )
+
+// GitHub-controlled text reaches a terminal through every text-mode command,
+// and control characters are the vector: ANSI SGR sequences repaint the
+// display, OSC 52 writes the user's clipboard, and a bare CR overwrites the
+// line just printed. The read path normalizes rather than repairs, so the
+// renderer neutralizes rather than drops — the offending value stays visible,
+// and a single-byte replacement keeps the column alignment honest.
+const controlReplacement = '?'
+
+// sanitizeInline neutralizes every control character in a value rendered on
+// one line. Newline and tab go too: neither is formatting there, and a
+// newline would let a hostile title forge a line of its own.
+func sanitizeInline(s string) string { return sanitize(s, false) }
+
+// sanitizeBlock is the multi-line form, for issue and comment bodies: the
+// newlines and tabs carrying the markdown's shape survive, everything else is
+// neutralized.
+func sanitizeBlock(s string) string { return sanitize(s, true) }
+
+func sanitize(s string, keepLayout bool) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		switch {
+		case r == utf8.RuneError && size == 1:
+			// Not valid UTF-8. A raw C1 byte such as 0x9b arrives this way,
+			// and no terminal should see it intact.
+			b.WriteByte(controlReplacement)
+		case keepLayout && (r == '\n' || r == '\t'):
+			b.WriteRune(r)
+		case unicode.IsControl(r):
+			// C0, DEL and C1 — every escape-sequence introducer lives here.
+			b.WriteByte(controlReplacement)
+		default:
+			b.WriteRune(r)
+		}
+		i += size
+	}
+	return b.String()
+}
 
 // meta is the "P2 enhancement (tests)" middle column of an issue line.
 func meta(i model.Issue) string {
@@ -19,14 +62,14 @@ func meta(i model.Issue) string {
 		parts = append(parts, t)
 	}
 	if areas := i.Areas(); len(areas) > 0 {
-		parts = append(parts, "("+strings.Join(areas, ",")+")")
+		parts = append(parts, "("+sanitizeInline(strings.Join(areas, ","))+")")
 	}
 	return strings.Join(parts, " ")
 }
 
 // Line renders one issue as `#n meta  title`, unaligned.
 func Line(i model.Issue) string {
-	return fmt.Sprintf("#%d %s  %s", i.Number, meta(i), i.Title)
+	return fmt.Sprintf("#%d %s  %s", i.Number, meta(i), sanitizeInline(i.Title))
 }
 
 // lineOpts tweak List output per caller.
@@ -53,7 +96,7 @@ func annotations(i model.Issue) string {
 	if i.Claimed() {
 		claim := "in progress"
 		if len(i.Assignees) > 0 {
-			claim += " @" + strings.Join(i.Assignees, " @")
+			claim += " @" + sanitizeInline(strings.Join(i.Assignees, " @"))
 		}
 		parts = append(parts, claim)
 	}
@@ -79,12 +122,12 @@ func lines(w io.Writer, issues []model.Issue, opts lineOpts) {
 		}
 	}
 	for idx, i := range issues {
-		fmt.Fprintf(w, "#%-*d %-*s  %s", numWidth, i.Number, metaWidth, metas[idx], i.Title)
+		fmt.Fprintf(w, "#%-*d %-*s  %s", numWidth, i.Number, metaWidth, metas[idx], sanitizeInline(i.Title))
 		if opts.progress && i.IsEpic() {
 			fmt.Fprintf(w, "  %d/%d", i.SubIssuesCompleted, i.SubIssuesTotal)
 		}
 		if opts.assignees && len(i.Assignees) > 0 {
-			fmt.Fprintf(w, "  @%s", strings.Join(i.Assignees, " @"))
+			fmt.Fprintf(w, "  @%s", sanitizeInline(strings.Join(i.Assignees, " @")))
 		}
 		if opts.state && !i.IsOpen() {
 			fmt.Fprint(w, "  [closed]")
@@ -119,13 +162,13 @@ func Show(w io.Writer, i model.Issue) {
 	if i.StateReason != "" {
 		state += " (" + strings.ToLower(i.StateReason) + ")"
 	}
-	fmt.Fprintf(w, "state: %s  created: %s", state, i.CreatedAt.Format("2006-01-02"))
+	fmt.Fprintf(w, "state: %s  created: %s", sanitizeInline(state), i.CreatedAt.Format("2006-01-02"))
 	if len(i.Assignees) > 0 {
-		fmt.Fprintf(w, "  assignee: @%s", strings.Join(i.Assignees, " @"))
+		fmt.Fprintf(w, "  assignee: @%s", sanitizeInline(strings.Join(i.Assignees, " @")))
 	}
 	fmt.Fprintln(w)
 	if i.Parent != nil {
-		fmt.Fprintf(w, "parent: #%d %s\n", i.Parent.Number, i.ParentTitle)
+		fmt.Fprintf(w, "parent: #%d %s\n", i.Parent.Number, sanitizeInline(i.ParentTitle))
 	}
 	if len(i.BlockedBy) > 0 {
 		fmt.Fprintf(w, "blocked by: %s\n", refList(i.BlockedBy))
@@ -135,7 +178,7 @@ func Show(w io.Writer, i model.Issue) {
 	}
 	if body := strings.TrimSpace(i.Body); body != "" {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, body)
+		fmt.Fprintln(w, sanitizeBlock(body))
 	}
 	if len(i.Comments) > 0 {
 		fmt.Fprintln(w)
@@ -145,7 +188,8 @@ func Show(w io.Writer, i model.Issue) {
 		}
 		fmt.Fprintln(w, header)
 		for _, c := range i.Comments {
-			fmt.Fprintf(w, "  @%s (%s): %s\n", c.Author, c.CreatedAt.Format("2006-01-02"), strings.TrimSpace(c.Body))
+			fmt.Fprintf(w, "  @%s (%s): %s\n", sanitizeInline(c.Author),
+				c.CreatedAt.Format("2006-01-02"), sanitizeBlock(strings.TrimSpace(c.Body)))
 		}
 	}
 }
@@ -171,7 +215,7 @@ func EpicStatus(w io.Writer, epic model.Issue, children []model.Issue) {
 		if !child.IsOpen() {
 			mark = "✓"
 		}
-		fmt.Fprintf(w, "  %s #%d %s  %s\n", mark, child.Number, meta(child), child.Title)
+		fmt.Fprintf(w, "  %s #%d %s  %s\n", mark, child.Number, meta(child), sanitizeInline(child.Title))
 	}
 }
 
@@ -219,7 +263,7 @@ type PrimeData struct {
 // Prime renders the session-start primer: static conventions, live state,
 // contradictions. Sections are omitted when empty.
 func Prime(w io.Writer, static string, d PrimeData) {
-	fmt.Fprintf(w, "# hew primer — %s\n", d.Repo)
+	fmt.Fprintf(w, "# hew primer — %s\n", sanitizeInline(d.Repo))
 	fmt.Fprintln(w, static)
 	fmt.Fprintf(w, "\n## Ready (%d of %d open)\n", d.ReadyTotal, d.OpenTotal)
 	if len(d.Ready) == 0 {
