@@ -321,8 +321,9 @@ and any existing PR on the head, one REST create.
 ### `hew prime`
 
 The session-start ritual, modeled on `bd prime`: one command whose output an agent
-injects at the top of a session (via a CLAUDE.md instruction, Claude Code hook, or
-Codex hook) instead of maintaining hand-written workflow prose. Three parts:
+injects at the top of a session (via a CLAUDE.md instruction or an agent
+hook installed by `hew hooks install`) instead of maintaining hand-written
+workflow prose. Three parts:
 
 1. **Static primer** — the conventions and workflow above, compressed to a few
    hundred tokens, including the tool's own command cheatsheet.
