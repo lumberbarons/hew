@@ -16,7 +16,7 @@ reads the current branch — plus the [`gh` CLI](https://cli.github.com/) for
 authentication. The install script also needs `curl` and `tar`.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/lumberbarons/hew/main/install.sh | bash
+curl -fsSL https://lumberbarons.github.io/hew/install.sh | bash
 ```
 
 Installs to `~/.local/bin` (override with `INSTALL_DIR`); never uses sudo.

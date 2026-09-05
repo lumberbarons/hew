@@ -39,7 +39,7 @@ jobs:
 
       - name: install hew
         run: |
-          curl -fsSL https://raw.githubusercontent.com/lumberbarons/hew/main/install.sh | bash
+          curl -fsSL https://lumberbarons.github.io/hew/install.sh | bash
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: triage the new issue

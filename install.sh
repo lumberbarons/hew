@@ -2,7 +2,7 @@
 # Installs the latest hew release binary to $HOME/.local/bin (override
 # with INSTALL_DIR). Never uses sudo.
 #
-#   curl -fsSL https://raw.githubusercontent.com/lumberbarons/hew/main/install.sh | bash
+#   curl -fsSL https://lumberbarons.github.io/hew/install.sh | bash
 set -euo pipefail
 
 REPO="lumberbarons/hew"
