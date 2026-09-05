@@ -88,11 +88,12 @@ hew prime                      # session-start context for agents
 hew ready [--limit N]          # open, non-epic, triaged, zero open blockers; P0→P4
                                   # capped at 30 by default (0 for all); truncation warns
 hew list [--label X] [--epic N] [--state open|closed|all]
-            [--bodies]           # with --json: body on every line, dedup in one call
-                                  # (--closed is an alias for --state closed)
+            [--bodies]           # with --json: body on every line, dedup in one call;
+                                   # untriaged issues are omitted — hew triage holds them
+                                   # (--closed is an alias for --state closed)
 hew show <n>                   # body, deps, parent, children, recent comments
-hew search <terms>             # text search, open+closed, best-match order —
-                                  # check for an existing issue before filing one
+hew search <terms>             # text search over vetted issues, open+closed, best-match
+                                   # order — check for an existing issue before filing one
 hew create --type bug|enhancement|task --title "..."
               [--where X] [--problem|--goal "..."] [--fix|--approach "..."]
               [--done-when "..."]...   # section flags compose the body template
@@ -100,7 +101,9 @@ hew create --type bug|enhancement|task --title "..."
               [--discovered-from N]
               [--body-file F | --edit] # long-form escape hatch / $EDITOR
 hew start <n> [--priority P0..P4] [--force]
-hew triage                     # issues missing priority/type labels
+hew triage [--search <terms>]  # issues missing priority/type labels; --search runs
+                                   # the same search over untriaged titles and bodies
+                                   # (open+closed) — the untriaged half of dedup
 hew set <n> [--priority ..] [--type ..] [--add-area X] [--remove-area X]
            [--parent N | --no-parent] [--title "..."]
            [--body-file F]        # replace the body (an empty file is refused)
@@ -155,18 +158,49 @@ means "already claimed by someone else, pick the next ready item", `5` means
 
 ### Checking for duplicates
 
-Three read paths can answer "does this already exist?", so the tool prescribes
-an order rather than leaving an agent to pick:
+Untriaged issues (missing a priority or type label) are held behind `hew triage`,
+so "does this already exist?" is answered in two calls, one per population:
 
-1. `hew search <terms>` — the default. Server-side, cheap, and covers open and
-   closed issues, so "already fixed" answers the question as well as "already
-   filed". Results are capped; it warns rather than paging.
-2. `hew list --json --bodies --state all` — when exhaustiveness matters or the
-   search index may be stale. One call carries every issue's body in both
-   states; `--bodies` requires `--json`.
+1. `hew search <terms>` — the default. Server-side, cheap, open and closed,
+   vetted issues only, so "already fixed" answers the question as well as
+   "already filed". Results are capped; it warns rather than paging, and when
+   every fetched match was untriaged it says so and names `hew triage --search`
+   instead of pretending there is nothing to dedup against.
+2. `hew triage --search <terms>` — the same search over the untriaged queue,
+   open and closed. Run it when the user asks, or in a scoped triage agent
+   (see below); a coding agent that never runs it still dedups correctly
+   against vetted work.
 3. `hew show <n>` — only to read a specific candidate the first two surfaced.
 
 Then file with `hew create ... --discovered-from <n>`.
+
+### Denying untriaged content in a harness
+
+`hew triage` is the only command that emits untriaged titles and bodies (`hew
+show <n>` reading one issue by number is the deliberate exception), and the
+primer instructs agents never to run it unless the user explicitly asks. So
+the command name is the unit a harness deny list can key on: deny it, and an
+agent cannot reach unvetted content even by passing its own flags.
+
+`hew hooks install` writes no permissions block — silently restricting an
+agent from a hook installer would be surprising. Add the deny entry yourself;
+in Claude Code's `.claude/settings.json`, for example:
+
+```json
+{
+  "permissions": {
+    "deny": ["Bash(hew triage:*)"]
+  }
+}
+```
+
+The instruction and the deny entry are the two layers of the same boundary:
+the primer line holds for harnesses with no deny mechanism, and the deny entry
+enforces it where one exists. The natural split is two agent shapes — a
+**coding agent** denies `hew triage` and dedups with `hew search`, the right
+scope for an agent that can only act on vetted work; a **scoped triage agent**
+(like the auto-triage workflow below) is allowed triage plus `show` and does
+the untriaged half of dedup with `hew triage --search`.
 
 ### Plan files
 
@@ -227,8 +261,10 @@ and either closes it as one or applies a type and priority label plus a short
 rationale comment. What it deliberately cannot do is the interesting part:
 
 - `permissions: issues: write` is the only grant — no code, no PRs, no other repos.
-- The tool allowlist is a handful of `hew` subcommands plus `gh issue comment`
-  and `gh label list`. No `create`, no `start`, no shell beyond that.
+- The tool allowlist is a handful of `hew` subcommands — including `hew triage`,
+  since this is the scoped triage agent that runs the untriaged half of dedup —
+  plus `gh issue comment` and `gh label list`. No `create`, no `start`, no shell
+  beyond that.
 - It assigns P2–P4 only; anything it thinks is P0/P1 it labels P2 and flags for a
   human to upgrade. Reports too vague to classify are left untriaged
   (`hew triage` still lists them) rather than mislabelled.
@@ -238,12 +274,15 @@ rationale comment. What it deliberately cannot do is the interesting part:
 Issue bodies are untrusted input; the permission scope and the allowlist are the
 mitigation, not the prompt's instructions.
 
-The same assumption shapes the read path: `ready` and `prime` run automatically —
-`prime` as a SessionStart hook — so they show triaged issues only. GitHub drops
-labels from non-collaborators, which makes a priority and type label evidence that
-a maintainer saw the issue, and evidence a stranger cannot forge. Anything
-unlabelled stays visible to people through `hew triage` and `hew list`, and the
-primer reports how much is waiting.
+The same assumption shapes the read path: `ready`, `prime`, `list` and `search`
+all omit untriaged issues — `prime` runs as a SessionStart hook, and `list` and
+`search` are calls an agent can reach on its own initiative, flags included.
+GitHub drops labels from non-collaborators, which makes a priority and type
+label evidence that a maintainer saw the issue, and evidence a stranger cannot
+forge. Untriaged content is emitted by exactly one list-shaped command,
+`hew triage`, and the primer tells agents never to run it unless the user
+asks; the command boundary is what a deny list enforces (see above). The
+primer still reports how much is waiting.
 
 ## Design
 

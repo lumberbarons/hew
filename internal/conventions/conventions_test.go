@@ -177,8 +177,9 @@ func TestPrimerStaticMentionsCoreCommands(t *testing.T) {
 }
 
 // The primer must prescribe one dedup sequence rather than leaving an agent
-// to choose between the three read paths that can answer "does this already
-// exist?" — search, list --bodies, and show.
+// to choose between the read paths that can answer "does this already
+// exist?" — search over vetted work, triage --search over the untriaged rest,
+// and show for specific candidates.
 func TestPrimerStaticPrescribesDedupSequence(t *testing.T) {
 	_, rest, found := strings.Cut(PrimerStatic, "Dedup before filing:")
 	if !found {
@@ -187,25 +188,56 @@ func TestPrimerStaticPrescribesDedupSequence(t *testing.T) {
 	// Scope the assertions to that paragraph: a whole-primer search would
 	// pass on the command cheatsheet mentioning the same flags.
 	guidance, _, _ := strings.Cut(rest, "\n\n")
-	for _, want := range []string{"hew search", "open+closed", "--bodies", "--state all", "show <n>", "--discovered-from"} {
+	for _, want := range []string{"hew search", "open+closed", "hew triage --search", "show <n>", "--discovered-from"} {
 		if !strings.Contains(guidance, want) {
 			t.Errorf("dedup guidance missing %q:\n%s", want, guidance)
 		}
 	}
-	if searchAt, listAt := strings.Index(guidance, "hew search"), strings.Index(guidance, "--bodies"); searchAt > listAt {
-		t.Errorf("dedup guidance must name search before list --bodies:\n%s", guidance)
+	if searchAt, triageAt := strings.Index(guidance, "hew search"), strings.Index(guidance, "hew triage --search"); searchAt > triageAt {
+		t.Errorf("dedup guidance must name search before triage --search:\n%s", guidance)
+	}
+	// The untriaged half runs only when the user asked for it; a coding
+	// agent that never calls triage still dedups against vetted work.
+	if !strings.Contains(guidance, "only when the user asked") {
+		t.Errorf("dedup guidance does not gate triage on the user:\n%s", guidance)
 	}
 }
 
-// An agent that cannot see untriaged work in ready or prime will conclude the
-// queue is drained unless the primer says otherwise, so the exclusion has to
-// be stated alongside the command that reveals what was held back.
+// An agent that cannot see untriaged work in any automatic or dedup path
+// will conclude the queue is drained unless the primer says otherwise, so
+// the exclusion has to be stated alongside the command that reveals what was
+// held back.
 func TestPrimerStaticStatesUntriagedExclusion(t *testing.T) {
-	line := primerLineContaining(t, "untriaged")
-	for _, want := range []string{"ready", "prime", "hew triage"} {
-		if !strings.Contains(line, want) {
-			t.Errorf("untriaged guidance missing %q:\n%s", want, line)
+	// "untriaged" appears on two lines: the conventions bullet names every
+	// path that omits the content, and the dedup guidance routes the other
+	// half through triage --search. Assert across both, scoped to those lines
+	// so the command cheatsheet can't satisfy the check by coincidence.
+	var lines []string
+	for _, line := range strings.Split(PrimerStatic, "\n") {
+		if strings.Contains(line, "untriaged") {
+			lines = append(lines, line)
 		}
+	}
+	if len(lines) != 2 {
+		t.Fatalf("want exactly two primer lines mentioning %q, got %d:\n%s", "untriaged", len(lines), strings.Join(lines, "\n"))
+	}
+	joined := strings.Join(lines, "\n")
+	// The triage --search routing itself is asserted in the dedup-sequence
+	// test; here the point is that every other read is named as omitting.
+	for _, want := range []string{"ready", "prime", "list", "search", "hew triage", "show <n>", "hew set"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("untriaged guidance missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+// Triage acquires the untriaged surface by taking it from every other read;
+// the primer must forbid autonomous reaches for it, since a deny list is only
+// the enforcement layer of an instruction that has to carry weight alone.
+func TestPrimerStaticForbidsAutonomousTriage(t *testing.T) {
+	line := primerLineContaining(t, "Never call hew triage")
+	if !strings.Contains(line, "unless the user explicitly asked") {
+		t.Errorf("triage guidance missing the user gate:\n%s", line)
 	}
 }
 

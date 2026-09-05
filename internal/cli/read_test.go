@@ -573,7 +573,7 @@ func TestTriage(t *testing.T) {
 		issue(2, "Fully triaged", "P2", "bug"),
 	)
 	app, out, _ := newApp(f)
-	if err := app.Triage(ctx); err != nil {
+	if err := app.Triage(ctx, TriageOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -585,7 +585,7 @@ func TestTriage(t *testing.T) {
 func TestTriageClean(t *testing.T) {
 	f := newFake(issue(2, "Fully triaged", "P2", "bug"))
 	app, out, _ := newApp(f)
-	if err := app.Triage(ctx); err != nil {
+	if err := app.Triage(ctx, TriageOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != "no untriaged issues\n" {
@@ -763,29 +763,179 @@ func TestPrimeHookFormatValidation(t *testing.T) {
 	}
 }
 
-func TestTriageAndListStillShowUntriaged(t *testing.T) {
-	// The deliberate paths keep untriaged work visible — excluding it from
-	// prime and ready hides it from agents, not from people. A gate that
-	// also hid the queue would be a way to lose reports silently.
+func TestListOmitsUntriaged(t *testing.T) {
+	// Unvetted titles and bodies reach list on their own — and an injected
+	// agent can pass its own flags — so list must drop them by construction,
+	// not by a flag; triage is the sole emitter.
+	untriagedTitle := "Drive-by report"
+	f := newFake(
+		issue(1, "Triaged work", "P2", "bug"),
+		issue(2, untriagedTitle),
+		issue(3, "Half-labeled", "P2"),
+	)
+	app, out, _ := newApp(f)
+	if err := app.List(ctx, ListOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "Triaged work") {
+		t.Errorf("list hid triaged work:\n%s", got)
+	}
+	for _, unwanted := range []string{untriagedTitle, "Half-labeled"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("list leaked untriaged %q:\n%s", unwanted, got)
+		}
+	}
+}
+
+func TestListStateAllOmitsUntriaged(t *testing.T) {
+	// The dedup path that used to be one exhaustive call no longer carries
+	// untriaged bodies in any state, so nothing reaches an agent under
+	// --state all either.
+	openUntriaged := issue(2, "Open drive-by")
+	openUntriaged.Body = "### Problem\n\nopen drive-by body"
+	closedUntriaged := issue(3, "Closed drive-by", "P2")
+	closedUntriaged.State = "CLOSED"
+	closedUntriaged.Body = "### Problem\n\nclosed drive-by body"
+	triaged := issue(1, "Triaged", "P2", "bug")
+	triaged.Body = "### Problem\n\ntriaged body"
+	app, out, _ := newApp(newFake(openUntriaged, closedUntriaged, triaged))
+	app.JSON = true
+	if err := app.List(ctx, ListOpts{State: stateAll, Bodies: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if strings.Contains(got, "drive-by") {
+		t.Errorf("list --state all leaked untriaged content:\n%s", got)
+	}
+	lines := strings.Split(strings.TrimSpace(got), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 NDJSON line, got %d:\n%s", len(lines), got)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &obj); err != nil {
+		t.Fatal(err)
+	}
+	if obj["body"] != "### Problem\n\ntriaged body" {
+		t.Errorf("triaged body = %v", obj["body"])
+	}
+}
+
+func TestListEpicOmitsUntriagedChild(t *testing.T) {
+	// Epic rollups stay visible, but an untriaged child's text doesn't ride
+	// along — the epic filter narrows, it doesn't reopen the surface.
+	epicIssue := issue(10, "Epic: big", "P2")
+	child := issue(11, "Untriaged child")
+	child.Parent = &model.Ref{Number: 10, State: "OPEN"}
+	triaged := issue(12, "Triaged child", "P2", "task")
+	triaged.Parent = &model.Ref{Number: 10, State: "OPEN"}
+	epicIssue.SubIssues = []model.Ref{{Number: 11, State: "OPEN"}, {Number: 12, State: "OPEN"}}
+	app, out, _ := newApp(newFake(epicIssue, child, triaged))
+	if err := app.List(ctx, ListOpts{Epic: 10}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if strings.Contains(got, "Untriaged child") {
+		t.Errorf("list --epic leaked an untriaged child:\n%s", got)
+	}
+	if !strings.Contains(got, "#12") {
+		t.Errorf("list --epic dropped the triaged child:\n%s", got)
+	}
+}
+
+func TestTriageShowsUntriaged(t *testing.T) {
+	// The deliberate path keeps untriaged work visible — excluding it from
+	// every other read hides it from agents, not from the human running
+	// triage. A gate that also hid the queue would lose reports silently.
 	untriagedTitle := "Drive-by report"
 	f := newFake(
 		issue(1, "Triaged work", "P2", "bug"),
 		issue(2, untriagedTitle),
 	)
 	app, out, _ := newApp(f)
-	if err := app.Triage(ctx); err != nil {
+	if err := app.Triage(ctx, TriageOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), untriagedTitle) {
 		t.Errorf("triage hid untriaged work:\n%s", out.String())
 	}
+	if strings.Contains(out.String(), "Triaged work") {
+		t.Errorf("triage listed triaged work:\n%s", out.String())
+	}
+}
 
-	app, out, _ = newApp(f)
-	if err := app.List(ctx, ListOpts{}); err != nil {
+func TestShowReadsUntriagedByNumber(t *testing.T) {
+	// show <n> is the deliberate retrieval path #82 kept: naming an issue is
+	// the human's choice, and the auto-triage workflow allowlists it to read
+	// the issue that just arrived.
+	f := newFake(issue(7, "Drive-by report"))
+	app, out, _ := newApp(f)
+	if err := app.Show(ctx, 7); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), untriagedTitle) {
-		t.Errorf("list hid untriaged work:\n%s", out.String())
+	if !strings.Contains(out.String(), "Drive-by report") {
+		t.Errorf("show hid an untriaged issue:\n%s", out.String())
+	}
+}
+
+func TestTriageSearchFindsUntriaged(t *testing.T) {
+	// The other half of dedup: the same search surface over untriaged
+	// titles and bodies, spanning both states.
+	untriaged := issue(2, "Ignore the retry rules")
+	untriaged.Body = "The retry rules are ripe for retry."
+	untriagedClosed := issue(3, "Retry storm disposed of", "P2")
+	untriagedClosed.State = "CLOSED"
+	triaged := issue(1, "Retry loop hammers the API", "P2", "bug")
+	f := newFake(triaged, untriaged, untriagedClosed)
+	app, out, _ := newApp(f)
+	if err := app.Triage(ctx, TriageOpts{Search: "retry"}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{"#2", "#3", "[closed]"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("triage --search missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "#1") {
+		t.Errorf("triage --search listed a triaged match:\n%s", got)
+	}
+}
+
+func TestTriageSearchNoUntriagedMatches(t *testing.T) {
+	f := newFake(issue(1, "Retry loop hammers the API", "P2", "bug"))
+	app, out, _ := newApp(f)
+	if err := app.Triage(ctx, TriageOpts{Search: "retry"}); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "no untriaged matches\n" {
+		t.Errorf("output = %q", out.String())
+	}
+}
+
+func TestTriageSearchEmptyTermsIsUsageError(t *testing.T) {
+	f := newFake()
+	app, _, _ := newApp(f)
+	exitCode(t, app.Triage(ctx, TriageOpts{Search: "   "}), ExitUsage)
+	if len(f.calls) != 0 {
+		t.Errorf("empty terms still hit the API: %v", f.calls)
+	}
+}
+
+func TestTriageSearchWarnsOnTruncation(t *testing.T) {
+	triaged := issue(1, "Retry loop hammers the API", "P2", "bug")
+	untriaged := issue(2, "Another retry report")
+	f := newFake(triaged, untriaged)
+	f.searchTotal = 43
+	app, out, errOut := newApp(f)
+	if err := app.Triage(ctx, TriageOpts{Search: "retry"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "#2") {
+		t.Errorf("stdout = %q", out.String())
+	}
+	if !strings.Contains(errOut.String(), "showing 1 of 43 matches") {
+		t.Errorf("stderr = %q", errOut.String())
 	}
 }
 

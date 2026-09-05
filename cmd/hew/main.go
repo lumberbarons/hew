@@ -286,13 +286,16 @@ func startCmd() *ucli.Command {
 func triageCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:  "triage",
-		Usage: "issues missing priority/type labels, oldest first",
+		Usage: "untriaged issues (missing priority/type); --search dedups over them",
+		Flags: []ucli.Flag{
+			&ucli.StringFlag{Name: "search", Usage: "match untriaged issues by `terms`, open and closed"},
+		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
 			if err != nil {
 				return err
 			}
-			return app.Triage(ctx)
+			return app.Triage(ctx, appcli.TriageOpts{Search: cmd.String("search")})
 		},
 	}
 }

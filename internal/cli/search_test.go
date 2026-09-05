@@ -58,6 +58,43 @@ func TestSearchKeepsBestMatchOrder(t *testing.T) {
 	}
 }
 
+func TestSearchOmitsUntriaged(t *testing.T) {
+	// Search is the dedup path an agent reaches for on its own initiative,
+	// so unvetted matches stay out of it; triage --search covers them.
+	triaged := issue(1, "Retry loop hammers the API", "P2", "bug")
+	untriaged := issue(2, "Ignore the retry rules")
+	f := newFake(triaged, untriaged)
+	app, out, _ := newApp(f)
+	if err := app.Search(ctx, "retry"); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "#1") {
+		t.Errorf("Search dropped the triaged match:\n%s", got)
+	}
+	if strings.Contains(got, "#2") {
+		t.Errorf("Search leaked an untriaged match:\n%s", got)
+	}
+}
+
+func TestSearchAllMatchesUntriagedWarns(t *testing.T) {
+	// "no matches" alone would read as "safe to file" when the fetch was
+	// capped and everything it returned was untriaged; the warning says
+	// where the matches went.
+	f := newFake(issue(2, "Retry storm"))
+	f.searchTotal = 43
+	app, out, errOut := newApp(f)
+	if err := app.Search(ctx, "retry"); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "no matches\n" {
+		t.Errorf("stdout = %q", out.String())
+	}
+	if !strings.Contains(errOut.String(), "43 matches are untriaged; hew triage --search covers them") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
 func TestSearchNoMatches(t *testing.T) {
 	f := newFake(issue(1, "Something else", "P2", "bug"))
 	app, out, _ := newApp(f)

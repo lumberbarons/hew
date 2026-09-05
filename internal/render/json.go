@@ -89,8 +89,8 @@ func ToJSON(i model.Issue, withDetail bool) IssueJSON {
 // JSONList writes issues as NDJSON — one compact object per line. Unlike
 // an array, it stays parseable under head/grep and agent output
 // truncation, which is how list output actually gets consumed. withBodies
-// carries each issue's body (list --bodies), turning whole-tracker dedup
-// into a single call instead of a show per candidate.
+// carries each issue's body (list --bodies), turning dedup over the triaged
+// tracker into a single call instead of a show per candidate.
 func JSONList(w io.Writer, issues []model.Issue, withBodies bool) error {
 	enc := json.NewEncoder(w)
 	for _, i := range issues {
