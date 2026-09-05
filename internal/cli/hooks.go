@@ -144,22 +144,78 @@ func (a *App) HooksRemove(projectRoot string, agent HookAgent) error {
 	})
 }
 
-// addHookEntry appends the session-start hook in the agent's own shape:
+// addHookEntry appends the session-start hook in the agent's own shape —
 // claude and codex share the nested {"hooks": [...]} form, cursor writes
-// flat entries under its own event key.
+// flat entries under its own event key — via the agent's hookShape, so a
+// third shape is one new hookShape value rather than a new pair of
+// traversal functions.
 func addHookEntry(agent HookAgent, settings map[string]any) bool {
-	if agent == HookAgentCursor {
-		return addCursorHook(settings)
+	shape := hookShapeFor(agent)
+	if shape.ensureDefaults != nil {
+		shape.ensureDefaults(settings)
 	}
-	return addPrimeHook(settings)
+	if hasHookMatch(shape, settings) {
+		return false
+	}
+	hooks, _ := settings["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+		settings["hooks"] = hooks
+	}
+	entries, _ := hooks[shape.eventKey].([]any)
+	hooks[shape.eventKey] = append(entries, shape.newEntry())
+	return true
 }
 
-// removeHookEntry strips the session-start hook, again in the agent's shape.
+// removeHookEntry strips the session-start hook, again via the agent's
+// hookShape, pruning entries, the event's list, and the hooks object when
+// they end up empty.
 func removeHookEntry(agent HookAgent, settings map[string]any) bool {
-	if agent == HookAgentCursor {
-		return removeCursorHook(settings)
+	shape := hookShapeFor(agent)
+	entries := hookEventEntries(shape.eventKey, settings)
+	changed := false
+	var kept []any
+	for _, entry := range entries {
+		if !shape.matches(entry) {
+			kept = append(kept, entry)
+			continue
+		}
+		changed = true
+		if stripped := shape.strip(entry); stripped != nil {
+			kept = append(kept, stripped)
+		}
 	}
-	return removePrimeHook(settings)
+	if !changed {
+		return false
+	}
+	hooks := settings["hooks"].(map[string]any)
+	if len(kept) == 0 {
+		delete(hooks, shape.eventKey)
+	} else {
+		hooks[shape.eventKey] = kept
+	}
+	if len(hooks) == 0 {
+		delete(settings, "hooks")
+	}
+	return true
+}
+
+func hasHookMatch(shape hookShape, settings map[string]any) bool {
+	for _, entry := range hookEventEntries(shape.eventKey, settings) {
+		if shape.matches(entry) {
+			return true
+		}
+	}
+	return false
+}
+
+func hookEventEntries(eventKey string, settings map[string]any) []any {
+	hooks, _ := settings["hooks"].(map[string]any)
+	if hooks == nil {
+		return nil
+	}
+	entries, _ := hooks[eventKey].([]any)
+	return entries
 }
 
 // hookEntryDetails is the event name and command to report for the agent's
@@ -416,29 +472,45 @@ func (h *hookSettings) dirEmpty(rel string) (bool, error) {
 	return len(entries) == 0, nil
 }
 
-// addPrimeHook appends the hook entry unless any SessionStart hook already
-// runs hew prime (however the user phrased its entry). Reports whether
-// it changed anything.
-func addPrimeHook(settings map[string]any) bool {
-	if hasPrimeHook(settings) {
-		return false
-	}
-	hooks, _ := settings["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
-		settings["hooks"] = hooks
-	}
-	entries, _ := hooks[hookEvent].([]any)
-	hooks[hookEvent] = append(entries, map[string]any{
-		"hooks": []any{
-			map[string]any{"type": "command", "command": primeHookCommand},
-		},
-	})
-	return true
+// hookShape describes one agent's on-disk session-start hook entry format,
+// so addHookEntry/removeHookEntry above run once for every shape instead of
+// each shape carrying its own copy of the traversal and pruning logic.
+type hookShape struct {
+	eventKey string
+	// ensureDefaults sets schema fields a shape requires before its first
+	// hook is written (nil if the format has none).
+	ensureDefaults func(settings map[string]any)
+	// newEntry builds the entry install appends.
+	newEntry func() any
+	// matches reports whether a top-level entry runs hew prime, however
+	// the user phrased it.
+	matches func(entry any) bool
+	// strip returns entry with its hew-prime hook(s) removed, or nil if
+	// nothing should remain and the whole entry should be dropped. Called
+	// only when matches(entry) is true.
+	strip func(entry any) any
 }
 
-func hasPrimeHook(settings map[string]any) bool {
-	for _, entry := range sessionStartEntries(settings) {
+func hookShapeFor(agent HookAgent) hookShape {
+	if agent == HookAgentCursor {
+		return cursorHookShape
+	}
+	return nestedHookShape
+}
+
+// nestedHookShape is claude's and codex's shared SessionStart shape: entries
+// are {"hooks": [{"type": "command", "command": ...}, ...]} objects, so a
+// single entry can carry hooks besides ours that a removal must preserve.
+var nestedHookShape = hookShape{
+	eventKey: hookEvent,
+	newEntry: func() any {
+		return map[string]any{
+			"hooks": []any{
+				map[string]any{"type": "command", "command": primeHookCommand},
+			},
+		}
+	},
+	matches: func(entry any) bool {
 		m, _ := entry.(map[string]any)
 		inner, _ := m["hooks"].([]any)
 		for _, h := range inner {
@@ -447,62 +519,25 @@ func hasPrimeHook(settings map[string]any) bool {
 				return true
 			}
 		}
-	}
-	return false
-}
-
-// removePrimeHook deletes every issues-prime hook and prunes entries, the
-// SessionStart list, and the hooks object when they end up empty.
-func removePrimeHook(settings map[string]any) bool {
-	entries := sessionStartEntries(settings)
-	changed := false
-	var keptEntries []any
-	for _, entry := range entries {
-		m, ok := entry.(map[string]any)
-		if !ok {
-			keptEntries = append(keptEntries, entry)
-			continue
-		}
+		return false
+	},
+	strip: func(entry any) any {
+		m := entry.(map[string]any)
 		inner, _ := m["hooks"].([]any)
-		var keptHooks []any
+		var kept []any
 		for _, h := range inner {
 			hm, _ := h.(map[string]any)
 			if cmd, _ := hm["command"].(string); strings.Contains(cmd, primeHookCommand) {
-				changed = true
 				continue
 			}
-			keptHooks = append(keptHooks, h)
+			kept = append(kept, h)
 		}
-		if len(keptHooks) == 0 && len(inner) > 0 {
-			continue // entry existed only for our hook
+		if len(kept) == 0 {
+			return nil // entry existed only for our hook
 		}
-		if keptHooks != nil {
-			m["hooks"] = keptHooks
-		}
-		keptEntries = append(keptEntries, entry)
-	}
-	if !changed {
-		return false
-	}
-	hooks := settings["hooks"].(map[string]any)
-	if len(keptEntries) == 0 {
-		delete(hooks, hookEvent)
-	} else {
-		hooks[hookEvent] = keptEntries
-	}
-	if len(hooks) == 0 {
-		delete(settings, "hooks")
-	}
-	return true
-}
-
-func sessionStartEntries(settings map[string]any) []any {
-	hooks, _ := settings["hooks"].(map[string]any)
-	if hooks == nil {
-		return nil
-	}
-	entries, _ := hooks[hookEvent].([]any)
-	return entries
+		m["hooks"] = kept
+		return m
+	},
 }
 
 // Cursor's hooks.json shape differs from claude's and codex's on every axis:
@@ -522,72 +557,25 @@ const (
 	cursorHookTimeout = 30
 )
 
-// addCursorHook appends the flat Cursor entry under sessionStart and ensures
-// the schema version is present. Reports whether it changed anything.
-func addCursorHook(settings map[string]any) bool {
-	if _, ok := settings["version"]; !ok {
-		settings["version"] = 1 // the schema default; an explicit value is kept
-	}
-	if hasCursorPrimeHook(settings) {
-		return false
-	}
-	hooks, _ := settings["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
-		settings["hooks"] = hooks
-	}
-	entries, _ := hooks[cursorHookEvent].([]any)
-	hooks[cursorHookEvent] = append(entries, map[string]any{
-		"command": cursorHookCommand,
-		"timeout": cursorHookTimeout,
-	})
-	return true
-}
-
-func hasCursorPrimeHook(settings map[string]any) bool {
-	for _, entry := range cursorHookEntries(settings) {
-		m, _ := entry.(map[string]any)
-		if cmd, _ := m["command"].(string); strings.Contains(cmd, primeHookCommand) {
-			return true
+// cursorHookShape is Cursor's flat SessionStart shape: an entry is the hook,
+// so a match always drops the whole entry rather than pruning inside it.
+var cursorHookShape = hookShape{
+	eventKey: cursorHookEvent,
+	ensureDefaults: func(settings map[string]any) {
+		if _, ok := settings["version"]; !ok {
+			settings["version"] = 1 // the schema default; an explicit value is kept
 		}
-	}
-	return false
-}
-
-// removeCursorHook deletes every hew prime entry and prunes the sessionStart
-// list and the hooks object when they end up empty.
-func removeCursorHook(settings map[string]any) bool {
-	entries := cursorHookEntries(settings)
-	changed := false
-	var kept []any
-	for _, entry := range entries {
-		m, _ := entry.(map[string]any)
-		if cmd, _ := m["command"].(string); strings.Contains(cmd, primeHookCommand) {
-			changed = true
-			continue
+	},
+	newEntry: func() any {
+		return map[string]any{
+			"command": cursorHookCommand,
+			"timeout": cursorHookTimeout,
 		}
-		kept = append(kept, entry)
-	}
-	if !changed {
-		return false
-	}
-	hooks := settings["hooks"].(map[string]any)
-	if len(kept) == 0 {
-		delete(hooks, cursorHookEvent)
-	} else {
-		hooks[cursorHookEvent] = kept
-	}
-	if len(hooks) == 0 {
-		delete(settings, "hooks")
-	}
-	return true
-}
-
-func cursorHookEntries(settings map[string]any) []any {
-	hooks, _ := settings["hooks"].(map[string]any)
-	if hooks == nil {
-		return nil
-	}
-	entries, _ := hooks[cursorHookEvent].([]any)
-	return entries
+	},
+	matches: func(entry any) bool {
+		m, _ := entry.(map[string]any)
+		cmd, _ := m["command"].(string)
+		return strings.Contains(cmd, primeHookCommand)
+	},
+	strip: func(entry any) any { return nil },
 }
