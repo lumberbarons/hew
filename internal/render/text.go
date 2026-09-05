@@ -67,9 +67,10 @@ func meta(i model.Issue) string {
 	return strings.Join(parts, " ")
 }
 
-// Line renders one issue as `#n meta  title`, unaligned.
-func Line(i model.Issue) string {
-	return fmt.Sprintf("#%d %s  %s", i.Number, meta(i), sanitizeInline(i.Title))
+// Line renders one issue as `#n meta  title`, unaligned. Under a color
+// style the number is amber and the priority green.
+func Line(i model.Issue, s Style) string {
+	return fmt.Sprintf("%s %s  %s", s.numPadded(i.Number, len(strconv.Itoa(i.Number))), s.metaPadded(meta(i), len(meta(i))), sanitizeInline(i.Title))
 }
 
 // lineOpts tweak List output per caller.
@@ -109,7 +110,7 @@ func annotations(i model.Issue) string {
 	return "  [" + strings.Join(parts, "; ") + "]"
 }
 
-func lines(w io.Writer, issues []model.Issue, opts lineOpts) {
+func lines(w io.Writer, issues []model.Issue, opts lineOpts, s Style) {
 	numWidth, metaWidth := 0, 0
 	metas := make([]string, len(issues))
 	for idx, i := range issues {
@@ -122,18 +123,18 @@ func lines(w io.Writer, issues []model.Issue, opts lineOpts) {
 		}
 	}
 	for idx, i := range issues {
-		fmt.Fprintf(w, "#%-*d %-*s  %s", numWidth, i.Number, metaWidth, metas[idx], sanitizeInline(i.Title))
+		fmt.Fprintf(w, "%s %s  %s", s.numPadded(i.Number, numWidth), s.metaPadded(metas[idx], metaWidth), sanitizeInline(i.Title))
 		if opts.progress && i.IsEpic() {
-			fmt.Fprintf(w, "  %d/%d", i.SubIssuesCompleted, i.SubIssuesTotal)
+			fmt.Fprintf(w, "  %s", s.dim(fmt.Sprintf("%d/%d", i.SubIssuesCompleted, i.SubIssuesTotal)))
 		}
 		if opts.assignees && len(i.Assignees) > 0 {
-			fmt.Fprintf(w, "  @%s", sanitizeInline(strings.Join(i.Assignees, " @")))
+			fmt.Fprintf(w, "  %s", s.dim("@"+sanitizeInline(strings.Join(i.Assignees, " @"))))
 		}
 		if opts.state && !i.IsOpen() {
-			fmt.Fprint(w, "  [closed]")
+			fmt.Fprint(w, "  ", s.dim("[closed]"))
 		}
 		if opts.annotate {
-			fmt.Fprint(w, annotations(i))
+			fmt.Fprint(w, s.dim(annotations(i)))
 		}
 		fmt.Fprintln(w)
 	}
@@ -141,40 +142,40 @@ func lines(w io.Writer, issues []model.Issue, opts lineOpts) {
 
 // List renders one aligned line per issue, annotated with whatever keeps
 // it from being plain ready work.
-func List(w io.Writer, issues []model.Issue) {
-	lines(w, issues, lineOpts{annotate: true})
+func List(w io.Writer, issues []model.Issue, s Style) {
+	lines(w, issues, lineOpts{annotate: true}, s)
 }
 
 // ListWithAssignees renders lines with @assignee suffixes (in-progress view).
-func ListWithAssignees(w io.Writer, issues []model.Issue) {
-	lines(w, issues, lineOpts{assignees: true})
+func ListWithAssignees(w io.Writer, issues []model.Issue, s Style) {
+	lines(w, issues, lineOpts{assignees: true}, s)
 }
 
 // EpicList renders epics with their progress rollups.
-func EpicList(w io.Writer, issues []model.Issue) {
-	lines(w, issues, lineOpts{progress: true})
+func EpicList(w io.Writer, issues []model.Issue, s Style) {
+	lines(w, issues, lineOpts{progress: true}, s)
 }
 
 // Show renders the full detail view for one issue.
-func Show(w io.Writer, i model.Issue) {
-	fmt.Fprintln(w, Line(i))
+func Show(w io.Writer, i model.Issue, s Style) {
+	fmt.Fprintln(w, Line(i, s))
 	state := strings.ToLower(i.State)
 	if i.StateReason != "" {
 		state += " (" + strings.ToLower(i.StateReason) + ")"
 	}
-	fmt.Fprintf(w, "state: %s  created: %s", sanitizeInline(state), i.CreatedAt.Format("2006-01-02"))
+	line := fmt.Sprintf("state: %s  created: %s", sanitizeInline(state), i.CreatedAt.Format("2006-01-02"))
 	if len(i.Assignees) > 0 {
-		fmt.Fprintf(w, "  assignee: @%s", sanitizeInline(strings.Join(i.Assignees, " @")))
+		line += fmt.Sprintf("  assignee: @%s", sanitizeInline(strings.Join(i.Assignees, " @")))
 	}
-	fmt.Fprintln(w)
+	fmt.Fprintln(w, s.dim(line))
 	if i.Parent != nil {
-		fmt.Fprintf(w, "parent: #%d %s\n", i.Parent.Number, sanitizeInline(i.ParentTitle))
+		fmt.Fprintf(w, "parent: %s %s\n", s.num(i.Parent.Number), sanitizeInline(i.ParentTitle))
 	}
 	if len(i.BlockedBy) > 0 {
-		fmt.Fprintf(w, "blocked by: %s\n", refList(i.BlockedBy))
+		fmt.Fprintf(w, "blocked by: %s\n", refList(i.BlockedBy, s))
 	}
 	if i.IsEpic() {
-		fmt.Fprintf(w, "sub-issues (%d/%d done): %s\n", i.SubIssuesCompleted, i.SubIssuesTotal, refList(i.SubIssues))
+		fmt.Fprintf(w, "sub-issues (%d/%d done): %s\n", i.SubIssuesCompleted, i.SubIssuesTotal, refList(i.SubIssues, s))
 	}
 	if body := strings.TrimSpace(i.Body); body != "" {
 		fmt.Fprintln(w)
@@ -186,7 +187,7 @@ func Show(w io.Writer, i model.Issue) {
 		if i.CommentsTotal > len(i.Comments) {
 			header = fmt.Sprintf("comments (showing last %d of %d):", len(i.Comments), i.CommentsTotal)
 		}
-		fmt.Fprintln(w, header)
+		fmt.Fprintln(w, s.dim(header))
 		for _, c := range i.Comments {
 			fmt.Fprintf(w, "  @%s (%s): %s\n", sanitizeInline(c.Author),
 				c.CreatedAt.Format("2006-01-02"), sanitizeBlock(strings.TrimSpace(c.Body)))
@@ -194,13 +195,10 @@ func Show(w io.Writer, i model.Issue) {
 	}
 }
 
-func refList(refs []model.Ref) string {
+func refList(refs []model.Ref, s Style) string {
 	parts := make([]string, len(refs))
 	for idx, r := range refs {
-		parts[idx] = fmt.Sprintf("#%d", r.Number)
-		if !r.IsOpen() {
-			parts[idx] += " (closed)"
-		}
+		parts[idx] = s.refNum(r.Number, !r.IsOpen())
 	}
 	return strings.Join(parts, ", ")
 }
@@ -208,14 +206,14 @@ func refList(refs []model.Ref) string {
 // EpicStatus renders one epic and its children. Children are the epic's
 // full parent-backlinked set (complete even when the sub-issue connection
 // was capped); the rollup line keeps the server-side completed/total.
-func EpicStatus(w io.Writer, epic model.Issue, children []model.Issue) {
-	fmt.Fprintf(w, "%s  %d/%d\n", Line(epic), epic.SubIssuesCompleted, epic.SubIssuesTotal)
+func EpicStatus(w io.Writer, epic model.Issue, children []model.Issue, s Style) {
+	fmt.Fprintf(w, "%s  %s\n", Line(epic, s), s.dim(fmt.Sprintf("%d/%d", epic.SubIssuesCompleted, epic.SubIssuesTotal)))
 	for _, child := range children {
 		mark := "○"
 		if !child.IsOpen() {
 			mark = "✓"
 		}
-		fmt.Fprintf(w, "  %s #%d %s  %s\n", mark, child.Number, meta(child), sanitizeInline(child.Title))
+		fmt.Fprintf(w, "  %s %s %s  %s\n", mark, s.numPadded(child.Number, len(strconv.Itoa(child.Number))), s.metaPadded(meta(child), len(meta(child))), sanitizeInline(child.Title))
 	}
 }
 
@@ -262,28 +260,28 @@ type PrimeData struct {
 
 // Prime renders the session-start primer: static conventions, live state,
 // contradictions. Sections are omitted when empty.
-func Prime(w io.Writer, static string, d PrimeData) {
+func Prime(w io.Writer, static string, d PrimeData, s Style) {
 	fmt.Fprintf(w, "# hew primer — %s\n", sanitizeInline(d.Repo))
 	fmt.Fprintln(w, static)
 	fmt.Fprintf(w, "\n## Ready (%d of %d open)\n", d.ReadyTotal, d.OpenTotal)
 	if len(d.Ready) == 0 {
 		fmt.Fprintln(w, "no ready work")
 	} else {
-		lines(w, d.Ready, lineOpts{})
+		lines(w, d.Ready, lineOpts{}, s)
 		if d.ReadyTotal > len(d.Ready) {
-			fmt.Fprintf(w, "… %d more: hew ready\n", d.ReadyTotal-len(d.Ready))
+			fmt.Fprintln(w, s.dim(fmt.Sprintf("… %d more: hew ready", d.ReadyTotal-len(d.Ready))))
 		}
 	}
 	if len(d.InProgress) > 0 {
 		fmt.Fprintf(w, "\n## In progress (%d)\n", len(d.InProgress))
-		lines(w, d.InProgress, lineOpts{assignees: true})
+		lines(w, d.InProgress, lineOpts{assignees: true}, s)
 	}
 	if len(d.Epics) > 0 {
 		fmt.Fprintln(w, "\n## Epics")
-		lines(w, d.Epics, lineOpts{progress: true})
+		lines(w, d.Epics, lineOpts{progress: true}, s)
 	}
 	if d.Untriaged > 0 {
-		fmt.Fprintf(w, "\n%d untriaged → hew triage\n", d.Untriaged)
+		fmt.Fprintln(w, s.dim(fmt.Sprintf("\n%d untriaged → hew triage", d.Untriaged)))
 	}
 	if len(d.Warnings) > 0 {
 		fmt.Fprintln(w, "\n## Warnings")

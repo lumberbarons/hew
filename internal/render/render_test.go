@@ -80,7 +80,7 @@ func TestList(t *testing.T) {
 		Labels: []string{"P2", "bug", "in-progress"}, Assignees: []string{"lumberbarons"},
 	}
 	var buf bytes.Buffer
-	List(&buf, append(issues, blocked, epic, claimed))
+	List(&buf, append(issues, blocked, epic, claimed), Style{})
 	checkGolden(t, "list", buf.Bytes())
 }
 
@@ -89,7 +89,7 @@ func TestListWithAssignees(t *testing.T) {
 	issues[0].Assignees = []string{"lumberbarons"}
 	issues[0].Labels = append(issues[0].Labels, "in-progress")
 	var buf bytes.Buffer
-	ListWithAssignees(&buf, issues)
+	ListWithAssignees(&buf, issues, Style{})
 	checkGolden(t, "list_assignees", buf.Bytes())
 }
 
@@ -101,7 +101,7 @@ func TestEpicList(t *testing.T) {
 		SubIssues: []model.Ref{{Number: 120, State: "OPEN"}},
 	}
 	var buf bytes.Buffer
-	EpicList(&buf, []model.Issue{epic})
+	EpicList(&buf, []model.Issue{epic}, Style{})
 	checkGolden(t, "epic_list", buf.Bytes())
 }
 
@@ -119,7 +119,7 @@ func TestShow(t *testing.T) {
 		CommentsTotal: 12,
 	}
 	var buf bytes.Buffer
-	Show(&buf, i)
+	Show(&buf, i, Style{})
 	checkGolden(t, "show", buf.Bytes())
 }
 
@@ -129,7 +129,7 @@ func TestShowClosedMinimal(t *testing.T) {
 		CreatedAt: ts(4), Labels: []string{"P3", "task"},
 	}
 	var buf bytes.Buffer
-	Show(&buf, i)
+	Show(&buf, i, Style{})
 	checkGolden(t, "show_closed", buf.Bytes())
 }
 
@@ -141,7 +141,7 @@ func TestShowEpic(t *testing.T) {
 		SubIssues: []model.Ref{{Number: 120, State: "OPEN"}, {Number: 121, State: "CLOSED"}},
 	}
 	var buf bytes.Buffer
-	Show(&buf, i)
+	Show(&buf, i, Style{})
 	checkGolden(t, "show_epic", buf.Bytes())
 }
 
@@ -156,7 +156,7 @@ func TestEpicStatus(t *testing.T) {
 		{Number: 121, Title: "Done child", State: "CLOSED", Labels: []string{"P2", "task"}},
 	}
 	var buf bytes.Buffer
-	EpicStatus(&buf, epic, children)
+	EpicStatus(&buf, epic, children, Style{})
 	checkGolden(t, "epic_status", buf.Bytes())
 }
 
@@ -185,14 +185,14 @@ func TestPrime(t *testing.T) {
 		Untriaged:  7,
 	}
 	var buf bytes.Buffer
-	Prime(&buf, "Workflow: hew ready → hew start <n>.", d)
+	Prime(&buf, "Workflow: hew ready → hew start <n>.", d, Style{})
 	checkGolden(t, "prime", buf.Bytes())
 }
 
 func TestPrimeEmptySectionsOmitted(t *testing.T) {
 	d := PrimeData{Repo: "o/r", OpenTotal: 0, ReadyTotal: 0}
 	var buf bytes.Buffer
-	Prime(&buf, "static", d)
+	Prime(&buf, "static", d, Style{})
 	out := buf.String()
 	if strings.Contains(out, "In progress") || strings.Contains(out, "Epics") ||
 		strings.Contains(out, "Warnings") || strings.Contains(out, "untriaged") {
@@ -207,7 +207,7 @@ func TestPrimeMoreLine(t *testing.T) {
 	issues := fixtureIssues()
 	d := PrimeData{Repo: "o/r", Ready: model.Ready(issues)[:1], ReadyTotal: 3, OpenTotal: 5}
 	var buf bytes.Buffer
-	Prime(&buf, "static", d)
+	Prime(&buf, "static", d, Style{})
 	if !strings.Contains(buf.String(), "… 2 more: hew ready") {
 		t.Errorf("missing more line:\n%s", buf.String())
 	}
@@ -332,7 +332,7 @@ func TestJSONEpicStatus(t *testing.T) {
 
 func TestLine(t *testing.T) {
 	i := model.Issue{Number: 7, Title: "T", State: "OPEN", Labels: []string{"bug"}}
-	if got := Line(i); got != "#7 P? bug  T" {
+	if got := Line(i, Style{}); got != "#7 P? bug  T" {
 		t.Errorf("Line() = %q", got)
 	}
 }

@@ -1,0 +1,15 @@
+[38;2;242;169;59m#42[0m [38;2;95;214;139mP1[0m bug (tests)  Fix the frobnicator
+[38;2;110;125;113mstate: open  created: 2026-07-06  assignee: @lumberbarons[0m
+parent: [38;2;242;169;59m#137[0m Epic: Voltgo
+blocked by: [38;2;242;169;59m#7[0m, [38;2;242;169;59m#8[0m (closed)
+
+### Where
+
+internal/frob
+
+### Problem
+
+It wobbles.
+
+[38;2;110;125;113mcomments (showing last 1 of 12):[0m
+  @alice (2026-07-07): repro attached

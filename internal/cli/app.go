@@ -55,6 +55,10 @@ type App struct {
 	Out    io.Writer
 	ErrOut io.Writer
 	JSON   bool
+	// Color is the precomputed TTY decision (render.ColorEnabled on the
+	// real stdout in main): text renderers wrap their semantic spans in
+	// ANSI only when it is set. JSON and piped output are never affected.
+	Color bool
 	// Edit opens an editor seeded with initial text and returns the result;
 	// wired to $EDITOR by main, injected by tests.
 	Edit func(initial string) (string, error)
@@ -70,6 +74,9 @@ func (a *App) printf(format string, args ...any) {
 func (a *App) warnf(format string, args ...any) {
 	fmt.Fprintf(a.ErrOut, "⚠ "+format+"\n", args...)
 }
+
+// style is the render style for the app's color decision.
+func (a *App) style() render.Style { return render.StyleFor(a.Color) }
 
 // progressf narrates long-running work: stdout normally, stderr under
 // --json so the machine-readable stream stays clean.
@@ -93,13 +100,13 @@ func (a *App) progressf(format string, args ...any) {
 
 // emitList renders an issue collection: NDJSON under --json, otherwise the
 // given text renderer, or emptyMsg when there are none.
-func (a *App) emitList(issues []model.Issue, emptyMsg string, renderText func(io.Writer, []model.Issue)) error {
+func (a *App) emitList(issues []model.Issue, emptyMsg string, renderText func(io.Writer, []model.Issue, render.Style)) error {
 	return a.emitListBodies(issues, emptyMsg, renderText, false)
 }
 
 // emitListBodies is emitList with the body carried on every NDJSON line
 // (list --bodies); text output is unaffected.
-func (a *App) emitListBodies(issues []model.Issue, emptyMsg string, renderText func(io.Writer, []model.Issue), withBodies bool) error {
+func (a *App) emitListBodies(issues []model.Issue, emptyMsg string, renderText func(io.Writer, []model.Issue, render.Style), withBodies bool) error {
 	if a.JSON {
 		return render.JSONList(a.Out, issues, withBodies)
 	}
@@ -107,7 +114,7 @@ func (a *App) emitListBodies(issues []model.Issue, emptyMsg string, renderText f
 		a.printf("%s\n", emptyMsg)
 		return nil
 	}
-	renderText(a.Out, issues)
+	renderText(a.Out, issues, a.style())
 	return nil
 }
 
@@ -116,7 +123,7 @@ func (a *App) emitIssue(issue model.Issue) error {
 	if a.JSON {
 		return render.JSONIssue(a.Out, issue)
 	}
-	render.Show(a.Out, issue)
+	render.Show(a.Out, issue, a.style())
 	return nil
 }
 
@@ -125,7 +132,7 @@ func (a *App) emitEpicStatus(epic model.Issue, children []model.Issue) error {
 	if a.JSON {
 		return render.JSONEpicStatus(a.Out, epic, children)
 	}
-	render.EpicStatus(a.Out, epic, children)
+	render.EpicStatus(a.Out, epic, children, a.style())
 	return nil
 }
 
@@ -146,7 +153,7 @@ func (a *App) emitPrime(static string, d render.PrimeData) error {
 	if a.JSON {
 		return render.JSONPrime(a.Out, d)
 	}
-	render.Prime(a.Out, static, d)
+	render.Prime(a.Out, static, d, a.style())
 	return nil
 }
 

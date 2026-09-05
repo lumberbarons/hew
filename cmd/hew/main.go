@@ -19,6 +19,7 @@ import (
 	"github.com/lumberbarons/hew/internal/editor"
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/git"
+	"github.com/lumberbarons/hew/internal/render"
 
 	"github.com/cli/go-gh/v2/pkg/repository"
 )
@@ -70,8 +71,11 @@ func buildApp(cmd *ucli.Command) (*appcli.App, error) {
 		Out:    os.Stdout,
 		ErrOut: os.Stderr,
 		JSON:   cmd.Bool("json"),
-		Edit:   editor.Edit,
-		Git:    git.Current,
+		// The TTY/NO_COLOR/TERM/FORCE_COLOR decision is made once, here,
+		// against the real stdout; tests inject their own.
+		Color: render.ColorEnabled(os.Stdout),
+		Edit:  editor.Edit,
+		Git:   git.Current,
 	}, nil
 }
 
@@ -526,7 +530,7 @@ func hooksApp(cmd *ucli.Command) (*appcli.App, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	return &appcli.App{Out: os.Stdout, ErrOut: os.Stderr, JSON: cmd.Bool("json")}, root, nil
+	return &appcli.App{Out: os.Stdout, ErrOut: os.Stderr, JSON: cmd.Bool("json"), Color: render.ColorEnabled(os.Stdout)}, root, nil
 }
 
 func hooksCmd() *ucli.Command {
