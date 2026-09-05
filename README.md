@@ -37,7 +37,7 @@ repository is detected from the git remote (`--repo owner/name` overrides).
 
 ```sh
 hew init          # bootstrap the label set in a repo; prints a CLAUDE.md snippet
-hew hooks install claude # session-start hook for Claude Code (codex and opencode too)
+hew hooks install <claude|codex|opencode> # agent session-start hook running `hew prime`
 hew prime         # session-start context: conventions + ready work + live state
 hew ready         # what should I work on? (priority-sorted, zero open blockers)
 hew start 42      # claim it: assign @me + in-progress (refuses claimed work: exit 3,
