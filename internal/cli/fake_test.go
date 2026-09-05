@@ -313,6 +313,21 @@ func (f *fakeClient) CloseIssue(ctx context.Context, number int, reason gh.Close
 	return nil
 }
 
+func (f *fakeClient) ReopenIssue(ctx context.Context, number int) error {
+	if err := f.record(fmt.Sprintf("ReopenIssue %d", number)); err != nil {
+		return err
+	}
+	i, err := f.requireIssue(number)
+	if err != nil {
+		return err
+	}
+	i.State = "OPEN"
+	// GitHub records REOPENED as the state reason rather than clearing the
+	// close reason, so the fake does too.
+	i.StateReason = "REOPENED"
+	return nil
+}
+
 func (f *fakeClient) AddBlockedBy(ctx context.Context, number, blockingNumber int) error {
 	if err := f.record(fmt.Sprintf("AddBlockedBy %d %d", number, blockingNumber)); err != nil {
 		return err

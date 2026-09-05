@@ -89,7 +89,7 @@ func root() *ucli.Command {
 		Commands: []*ucli.Command{
 			primeCmd(), readyCmd(), listCmd(), showCmd(), searchCmd(),
 			createCmd(), startCmd(), triageCmd(), setCmd(), prCmd(), closeCmd(),
-			blockCmd(), unblockCmd(), epicCmd(), applyCmd(), initCmd(),
+			reopenCmd(), blockCmd(), unblockCmd(), epicCmd(), applyCmd(), initCmd(),
 			hooksCmd(), migrateCmd(),
 		},
 	}
@@ -394,6 +394,28 @@ func closeCmd() *ucli.Command {
 				return err
 			}
 			return app.Close(ctx, n, cmd.String("reason"), cmd.Bool("completed"), cmd.Int("duplicate-of"))
+		},
+	}
+}
+
+func reopenCmd() *ucli.Command {
+	return &ucli.Command{
+		Name:      "reopen",
+		Usage:     "comment + reopen (no-op on an already-open issue)",
+		ArgsUsage: "<n>",
+		Flags: []ucli.Flag{
+			&ucli.StringFlag{Name: "reason", Usage: "reopening comment (required)"},
+		},
+		Action: func(ctx context.Context, cmd *ucli.Command) error {
+			n, err := numberArg(cmd, "hew reopen <n> --reason \"...\"")
+			if err != nil {
+				return err
+			}
+			app, err := buildApp(cmd)
+			if err != nil {
+				return err
+			}
+			return app.Reopen(ctx, n, cmd.String("reason"))
 		},
 	}
 }

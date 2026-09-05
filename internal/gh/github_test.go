@@ -428,6 +428,7 @@ func TestGraphQLMutations(t *testing.T) {
 		return fmt.Sprintf(`{"data":{"repository":{"issue":{"id":"NODE%v"}}}}`, vars["number"])
 	}
 	f.graphql["closeIssue"] = `{"data":{"closeIssue":{"clientMutationId":null}}}`
+	f.graphql["reopenIssue"] = `{"data":{"reopenIssue":{"clientMutationId":null}}}`
 	f.graphql["addBlockedBy"] = `{"data":{"addBlockedBy":{"clientMutationId":null}}}`
 	f.graphql["removeBlockedBy"] = `{"data":{"removeBlockedBy":{"clientMutationId":null}}}`
 	f.graphql["addSubIssue"] = `{"data":{"addSubIssue":{"clientMutationId":null}}}`
@@ -435,6 +436,9 @@ func TestGraphQLMutations(t *testing.T) {
 	c := f.client(t)
 	ctx := context.Background()
 	if err := c.CloseIssue(ctx, 1, CloseNotPlanned); err != nil {
+		t.Error(err)
+	}
+	if err := c.ReopenIssue(ctx, 3); err != nil {
 		t.Error(err)
 	}
 	if err := c.AddBlockedBy(ctx, 1, 2); err != nil {
@@ -482,6 +486,11 @@ func TestGraphQLMutations(t *testing.T) {
 	if got, want := gqlVariables(t, f, "closeIssue"), (map[string]any{"id": "NODE1", "reason": "NOT_PLANNED"}); !reflect.DeepEqual(got, want) {
 		t.Errorf("closeIssue variables = %v, want %v", got, want)
 	}
+	// reopenIssue takes the node ID alone; GitHub records the state reason
+	// itself, so there is nothing else to pass or to get wrong.
+	if got, want := gqlVariables(t, f, "reopenIssue"), (map[string]any{"id": "NODE3"}); !reflect.DeepEqual(got, want) {
+		t.Errorf("reopenIssue variables = %v, want %v", got, want)
+	}
 }
 
 func TestMutationResolvesNodeIDAndReportsMissing(t *testing.T) {
@@ -489,8 +498,12 @@ func TestMutationResolvesNodeIDAndReportsMissing(t *testing.T) {
 	// Node-ID resolution finds no issue: the mutation must surface not-found
 	// rather than sending a bad ID to the mutation.
 	f.graphql["issue(number:"] = `{"data":{"repository":{"issue":null}}}`
-	err := f.client(t).CloseIssue(context.Background(), 404, CloseCompleted)
+	c := f.client(t)
+	err := c.CloseIssue(context.Background(), 404, CloseCompleted)
 	if err == nil || !strings.Contains(err.Error(), "#404 not found") {
+		t.Fatalf("err = %v", err)
+	}
+	if err := c.ReopenIssue(context.Background(), 404); err == nil || !strings.Contains(err.Error(), "#404 not found") {
 		t.Fatalf("err = %v", err)
 	}
 }

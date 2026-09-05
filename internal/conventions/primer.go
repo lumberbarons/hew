@@ -29,7 +29,8 @@ start <n> [--priority Pn] | set <n> [--priority Pn --type T --add-area X --remov
 pr [--for N --testing "..." --what "..." --why "..." --title "..." --ready] (draft PR for the claimed issue; body
   composed from the issue, exactly one "Fixes #n"; title defaults to feat:|fix:|chore: from the type —
   push the branch first) |
-close <n> --reason "..." [--completed | --duplicate-of M] | block <n> --on <m> | unblock <n> --from <m> |
+close <n> --reason "..." [--completed | --duplicate-of M] | reopen <n> --reason "..." |
+block <n> --on <m> | unblock <n> --from <m> |
 epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n>] |
 apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew apply --help). All take --json.`
 
