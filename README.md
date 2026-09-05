@@ -56,6 +56,11 @@ hew pr            # draft PR for the claimed issue, body composed, "Fixes #42" e
   project's `.codex/hooks.json`. Codex requires project hooks to be trusted;
   review and enable it with `/hooks`.
 
+Both refuse to write through a symlink. A checkout is untrusted input, so hew
+never follows a link standing where it expects its own directory or settings
+file — including one that stays inside the checkout. If yours are symlinked
+into a dotfiles repo, edit the file the link resolves to directly.
+
 `hew ready` prints one line per issue, so you can tell it worked:
 
 ```
