@@ -28,6 +28,8 @@ jobs:
           git switch --orphan gh-pages
           git show main:install.sh > install.sh
           git show main:site/index.html > index.html
-          git add install.sh index.html
+          git show main:site/robots.txt > robots.txt
+          git show main:site/sitemap.xml > sitemap.xml
+          git add install.sh index.html robots.txt sitemap.xml
           git commit -m "publish install.sh and site from main @ $(git rev-parse --short main)"
           git push --force origin gh-pages

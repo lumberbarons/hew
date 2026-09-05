@@ -468,8 +468,8 @@ agent silently duplicating half a plan.
   and `site/index.html` to the `gh-pages` branch (GitHub Pages source) whenever
   either changes, so the stable install URL and the landing page at
   https://lumberbarons.github.io/hew/ always serve the same content as `main`.
-  The landing page is a single self-contained HTML file — no build step, no
-  external assets.
+  The landing page is a self-contained static site — one HTML file plus
+  `robots.txt` and `sitemap.xml` — with no build step and no external assets.
 
 ## Spike results (2026-07-10)
 
