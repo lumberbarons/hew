@@ -197,8 +197,9 @@ hew pr [--for N] [--title "..."] [--what|--why|--testing "..."]
                                   # exactly one "Fixes #n" (see below)
 hew close <n> --reason "..."   # comment + close (not-planned unless --completed
                                   # or --duplicate-of M)
-hew reopen <n> --reason "..."  # comment + reopen, close's inverse; no label
-                                  # surgery, and a no-op on an already-open issue
+hew reopen <n> --reason "..."  # comment + reopen, close's inverse; releases a
+                                  # stale claim (close leaves it), never retriages,
+                                  # and is a no-op on an already-open issue
 hew block <n> --on <m> [--closed]      # add dependency (cycle-checked)
 hew unblock <n> --from <m> [--closed]
 hew epic create --title "..." [--children N,N,N]

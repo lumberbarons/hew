@@ -491,9 +491,16 @@ func (a *App) Close(ctx context.Context, number int, reason string, completed bo
 // Reopen is close's inverse: comment the reason, reopen the issue. Closing
 // comments routinely encode the condition to reopen on ("reopen only if #24
 // stalls"), and acting on one should keep close's comment-plus-state-change
-// shape rather than degrade to a bare state flip. No label surgery — the
-// issue rejoins list/triage/ready with the labels it already had, and normal
-// retriage applies.
+// shape rather than degrade to a bare state flip. No retriage — the issue
+// rejoins list/triage/ready with the priority, type, and area labels it
+// already had.
+//
+// A claim is the one thing reopen does clear. Neither close nor a PR merge
+// removes the in-progress label or the assignee, so most issues closed in
+// the normal workflow still carry the claim that produced the fix. Left in
+// place on a reopened issue it makes the claim guard lie: exit 5 tells the
+// old owner to resume merged work, exit 3 tells everyone else the issue is
+// taken, and ready hides it. Whoever wants it back runs start.
 func (a *App) Reopen(ctx context.Context, number int, reason string) error {
 	if reason == "" {
 		return usageErr("--reason is required")
@@ -518,7 +525,38 @@ func (a *App) Reopen(ctx context.Context, number int, reason string) error {
 		// a clean redo — re-running would post the comment a second time.
 		return fmt.Errorf("posted the reason comment on #%d but reopening it failed (a retry will comment again): %w", number, err)
 	}
-	return a.reportMutation(ctx, number, "reopened #%d\n", number)
+	released, err := a.releaseClaim(ctx, issue)
+	if err != nil {
+		// The reopen landed; only the release failed. A retry is a no-op
+		// reopen and will not clear it, so name the remedy.
+		return fmt.Errorf("reopened #%d but releasing its stale claim failed (it is open and still claimed; hew start --force takes it): %w", number, err)
+	}
+	if released == "" {
+		return a.reportMutation(ctx, number, "reopened #%d\n", number)
+	}
+	return a.reportMutation(ctx, number, "reopened #%d (released %s)\n", number, released)
+}
+
+// releaseClaim drops the in-progress label and every assignee from issue and
+// returns a description of what was released, or "" if it was not claimed.
+// The label goes first: if the assignee removal then fails the issue is
+// still claimed either way, and the error path reports exactly that.
+func (a *App) releaseClaim(ctx context.Context, issue model.Issue) (string, error) {
+	if !issue.Claimed() {
+		return "", nil
+	}
+	if issue.InProgress() {
+		if err := a.Client.RemoveLabel(ctx, issue.Number, model.InProgressLabel); err != nil {
+			return "", err
+		}
+	}
+	if len(issue.Assignees) == 0 {
+		return "stale in-progress label", nil
+	}
+	if err := a.Client.RemoveAssignees(ctx, issue.Number, issue.Assignees); err != nil {
+		return "", err
+	}
+	return "@" + strings.Join(issue.Assignees, " and @") + "'s stale claim", nil
 }
 
 // Block adds a native dependency after a transitive client-side cycle

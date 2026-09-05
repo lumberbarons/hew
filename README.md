@@ -102,7 +102,8 @@ hew pr [--for N] [--title "..."]
                                   # trailers are appended, never duplicated)
           [--base BRANCH] [--ready]
 hew close <n> --reason "..." [--completed | --duplicate-of M]
-hew reopen <n> --reason "..."          # comment + reopen; no-op on an open issue
+hew reopen <n> --reason "..."          # comment + reopen; releases a stale claim,
+                                       # no-op on an open issue
 hew block <n> --on <m> [--closed]      # native dependency, cycle-checked
 hew unblock <n> --from <m> [--closed]
 hew epic create --title "..." [--children N,N]

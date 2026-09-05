@@ -702,10 +702,18 @@ func TestReopen(t *testing.T) {
 	if !strings.Contains(out.String(), "reopened #1") {
 		t.Errorf("output = %q", out.String())
 	}
+	if strings.Contains(out.String(), "released") {
+		t.Errorf("unclaimed issue reported a released claim: %q", out.String())
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "RemoveLabel") || strings.HasPrefix(c, "RemoveAssignees") {
+			t.Errorf("unclaimed issue saw a claim-release call: %s", c)
+		}
+	}
 }
 
-// A reopened issue carries no label surgery, so it rejoins the normal read
-// path: list shows it again with whatever labels it already had.
+// A reopened issue is not retriaged, so it rejoins the normal read path:
+// list shows it again with whatever labels it already had.
 func TestReopenRestoresIssueToList(t *testing.T) {
 	closed := issue(1, "Work", "P2", "bug")
 	closed.State = "CLOSED"
@@ -792,6 +800,114 @@ func TestReopenReportsPostedCommentWhenReopenFails(t *testing.T) {
 	}
 	if f.byNumber(1).State != "CLOSED" {
 		t.Errorf("state = %s, want CLOSED", f.byNumber(1).State)
+	}
+}
+
+// A claim says someone is actively working the issue, and the close ended
+// that work. Neither close nor a PR merge clears the in-progress label or the
+// assignee, so a reopened issue would otherwise carry a claim that makes the
+// exit-code contract lie: exit 5 tells the old owner to resume merged work,
+// exit 3 tells everyone else it is taken. Reopen releases the claim and says
+// so; whoever wants it back runs start.
+func TestReopenReleasesStaleClaim(t *testing.T) {
+	closed := issue(1, "Work", "P2", "bug", model.InProgressLabel)
+	closed.State = "CLOSED"
+	closed.StateReason = "COMPLETED"
+	closed.Assignees = []string{"alice"}
+	f := newFake(closed)
+	app, out, _ := newApp(f)
+	if err := app.Reopen(ctx, 1, "regressed in v1.2"); err != nil {
+		t.Fatal(err)
+	}
+	i := f.byNumber(1)
+	if i.State != "OPEN" {
+		t.Errorf("state = %s, want OPEN", i.State)
+	}
+	if i.Claimed() {
+		t.Errorf("reopened issue still claimed: labels=%v assignees=%v", i.Labels, i.Assignees)
+	}
+	// Releasing the claim is not a retriage: priority and type stay put.
+	if !slices.Contains(i.Labels, "P2") || !slices.Contains(i.Labels, "bug") {
+		t.Errorf("triage labels disturbed: %v", i.Labels)
+	}
+	if !strings.Contains(out.String(), "reopened #1 (released @alice's stale claim)") {
+		t.Errorf("output = %q", out.String())
+	}
+	// Back in the pool: list no longer marks it in progress.
+	out.Reset()
+	if err := app.List(ctx, ListOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "#1") || strings.Contains(out.String(), "in progress") {
+		t.Errorf("list after reopen = %q", out.String())
+	}
+}
+
+// The in-progress label alone is a claim too — start sets both, but the
+// label can outlive the assignee — and the output names what was released.
+func TestReopenReleasesLabelOnlyClaim(t *testing.T) {
+	closed := issue(1, "Work", "P2", "bug", model.InProgressLabel)
+	closed.State = "CLOSED"
+	f := newFake(closed)
+	app, out, _ := newApp(f)
+	if err := app.Reopen(ctx, 1, "r"); err != nil {
+		t.Fatal(err)
+	}
+	if f.byNumber(1).Claimed() {
+		t.Errorf("still claimed: %v", f.byNumber(1).Labels)
+	}
+	if !strings.Contains(out.String(), "reopened #1 (released stale in-progress label)") {
+		t.Errorf("output = %q", out.String())
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "RemoveAssignees") {
+			t.Errorf("unassigned issue saw an assignee removal: %s", c)
+		}
+	}
+}
+
+// The reopen has landed by the time the claim release runs, so a failure
+// there must say the issue is open but still claimed — a retry is a no-op
+// reopen and will not clear it; start --force is the remedy.
+func TestReopenReportsClaimLeftWhenReleaseFails(t *testing.T) {
+	closed := issue(1, "Work", "P2", "bug", model.InProgressLabel)
+	closed.State = "CLOSED"
+	closed.Assignees = []string{"alice"}
+	f := newFake(closed)
+	f.failOn["RemoveAssignees"] = errors.New("boom")
+	app, _, _ := newApp(f)
+	err := app.Reopen(ctx, 1, "r")
+	if err == nil || !strings.Contains(err.Error(), "reopened #1 but releasing its stale claim failed") {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "still claimed") || !strings.Contains(err.Error(), "start --force") {
+		t.Errorf("err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Errorf("err = %v", err)
+	}
+	if got := f.byNumber(1); got.State != "OPEN" || !got.Claimed() {
+		t.Errorf("state = %s claimed = %v; want OPEN and still claimed", got.State, got.Claimed())
+	}
+	// The label goes first, so a failure there leaves both halves of the
+	// claim in place and never reaches the assignee call.
+	closed = issue(1, "Work", "P2", "bug", model.InProgressLabel)
+	closed.State = "CLOSED"
+	closed.Assignees = []string{"alice"}
+	f = newFake(closed)
+	f.failOn["RemoveLabel"] = errors.New("label boom")
+	app, _, _ = newApp(f)
+	err = app.Reopen(ctx, 1, "r")
+	if err == nil || !strings.Contains(err.Error(), "still claimed") || !strings.Contains(err.Error(), "label boom") {
+		t.Fatalf("err = %v", err)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "RemoveAssignees") {
+			t.Errorf("assignee removal ran after the label removal failed: %s", c)
+		}
+	}
+	if got := f.byNumber(1); !got.InProgress() || len(got.Assignees) != 1 {
+		t.Errorf("claim partially released: labels=%v assignees=%v", got.Labels, got.Assignees)
 	}
 }
 
