@@ -225,10 +225,14 @@ hew apply <plan.jsonl>         # batch-create from a JSONL plan: one entry per l
                                   # complete check, since pre-existing issues can't
                                   # reference entries that don't exist yet.
 hew init                       # bootstrap labels in a repo; print CLAUDE.md snippet
-hew hooks install|remove <claude|codex|opencode>
+hew hooks install|remove <claude|codex|cursor|opencode>
                                   # session-start injection of `hew prime` in the
                                   # selected agent's project configuration: a
-                                  # SessionStart hook for claude and codex, an
+                                  # SessionStart hook for claude and codex, a
+                                  # sessionStart hook for cursor whose command
+                                  # runs `hew prime --hook-format cursor` — the
+                                  # JSON additional_context wrapper Cursor's
+                                  # stdout contract requires — and an
                                   # auto-discovered opencode plugin that injects
                                   # the primer as system context, never a chat
                                   # message. Refuses a symlinked directory or
@@ -357,6 +361,16 @@ File discovered work with --discovered-from. Never work an epic directly.
 Everything after the header is one line per issue: `#n priority type (areas) title`.
 No URLs, no timestamps, no prose. Target: whole primer under ~600 tokens for a
 typical repo.
+
+Agent hooks consume prime differently: Claude Code and Codex inject its stdout
+as text, but Cursor's sessionStart hook parses stdout as JSON and reads
+`additional_context` (snake_case only — the camelCase `additionalContext`
+spelling is ignored). `hew prime --hook-format cursor` therefore renders the
+same primer into `{"additional_context": ...}` in Go — no shell wrapper around
+`python3` or `jq` — and that flag, not bare `hew prime`, is what
+`hew hooks install cursor` writes. prime never reads stdin, so Cursor's hook
+payload cannot leak into the primer; the flag refuses `--json`, since the hook
+object is neither the text primer nor the data schema.
 
 ## Output principles
 

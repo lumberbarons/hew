@@ -36,16 +36,17 @@ type HookAgent string
 const (
 	HookAgentClaude   HookAgent = "claude"
 	HookAgentCodex    HookAgent = "codex"
+	HookAgentCursor   HookAgent = "cursor"
 	HookAgentOpencode HookAgent = "opencode"
 )
 
 // ParseHookAgent accepts the agents whose hook file formats hew supports.
 func ParseHookAgent(value string) (HookAgent, error) {
 	switch HookAgent(value) {
-	case HookAgentClaude, HookAgentCodex, HookAgentOpencode:
+	case HookAgentClaude, HookAgentCodex, HookAgentCursor, HookAgentOpencode:
 		return HookAgent(value), nil
 	default:
-		return "", usageErr("agent must be claude, codex, or opencode")
+		return "", usageErr("agent must be claude, codex, cursor, or opencode")
 	}
 }
 
@@ -70,9 +71,9 @@ func FindProjectRoot(start string) (string, error) {
 }
 
 // HooksInstall adds a session-start hook running `hew prime` to the selected
-// agent's project configuration — a JSON settings entry for claude and
-// codex, an auto-discovered plugin file for opencode — creating the file if
-// needed and leaving everything else in it untouched. Idempotent.
+// agent's project configuration — a JSON settings entry for claude, codex,
+// and cursor, an auto-discovered plugin file for opencode — creating the
+// file if needed and leaving everything else in it untouched. Idempotent.
 func (a *App) HooksInstall(projectRoot string, agent HookAgent) error {
 	var err error
 	agent, err = ParseHookAgent(string(agent))
@@ -91,17 +92,18 @@ func (a *App) HooksInstall(projectRoot string, agent HookAgent) error {
 	if err != nil {
 		return err
 	}
-	changed := addPrimeHook(settings)
+	changed := addHookEntry(agent, settings)
 	if changed {
 		if err := file.write(settings); err != nil {
 			return err
 		}
 	}
+	event, command := hookEntryDetails(agent)
 	return a.emitResult(map[string]any{"agent": agent, "installed": changed, "path": file.path}, func() {
 		if changed {
-			a.printf("installed %s %s hook running `%s` in %s\n", agent, hookEvent, primeHookCommand, file.path)
+			a.printf("installed %s %s hook running `%s` in %s\n", agent, event, command, file.path)
 		} else {
-			a.printf("%s %s hook already installed in %s\n", agent, hookEvent, file.path)
+			a.printf("%s %s hook already installed in %s\n", agent, event, file.path)
 		}
 	})
 }
@@ -126,19 +128,47 @@ func (a *App) HooksRemove(projectRoot string, agent HookAgent) error {
 	if err != nil {
 		return err
 	}
-	changed := removePrimeHook(settings)
+	changed := removeHookEntry(agent, settings)
 	if changed {
 		if err := file.write(settings); err != nil {
 			return err
 		}
 	}
+	event, _ := hookEntryDetails(agent)
 	return a.emitResult(map[string]any{"agent": agent, "removed": changed, "path": file.path}, func() {
 		if changed {
-			a.printf("removed %s %s hook from %s\n", agent, hookEvent, file.path)
+			a.printf("removed %s %s hook from %s\n", agent, event, file.path)
 		} else {
-			a.printf("no %s %s hook found in %s\n", agent, hookEvent, file.path)
+			a.printf("no %s %s hook found in %s\n", agent, event, file.path)
 		}
 	})
+}
+
+// addHookEntry appends the session-start hook in the agent's own shape:
+// claude and codex share the nested {"hooks": [...]} form, cursor writes
+// flat entries under its own event key.
+func addHookEntry(agent HookAgent, settings map[string]any) bool {
+	if agent == HookAgentCursor {
+		return addCursorHook(settings)
+	}
+	return addPrimeHook(settings)
+}
+
+// removeHookEntry strips the session-start hook, again in the agent's shape.
+func removeHookEntry(agent HookAgent, settings map[string]any) bool {
+	if agent == HookAgentCursor {
+		return removeCursorHook(settings)
+	}
+	return removePrimeHook(settings)
+}
+
+// hookEntryDetails is the event name and command to report for the agent's
+// hook; cursor's differs in both.
+func hookEntryDetails(agent HookAgent) (event, command string) {
+	if agent == HookAgentCursor {
+		return cursorHookEvent, cursorHookCommand
+	}
+	return hookEvent, primeHookCommand
 }
 
 // hooksInstallOpencode writes the auto-discovered opencode plugin
@@ -208,6 +238,8 @@ func hookPathParts(agent HookAgent) []string {
 	switch agent {
 	case HookAgentCodex:
 		return []string{".codex", "hooks.json"}
+	case HookAgentCursor:
+		return []string{".cursor", "hooks.json"}
 	case HookAgentOpencode:
 		return []string{".opencode", "plugins", "hew-prime.js"}
 	}
@@ -470,5 +502,92 @@ func sessionStartEntries(settings map[string]any) []any {
 		return nil
 	}
 	entries, _ := hooks[hookEvent].([]any)
+	return entries
+}
+
+// Cursor's hooks.json shape differs from claude's and codex's on every axis:
+// the event key is sessionStart (leading lowercase), entries are flat
+// {"command": ...} objects rather than the nested {"hooks": [...]} form, and
+// — the real incompatibility — stdout must be valid JSON with the context in
+// additional_context (snake_case; Cursor ignores Claude Code's camelCase
+// additionalContext). A bare `hew prime` text output fails Cursor's JSON
+// parse and the primer never lands, so the hook runs the built-in JSON
+// emission path instead of a shell wrapper around python3 or jq. Cursor also
+// writes the hook payload on stdin; prime never reads stdin, so that JSON
+// cannot leak into the primer. sessionStart is fire-and-forget, so a timeout
+// bounds a stuck prime run.
+const (
+	cursorHookEvent   = "sessionStart"
+	cursorHookCommand = "hew prime --hook-format cursor"
+	cursorHookTimeout = 30
+)
+
+// addCursorHook appends the flat Cursor entry under sessionStart and ensures
+// the schema version is present. Reports whether it changed anything.
+func addCursorHook(settings map[string]any) bool {
+	if _, ok := settings["version"]; !ok {
+		settings["version"] = 1 // the schema default; an explicit value is kept
+	}
+	if hasCursorPrimeHook(settings) {
+		return false
+	}
+	hooks, _ := settings["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+		settings["hooks"] = hooks
+	}
+	entries, _ := hooks[cursorHookEvent].([]any)
+	hooks[cursorHookEvent] = append(entries, map[string]any{
+		"command": cursorHookCommand,
+		"timeout": cursorHookTimeout,
+	})
+	return true
+}
+
+func hasCursorPrimeHook(settings map[string]any) bool {
+	for _, entry := range cursorHookEntries(settings) {
+		m, _ := entry.(map[string]any)
+		if cmd, _ := m["command"].(string); strings.Contains(cmd, primeHookCommand) {
+			return true
+		}
+	}
+	return false
+}
+
+// removeCursorHook deletes every hew prime entry and prunes the sessionStart
+// list and the hooks object when they end up empty.
+func removeCursorHook(settings map[string]any) bool {
+	entries := cursorHookEntries(settings)
+	changed := false
+	var kept []any
+	for _, entry := range entries {
+		m, _ := entry.(map[string]any)
+		if cmd, _ := m["command"].(string); strings.Contains(cmd, primeHookCommand) {
+			changed = true
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	if !changed {
+		return false
+	}
+	hooks := settings["hooks"].(map[string]any)
+	if len(kept) == 0 {
+		delete(hooks, cursorHookEvent)
+	} else {
+		hooks[cursorHookEvent] = kept
+	}
+	if len(hooks) == 0 {
+		delete(settings, "hooks")
+	}
+	return true
+}
+
+func cursorHookEntries(settings map[string]any) []any {
+	hooks, _ := settings["hooks"].(map[string]any)
+	if hooks == nil {
+		return nil
+	}
+	entries, _ := hooks[cursorHookEvent].([]any)
 	return entries
 }

@@ -103,12 +103,15 @@ func primeCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:  "prime",
 		Usage: "session-start context: conventions, ready work, live state",
+		Flags: []ucli.Flag{
+			&ucli.StringFlag{Name: "hook-format", Usage: "emit for a session-start hook instead of text: `cursor` JSON-wraps the primer in additional_context"},
+		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
 			if err != nil {
 				return err
 			}
-			return app.Prime(ctx)
+			return app.Prime(ctx, appcli.PrimeOpts{HookFormat: cmd.String("hook-format")})
 		},
 	}
 }
@@ -536,14 +539,14 @@ func hooksApp(cmd *ucli.Command) (*appcli.App, string, error) {
 func hooksCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:  "hooks",
-		Usage: "manage agent hooks that run `hew prime` (claude, codex, or opencode)",
+		Usage: "manage agent hooks that run `hew prime` (claude, codex, cursor, or opencode)",
 		Commands: []*ucli.Command{
 			{
 				Name:      "install",
-				Usage:     "add the hook for `claude`, `codex`, or `opencode`",
-				ArgsUsage: "<claude|codex|opencode>",
+				Usage:     "add the hook for `claude`, `codex`, `cursor`, or `opencode`",
+				ArgsUsage: "<claude|codex|cursor|opencode>",
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
-					agent, err := hookAgentArg(cmd, "hew hooks install <claude|codex|opencode>")
+					agent, err := hookAgentArg(cmd, "hew hooks install <claude|codex|cursor|opencode>")
 					if err != nil {
 						return err
 					}
@@ -556,10 +559,10 @@ func hooksCmd() *ucli.Command {
 			},
 			{
 				Name:      "remove",
-				Usage:     "remove the hook for `claude`, `codex`, or `opencode`",
-				ArgsUsage: "<claude|codex|opencode>",
+				Usage:     "remove the hook for `claude`, `codex`, `cursor`, or `opencode`",
+				ArgsUsage: "<claude|codex|cursor|opencode>",
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
-					agent, err := hookAgentArg(cmd, "hew hooks remove <claude|codex|opencode>")
+					agent, err := hookAgentArg(cmd, "hew hooks remove <claude|codex|cursor|opencode>")
 					if err != nil {
 						return err
 					}

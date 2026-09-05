@@ -705,7 +705,7 @@ func (a *App) Init(ctx context.Context) error {
 			a.printf("created labels: %s\n", strings.Join(created, ", "))
 		}
 		a.printf("\nAdd to CLAUDE.md:\n\n%s\n", conventions.ClaudeSnippet)
-		a.printf("\nOr let a hook inject the primer automatically: hew hooks install <claude|codex|opencode>\n")
+		a.printf("\nOr let a hook inject the primer automatically: hew hooks install <claude|codex|cursor|opencode>\n")
 	})
 }
 

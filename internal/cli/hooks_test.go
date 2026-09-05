@@ -168,7 +168,7 @@ func TestHooksRemoveNothingInstalled(t *testing.T) {
 }
 
 func TestHooksJSONOutput(t *testing.T) {
-	for _, agent := range []HookAgent{HookAgentClaude, HookAgentCodex, HookAgentOpencode} {
+	for _, agent := range []HookAgent{HookAgentClaude, HookAgentCodex, HookAgentCursor, HookAgentOpencode} {
 		t.Run(string(agent), func(t *testing.T) {
 			app, out, root := hooksApp(t)
 			app.JSON = true
@@ -238,6 +238,158 @@ func TestHooksRemoveCodexKeepsOtherHooks(t *testing.T) {
 	kept := entries[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)
 	if kept["command"] != "echo hello" {
 		t.Errorf("wrong hook removed: %v", kept)
+	}
+}
+
+func TestHooksInstallCursor(t *testing.T) {
+	app, out, root := hooksApp(t)
+	if err := app.HooksInstall(root, HookAgentCursor); err != nil {
+		t.Fatal(err)
+	}
+	cursorPath := filepath.Join(root, ".cursor", "hooks.json")
+	if _, err := os.Stat(cursorPath); err != nil {
+		t.Fatalf("Cursor hook file missing: %v", err)
+	}
+	claudePath := filepath.Join(root, ".claude", "settings.json")
+	if _, err := os.Stat(claudePath); !os.IsNotExist(err) {
+		t.Fatalf("Cursor install wrote Claude settings: %v", err)
+	}
+	settings := readHooksFile(t, root, HookAgentCursor)
+	if settings["version"].(float64) != 1 {
+		t.Errorf("version = %v, want 1", settings["version"])
+	}
+	entries := settings["hooks"].(map[string]any)["sessionStart"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("sessionStart entries = %v", entries)
+	}
+	hook := entries[0].(map[string]any)
+	if hook["command"] != "hew prime --hook-format cursor" {
+		t.Errorf("command = %v", hook["command"])
+	}
+	if hook["timeout"].(float64) != 30 {
+		t.Errorf("timeout = %v", hook["timeout"])
+	}
+	if _, nested := hook["hooks"]; nested {
+		t.Errorf("Cursor entry copied the nested claude/codex shape: %v", hook)
+	}
+	if !strings.Contains(out.String(), "sessionStart") {
+		t.Errorf("output = %q", out.String())
+	}
+}
+
+func TestHooksInstallCursorIdempotent(t *testing.T) {
+	app, _, root := hooksApp(t)
+	if err := app.HooksInstall(root, HookAgentCursor); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.HooksInstall(root, HookAgentCursor); err != nil {
+		t.Fatal(err)
+	}
+	settings := readHooksFile(t, root, HookAgentCursor)
+	entries := settings["hooks"].(map[string]any)["sessionStart"].([]any)
+	if len(entries) != 1 {
+		t.Errorf("hook duplicated: %v", entries)
+	}
+}
+
+func TestHooksInstallCursorPreservesExistingSettings(t *testing.T) {
+	app, _, root := hooksApp(t)
+	path := hooksPath(root, HookAgentCursor)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{"command": "echo hello"}],
+    "afterFileEdit": [{"command": "gofmt -w ."}]
+  }
+}`
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.HooksInstall(root, HookAgentCursor); err != nil {
+		t.Fatal(err)
+	}
+	settings := readHooksFile(t, root, HookAgentCursor)
+	hooks := settings["hooks"].(map[string]any)
+	if _, ok := hooks["afterFileEdit"]; !ok {
+		t.Error("afterFileEdit hooks dropped")
+	}
+	entries := hooks["sessionStart"].([]any)
+	if len(entries) != 2 {
+		t.Fatalf("sessionStart entries = %v", entries)
+	}
+	first := entries[0].(map[string]any)
+	if first["command"] != "echo hello" {
+		t.Errorf("existing hook disturbed: %v", first)
+	}
+}
+
+func TestHooksInstallCursorDetectsHandwrittenHook(t *testing.T) {
+	// An entry phrased by hand still runs hew prime; install must not stack
+	// a second one beside it.
+	app, out, root := hooksApp(t)
+	path := hooksPath(root, HookAgentCursor)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `{"version":1,"hooks":{"sessionStart":[{"command":"hew prime --hook-format cursor"}]}}`
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.HooksInstall(root, HookAgentCursor); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "already installed") {
+		t.Errorf("output = %q", out.String())
+	}
+	settings := readHooksFile(t, root, HookAgentCursor)
+	entries := settings["hooks"].(map[string]any)["sessionStart"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("handwritten hook duplicated: %v", entries)
+	}
+}
+
+func TestHooksRemoveCursor(t *testing.T) {
+	app, _, root := hooksApp(t)
+	if err := app.HooksInstall(root, HookAgentCursor); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.HooksRemove(root, HookAgentCursor); err != nil {
+		t.Fatal(err)
+	}
+	settings := readHooksFile(t, root, HookAgentCursor)
+	if _, ok := settings["hooks"]; ok {
+		t.Errorf("empty hooks object not pruned: %v", settings)
+	}
+}
+
+func TestHooksRemoveCursorKeepsOtherHooks(t *testing.T) {
+	app, _, root := hooksApp(t)
+	path := hooksPath(root, HookAgentCursor)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `{"version":1,"hooks":{"sessionStart":[{"command":"echo hello"},{"command":"hew prime --hook-format cursor","timeout":30}],"afterFileEdit":[{"command":"gofmt -w ."}]}}`
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.HooksRemove(root, HookAgentCursor); err != nil {
+		t.Fatal(err)
+	}
+	settings := readHooksFile(t, root, HookAgentCursor)
+	hooks := settings["hooks"].(map[string]any)
+	entries := hooks["sessionStart"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %v", entries)
+	}
+	kept := entries[0].(map[string]any)
+	if kept["command"] != "echo hello" {
+		t.Errorf("wrong hook removed: %v", kept)
+	}
+	if _, ok := hooks["afterFileEdit"]; !ok {
+		t.Error("afterFileEdit hooks dropped")
 	}
 }
 
@@ -402,7 +554,7 @@ func opencodePluginPath(root string) string {
 }
 
 func TestParseHookAgent(t *testing.T) {
-	for _, agent := range []HookAgent{HookAgentClaude, HookAgentCodex, HookAgentOpencode} {
+	for _, agent := range []HookAgent{HookAgentClaude, HookAgentCodex, HookAgentCursor, HookAgentOpencode} {
 		got, err := ParseHookAgent(string(agent))
 		if err != nil || got != agent {
 			t.Errorf("ParseHookAgent(%q) = %q, %v", agent, got, err)
@@ -535,6 +687,10 @@ var symlinkShapes = []struct {
 	{"codex file", HookAgentCodex, "file", false},
 	{"codex dir relative", HookAgentCodex, "dir", true},
 	{"codex file relative", HookAgentCodex, "file", true},
+	{"cursor dir", HookAgentCursor, "dir", false},
+	{"cursor file", HookAgentCursor, "file", false},
+	{"cursor dir relative", HookAgentCursor, "dir", true},
+	{"cursor file relative", HookAgentCursor, "file", true},
 	{"opencode dir", HookAgentOpencode, "dir", false},
 	{"opencode file", HookAgentOpencode, "file", false},
 	{"opencode dir relative", HookAgentOpencode, "dir", true},
