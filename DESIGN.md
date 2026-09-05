@@ -156,8 +156,10 @@ primer so agents know what they're looking at:
   triage is human-initiated, and asking first is the tell that separates
   legitimate triage from an agent reaching for unvetted text on its own. A
   harness with a deny mechanism enforces the same boundary mechanically —
-  `README.md` documents the recommended `permissions.deny` entry; `hooks
-  install` deliberately writes no such block itself.
+  `README.md` documents the recommended `permissions.deny` entries, one per
+  flag arrangement, and `cmd/hew` keeps a regression test that every valid
+  spelling of the command matches them; `hooks install` deliberately writes
+  no such block itself.
 
 ## Command surface (v1)
 
@@ -183,8 +185,10 @@ hew search <terms>             # repo-scoped text search over open+closed, triag
                                   # filing discovered work ("already fixed" answers the
                                   # question as well as "already filed"); results capped,
                                   # warns on truncation instead of paging through, and
-                                  # says where the matches went when they were all
-                                  # untriaged (hew triage --search)
+                                  # when none of the matches it saw was triaged it says
+                                  # so — scoped to the fetched page, never claiming
+                                  # unseen matches are untriaged — and names
+                                  # hew triage --search
 
 hew create --type bug|enhancement|task [--priority P0..P4] [--area X]
               [--blocked-by N...] [--parent N] [--discovered-from N]

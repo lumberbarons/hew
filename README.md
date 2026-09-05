@@ -164,7 +164,8 @@ so "does this already exist?" is answered in two calls, one per population:
 1. `hew search <terms>` — the default. Server-side, cheap, open and closed,
    vetted issues only, so "already fixed" answers the question as well as
    "already filed". Results are capped; it warns rather than paging, and when
-   every fetched match was untriaged it says so and names `hew triage --search`
+   none of the matches it saw was triaged it says so — scoped to the fetched
+   page when the results were capped — and names `hew triage --search`
    instead of pretending there is nothing to dedup against.
 2. `hew triage --search <terms>` — the same search over the untriaged queue,
    open and closed. Run it when the user asks, or in a scoped triage agent
@@ -183,21 +184,32 @@ the command name is the unit a harness deny list can key on: deny it, and an
 agent cannot reach unvetted content even by passing its own flags.
 
 `hew hooks install` writes no permissions block — silently restricting an
-agent from a hook installer would be surprising. Add the deny entry yourself;
-in Claude Code's `.claude/settings.json`, for example:
+agent from a hook installer would be surprising. Add the deny entries
+yourself; in Claude Code's `.claude/settings.json`, for example:
 
 ```json
 {
   "permissions": {
-    "deny": ["Bash(hew triage:*)"]
+    "deny": [
+      "Bash(hew triage *)",
+      "Bash(hew * triage *)"
+    ]
   }
 }
 ```
 
-The instruction and the deny entry are the two layers of the same boundary:
-the primer line holds for harnesses with no deny mechanism, and the deny entry
-enforces it where one exists. The natural split is two agent shapes — a
-**coding agent** denies `hew triage` and dedups with `hew search`, the right
+Two rules because `hew`'s global flags parse in either position: the first
+covers `hew triage` and trailing flags, the second covers the same command
+with `--json` or `--repo owner/name` leading — `hew --repo o/r triage` would
+sail past the first rule's prefix. The `*` in the second rule matches
+anything between `hew` and `triage`, including more than one flag. Together
+they cover every valid arrangement of the command; a test in `cmd/hew` keeps
+the documented rules honest against the real flag surface.
+
+The instruction and the deny entries are the two layers of the same boundary:
+the primer line holds for harnesses with no deny mechanism, and the deny
+entries enforce it where one exists. The natural split is two agent shapes —
+a **coding agent** denies `hew triage` and dedups with `hew search`, the right
 scope for an agent that can only act on vetted work; a **scoped triage agent**
 (like the auto-triage workflow below) is allowed triage plus `show` and does
 the untriaged half of dedup with `hew triage --search`.

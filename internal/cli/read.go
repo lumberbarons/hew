@@ -173,11 +173,16 @@ func (a *App) Search(ctx context.Context, terms string) error {
 	}
 	fetched := len(issues)
 	out := slices.DeleteFunc(issues, func(i model.Issue) bool { return i.Untriaged() })
-	if total > fetched && len(out) == 0 {
-		// "No matches" would read as "safe to file" when every fetched match
-		// was untriaged; name where they went instead.
-		a.warnf("%d matches are untriaged; hew triage --search covers them", total)
-	} else if total > fetched {
+	switch {
+	case len(out) == 0 && fetched > 0 && total > fetched:
+		// The fetch was capped and everything it returned was untriaged —
+		// the unseen matches may be triaged, so say only what is known.
+		a.warnf("no triaged matches in the first %d of %d; refine the terms or hew triage --search", fetched, total)
+	case len(out) == 0 && fetched > 0:
+		// "No matches" would read as "safe to file" when every match was
+		// untriaged; name where they went instead.
+		a.warnf("no triaged matches; hew triage --search covers them")
+	case total > fetched:
 		a.warnf("showing %d of %d matches; refine the terms", len(out), total)
 	}
 	return a.emitList(out, "no matches", render.List)

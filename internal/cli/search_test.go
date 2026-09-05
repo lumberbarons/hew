@@ -78,9 +78,25 @@ func TestSearchOmitsUntriaged(t *testing.T) {
 }
 
 func TestSearchAllMatchesUntriagedWarns(t *testing.T) {
-	// "no matches" alone would read as "safe to file" when the fetch was
-	// capped and everything it returned was untriaged; the warning says
-	// where the matches went.
+	// "no matches" alone would read as "safe to file" when the whole match
+	// set was untriaged; the warning says where the matches went.
+	f := newFake(issue(2, "Retry storm"))
+	app, out, errOut := newApp(f)
+	if err := app.Search(ctx, "retry"); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "no matches\n" {
+		t.Errorf("stdout = %q", out.String())
+	}
+	if !strings.Contains(errOut.String(), "no triaged matches; hew triage --search covers them") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+func TestSearchCappedUntriagedWarnsWithinFetched(t *testing.T) {
+	// The fetch was capped and the fetched page was all untriaged — the
+	// unseen matches may be triaged, so the warning must describe only what
+	// was actually seen, never "all N matches are untriaged".
 	f := newFake(issue(2, "Retry storm"))
 	f.searchTotal = 43
 	app, out, errOut := newApp(f)
@@ -90,8 +106,13 @@ func TestSearchAllMatchesUntriagedWarns(t *testing.T) {
 	if out.String() != "no matches\n" {
 		t.Errorf("stdout = %q", out.String())
 	}
-	if !strings.Contains(errOut.String(), "43 matches are untriaged; hew triage --search covers them") {
-		t.Errorf("stderr = %q", errOut.String())
+	for _, want := range []string{"no triaged matches in the first 1 of 43", "refine the terms"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("stderr = %q, want %q", errOut.String(), want)
+		}
+	}
+	if strings.Contains(errOut.String(), "all 43") || strings.Contains(errOut.String(), "are untriaged") {
+		t.Errorf("stderr overclaims beyond the fetched page: %q", errOut.String())
 	}
 }
 
