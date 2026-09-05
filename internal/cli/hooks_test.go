@@ -168,7 +168,7 @@ func TestHooksRemoveNothingInstalled(t *testing.T) {
 }
 
 func TestHooksJSONOutput(t *testing.T) {
-	for _, agent := range []HookAgent{HookAgentClaude, HookAgentCodex} {
+	for _, agent := range []HookAgent{HookAgentClaude, HookAgentCodex, HookAgentOpencode} {
 		t.Run(string(agent), func(t *testing.T) {
 			app, out, root := hooksApp(t)
 			app.JSON = true
@@ -241,8 +241,168 @@ func TestHooksRemoveCodexKeepsOtherHooks(t *testing.T) {
 	}
 }
 
+func TestHooksInstallOpencode(t *testing.T) {
+	app, out, root := hooksApp(t)
+	if err := app.HooksInstall(root, HookAgentOpencode); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(opencodePluginPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, opencodePlugin) {
+		t.Errorf("plugin content = %s", got)
+	}
+	if !strings.Contains(out.String(), "installed") {
+		t.Errorf("output = %q", out.String())
+	}
+}
+
+func TestHooksInstallOpencodeIdempotent(t *testing.T) {
+	app, out, root := hooksApp(t)
+	if err := app.HooksInstall(root, HookAgentOpencode); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.HooksInstall(root, HookAgentOpencode); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "already installed") {
+		t.Errorf("output = %q", out.String())
+	}
+}
+
+func TestHooksInstallOpencodePreservesNeighbors(t *testing.T) {
+	app, _, root := hooksApp(t)
+	plugins := filepath.Join(root, ".opencode", "plugins")
+	if err := os.MkdirAll(plugins, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sibling := []byte("export const Other = async () => ({})\n")
+	if err := os.WriteFile(filepath.Join(plugins, "other.js"), sibling, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.HooksInstall(root, HookAgentOpencode); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(plugins, "other.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, sibling) {
+		t.Errorf("sibling plugin disturbed: %s", got)
+	}
+}
+
+func TestHooksInstallOpencodeRefusesForeignFile(t *testing.T) {
+	app, _, root := hooksApp(t)
+	foreign := []byte("export const Mine = async () => ({})\n")
+	if err := os.MkdirAll(filepath.Dir(opencodePluginPath(root)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(opencodePluginPath(root), foreign, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := app.HooksInstall(root, HookAgentOpencode)
+	if err == nil || !strings.Contains(err.Error(), "not managed by hew") {
+		t.Errorf("err = %v", err)
+	}
+	got, readErr := os.ReadFile(opencodePluginPath(root))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(got, foreign) {
+		t.Errorf("foreign plugin modified: %s", got)
+	}
+}
+
+func TestHooksRemoveOpencode(t *testing.T) {
+	app, _, root := hooksApp(t)
+	if err := app.HooksInstall(root, HookAgentOpencode); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.HooksRemove(root, HookAgentOpencode); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(opencodePluginPath(root)); !os.IsNotExist(err) {
+		t.Error("plugin file still exists")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".opencode")); !os.IsNotExist(err) {
+		t.Error("empty .opencode not pruned")
+	}
+}
+
+func TestHooksRemoveOpencodeKeepsNeighbors(t *testing.T) {
+	app, _, root := hooksApp(t)
+	if err := app.HooksInstall(root, HookAgentOpencode); err != nil {
+		t.Fatal(err)
+	}
+	sibling := filepath.Join(root, ".opencode", "plugins", "other.js")
+	if err := os.WriteFile(sibling, []byte("export const Other = async () => ({})\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.HooksRemove(root, HookAgentOpencode); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sibling); err != nil {
+		t.Errorf("sibling plugin removed: %v", err)
+	}
+}
+
+func TestHooksRemoveOpencodeNothingInstalled(t *testing.T) {
+	app, out, root := hooksApp(t)
+	if err := app.HooksRemove(root, HookAgentOpencode); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "no opencode plugin") {
+		t.Errorf("output = %q", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, ".opencode")); !os.IsNotExist(err) {
+		t.Error("remove created .opencode")
+	}
+}
+
+func TestHooksRemoveOpencodeRefusesForeignFile(t *testing.T) {
+	app, _, root := hooksApp(t)
+	foreign := []byte("export const Mine = async () => ({})\n")
+	if err := os.MkdirAll(filepath.Dir(opencodePluginPath(root)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(opencodePluginPath(root), foreign, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := app.HooksRemove(root, HookAgentOpencode)
+	if err == nil || !strings.Contains(err.Error(), "not managed by hew") {
+		t.Errorf("err = %v", err)
+	}
+	got, readErr := os.ReadFile(opencodePluginPath(root))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(got, foreign) {
+		t.Errorf("foreign plugin removed: %s", got)
+	}
+}
+
+// The plugin must reach the model through system context, invisibly and
+// before the first turn — never as a rendered chat message.
+func TestOpencodePluginAsset(t *testing.T) {
+	src := string(opencodePlugin)
+	for _, want := range []string{opencodeMarker, "session.created", "experimental.chat.system.transform", "output.system.push", "hew prime"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("plugin source missing %q", want)
+		}
+	}
+	if strings.Contains(src, "client.session.prompt") {
+		t.Error("plugin must inject via system context, not session.prompt")
+	}
+}
+
+func opencodePluginPath(root string) string {
+	return hooksPath(root, HookAgentOpencode)
+}
+
 func TestParseHookAgent(t *testing.T) {
-	for _, agent := range []HookAgent{HookAgentClaude, HookAgentCodex} {
+	for _, agent := range []HookAgent{HookAgentClaude, HookAgentCodex, HookAgentOpencode} {
 		got, err := ParseHookAgent(string(agent))
 		if err != nil || got != agent {
 			t.Errorf("ParseHookAgent(%q) = %q, %v", agent, got, err)
@@ -343,6 +503,9 @@ func linkSettings(t *testing.T, root string, agent HookAgent, shape string, dir,
 		}
 		dest = rel
 	}
+	if err := os.MkdirAll(filepath.Dir(parent), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	switch shape {
 	case "dir":
 		if err := os.Symlink(dest, parent); err != nil {
@@ -372,6 +535,10 @@ var symlinkShapes = []struct {
 	{"codex file", HookAgentCodex, "file", false},
 	{"codex dir relative", HookAgentCodex, "dir", true},
 	{"codex file relative", HookAgentCodex, "file", true},
+	{"opencode dir", HookAgentOpencode, "dir", false},
+	{"opencode file", HookAgentOpencode, "file", false},
+	{"opencode dir relative", HookAgentOpencode, "dir", true},
+	{"opencode file relative", HookAgentOpencode, "file", true},
 }
 
 var hookOps = []string{"install", "remove"}

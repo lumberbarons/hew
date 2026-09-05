@@ -532,14 +532,14 @@ func hooksApp(cmd *ucli.Command) (*appcli.App, string, error) {
 func hooksCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:  "hooks",
-		Usage: "manage Claude Code or Codex SessionStart hooks that run `hew prime`",
+		Usage: "manage agent hooks that run `hew prime` (claude, codex, or opencode)",
 		Commands: []*ucli.Command{
 			{
 				Name:      "install",
-				Usage:     "add the hook for `claude` or `codex`",
-				ArgsUsage: "<claude|codex>",
+				Usage:     "add the hook for `claude`, `codex`, or `opencode`",
+				ArgsUsage: "<claude|codex|opencode>",
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
-					agent, err := hookAgentArg(cmd, "hew hooks install <claude|codex>")
+					agent, err := hookAgentArg(cmd, "hew hooks install <claude|codex|opencode>")
 					if err != nil {
 						return err
 					}
@@ -552,10 +552,10 @@ func hooksCmd() *ucli.Command {
 			},
 			{
 				Name:      "remove",
-				Usage:     "remove the hook for `claude` or `codex`",
-				ArgsUsage: "<claude|codex>",
+				Usage:     "remove the hook for `claude`, `codex`, or `opencode`",
+				ArgsUsage: "<claude|codex|opencode>",
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
-					agent, err := hookAgentArg(cmd, "hew hooks remove <claude|codex>")
+					agent, err := hookAgentArg(cmd, "hew hooks remove <claude|codex|opencode>")
 					if err != nil {
 						return err
 					}

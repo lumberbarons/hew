@@ -37,7 +37,7 @@ repository is detected from the git remote (`--repo owner/name` overrides).
 
 ```sh
 hew init          # bootstrap the label set in a repo; prints a CLAUDE.md snippet
-hew hooks install claude # SessionStart hook for Claude Code (or use codex)
+hew hooks install claude # session-start hook for Claude Code (codex and opencode too)
 hew prime         # session-start context: conventions + ready work + live state
 hew ready         # what should I work on? (priority-sorted, zero open blockers)
 hew start 42      # claim it: assign @me + in-progress (refuses claimed work: exit 3,
@@ -48,13 +48,17 @@ hew pr            # draft PR for the claimed issue, body composed, "Fixes #42" e
 
 ## Session-start agents
 
-`hew prime` works with both Claude Code and Codex. Choose the agent explicitly:
+`hew prime` works with Claude Code, Codex, and opencode. Choose the agent
+explicitly:
 
 - **Claude Code:** `hew hooks install claude` adds a SessionStart hook to the
   project's `.claude/settings.json`.
 - **Codex:** `hew hooks install codex` adds the equivalent hook to the
   project's `.codex/hooks.json`. Codex requires project hooks to be trusted;
   review and enable it with `/hooks`.
+- **opencode:** `hew hooks install opencode` writes an auto-discovered plugin
+  to `.opencode/plugins/hew-prime.js`; it injects the primer into system
+  context, so it is present before the first turn without appearing in chat.
 
 Both refuse to write through a symlink. A checkout is untrusted input, so hew
 never follows a link standing where it expects its own directory or settings
@@ -120,7 +124,7 @@ hew apply <plan.jsonl> [--dry-run] [--state F] [--throttle D]
                                  # checkpointed and resumable (see "Plan files")
                                  # defaults: --state <plan>.state.json, --throttle 500ms
 hew init
-hew hooks install|remove <claude|codex>
+hew hooks install|remove <claude|codex|opencode>
                               # add/remove a SessionStart hook running `hew prime`
                               # in the selected agent's project configuration;
                               # preserves the rest of the file; needs a git repo

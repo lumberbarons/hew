@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +10,17 @@ import (
 	"path/filepath"
 	"strings"
 )
+
+// opencodePlugin is the auto-discovered opencode plugin hew installs as
+// .opencode/plugins/hew-prime.js: it runs `hew prime` once per session and
+// injects the primer as system context, not a chat message.
+//
+//go:embed opencode/hew-prime.js
+var opencodePlugin []byte
+
+// opencodeMarker marks the plugin file as hew's: install reports a file
+// carrying it as already installed, remove only deletes one.
+const opencodeMarker = "@hew-managed"
 
 // primeHookCommand is what the SessionStart hook runs; its stdout is
 // injected into the agent's context at session start, which is the whole
@@ -21,17 +34,18 @@ const hookEvent = "SessionStart"
 type HookAgent string
 
 const (
-	HookAgentClaude HookAgent = "claude"
-	HookAgentCodex  HookAgent = "codex"
+	HookAgentClaude   HookAgent = "claude"
+	HookAgentCodex    HookAgent = "codex"
+	HookAgentOpencode HookAgent = "opencode"
 )
 
 // ParseHookAgent accepts the agents whose hook file formats hew supports.
 func ParseHookAgent(value string) (HookAgent, error) {
 	switch HookAgent(value) {
-	case HookAgentClaude, HookAgentCodex:
+	case HookAgentClaude, HookAgentCodex, HookAgentOpencode:
 		return HookAgent(value), nil
 	default:
-		return "", usageErr("agent must be claude or codex")
+		return "", usageErr("agent must be claude, codex, or opencode")
 	}
 }
 
@@ -55,14 +69,18 @@ func FindProjectRoot(start string) (string, error) {
 	}
 }
 
-// HooksInstall adds a SessionStart hook running `hew prime` to the selected
-// agent's project configuration, creating the file if needed and leaving
-// everything else in it untouched. Idempotent.
+// HooksInstall adds a session-start hook running `hew prime` to the selected
+// agent's project configuration — a JSON settings entry for claude and
+// codex, an auto-discovered plugin file for opencode — creating the file if
+// needed and leaving everything else in it untouched. Idempotent.
 func (a *App) HooksInstall(projectRoot string, agent HookAgent) error {
 	var err error
 	agent, err = ParseHookAgent(string(agent))
 	if err != nil {
 		return err
+	}
+	if agent == HookAgentOpencode {
+		return a.hooksInstallOpencode(projectRoot)
 	}
 	file, err := openHookSettings(projectRoot, agent)
 	if err != nil {
@@ -96,6 +114,9 @@ func (a *App) HooksRemove(projectRoot string, agent HookAgent) error {
 	if err != nil {
 		return err
 	}
+	if agent == HookAgentOpencode {
+		return a.hooksRemoveOpencode(projectRoot)
+	}
 	file, err := openHookSettings(projectRoot, agent)
 	if err != nil {
 		return err
@@ -120,12 +141,75 @@ func (a *App) HooksRemove(projectRoot string, agent HookAgent) error {
 	})
 }
 
+// hooksInstallOpencode writes the auto-discovered opencode plugin
+// .opencode/plugins/hew-prime.js. Unlike the JSON settings files, the whole
+// file is hew's: installing is idempotent by the hew marker, and a file
+// without it — a user's own plugin of the same name — is refused, never
+// clobbered.
+func (a *App) hooksInstallOpencode(projectRoot string) error {
+	file, err := openHookSettings(projectRoot, HookAgentOpencode)
+	if err != nil {
+		return err
+	}
+	defer file.close()
+	existing, err := file.readRaw()
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		if !bytes.Contains(existing, []byte(opencodeMarker)) {
+			return fmt.Errorf("%s already exists and is not managed by hew, refusing to modify it", file.path)
+		}
+		return a.emitResult(map[string]any{"agent": HookAgentOpencode, "installed": false, "path": file.path}, func() {
+			a.printf("opencode plugin already installed in %s\n", file.path)
+		})
+	}
+	if err := file.writeRaw(opencodePlugin); err != nil {
+		return err
+	}
+	return a.emitResult(map[string]any{"agent": HookAgentOpencode, "installed": true, "path": file.path}, func() {
+		a.printf("installed opencode plugin in %s\n", file.path)
+	})
+}
+
+// hooksRemoveOpencode deletes the plugin file and prunes the directory
+// components hew created beneath the project root as long as they are
+// empty. A file hew did not install is refused, never deleted.
+func (a *App) hooksRemoveOpencode(projectRoot string) error {
+	file, err := openHookSettings(projectRoot, HookAgentOpencode)
+	if err != nil {
+		return err
+	}
+	defer file.close()
+	existing, err := file.readRaw()
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return a.emitResult(map[string]any{"agent": HookAgentOpencode, "removed": false, "path": file.path}, func() {
+			a.printf("no opencode plugin found in %s\n", file.path)
+		})
+	}
+	if !bytes.Contains(existing, []byte(opencodeMarker)) {
+		return fmt.Errorf("%s is not managed by hew, refusing to remove it", file.path)
+	}
+	if err := file.removeAndPrune(); err != nil {
+		return err
+	}
+	return a.emitResult(map[string]any{"agent": HookAgentOpencode, "removed": true, "path": file.path}, func() {
+		a.printf("removed opencode plugin from %s\n", file.path)
+	})
+}
+
 // hookPathParts is the settings file's location relative to the project
 // root: the components hew creates, and so exactly the ones a checkout
 // could have replaced with symlinks before hew got there.
 func hookPathParts(agent HookAgent) []string {
-	if agent == HookAgentCodex {
+	switch agent {
+	case HookAgentCodex:
 		return []string{".codex", "hooks.json"}
+	case HookAgentOpencode:
+		return []string{".opencode", "plugins", "hew-prime.js"}
 	}
 	return []string{".claude", "settings.json"}
 }
@@ -237,6 +321,67 @@ func (h *hookSettings) write(settings map[string]any) error {
 		return err
 	}
 	return pathErr("writing", h.path, h.root.WriteFile(h.rel, append(data, '\n'), 0o644))
+}
+
+// readRaw returns the file's bytes, or nil when it does not exist — the
+// opencode plugin file is JavaScript, not the JSON the other agents use.
+func (h *hookSettings) readRaw() ([]byte, error) {
+	data, err := h.root.ReadFile(h.rel)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, pathErr("reading", h.path, err)
+	}
+	return data, nil
+}
+
+func (h *hookSettings) writeRaw(data []byte) error {
+	if dir := filepath.Dir(h.rel); dir != "." {
+		if err := h.root.MkdirAll(dir, 0o755); err != nil {
+			return pathErr("creating", filepath.Dir(h.path), err)
+		}
+	}
+	return pathErr("writing", h.path, h.root.WriteFile(h.rel, data, 0o644))
+}
+
+// removeAndPrune deletes the file, then removes its parent directories
+// toward the project root as long as they are empty — anything the user put
+// beside the plugin keeps its directory alive.
+func (h *hookSettings) removeAndPrune() error {
+	if err := h.root.Remove(h.rel); err != nil {
+		return pathErr("removing", h.path, err)
+	}
+	dir := filepath.Dir(h.rel)
+	abs := filepath.Dir(h.path)
+	for dir != "." {
+		empty, err := h.dirEmpty(dir)
+		if err != nil {
+			return err
+		}
+		if !empty {
+			return nil
+		}
+		if err := h.root.Remove(dir); err != nil {
+			return pathErr("removing", abs, err)
+		}
+		dir = filepath.Dir(dir)
+		abs = filepath.Dir(abs)
+	}
+	return nil
+}
+
+func (h *hookSettings) dirEmpty(rel string) (bool, error) {
+	dir, err := h.root.Open(rel)
+	if err != nil {
+		return false, pathErr("reading", filepath.Dir(h.path), err)
+	}
+	defer func() { _ = dir.Close() }()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return false, pathErr("reading", filepath.Dir(h.path), err)
+	}
+	return len(entries) == 0, nil
 }
 
 // addPrimeHook appends the hook entry unless any SessionStart hook already
