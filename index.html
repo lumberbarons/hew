@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hew — cut the issue backlog down to size</title>
+<meta name="description" content="hew is an opinionated, agentic-first CLI for tracking work in GitHub Issues — ready-work detection, enforced conventions, native dependencies, and a primer that hands agents the whole tracker state.">
+<meta property="og:title" content="hew — cut the issue backlog down to size">
+<meta property="og:description" content="An opinionated, agentic-first CLI for tracking work in GitHub Issues.">
+<meta property="og:url" content="https://lumberbarons.github.io/hew/">
+<link rel="canonical" href="https://lumberbarons.github.io/hew/">
+<meta name="theme-color" content="#0e1411">
+<style>
+  :root {
+    --bg: #0e1411;
+    --surface: #151d18;
+    --raised: #1b241e;
+    --line: #28332b;
+    --text: #eceae2;
+    --muted: #9caa9f;
+    --dim: #6e7d71;
+    --amber: #f2a93b;
+    --amber-bright: #ffc15e;
+    --amber-deep: #c97f1e;
+    --green: #5fd68b;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: rgba(242, 169, 59, 0.35); }
+
+  /* faint board-grain over the whole page */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.013) 0 1px, transparent 1px 3px);
+    z-index: 0;
+  }
+
+  a { color: var(--amber); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, .mono { font-family: var(--mono); }
+  .container { max-width: 1000px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+
+  /* ---------- nav ---------- */
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: rgba(14, 20, 17, 0.82);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    height: 60px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 700; font-size: 18px; letter-spacing: -0.02em; }
+  .brand:hover { text-decoration: none; }
+  .mark {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: linear-gradient(160deg, var(--amber-bright), var(--amber-deep));
+    color: #241503;
+    flex: none;
+  }
+  .nav-links { margin-left: auto; display: flex; gap: 22px; align-items: center; }
+  .nav-links a { color: var(--muted); font-size: 14px; font-weight: 500; }
+  .nav-links a:hover { color: var(--text); text-decoration: none; }
+  .nav-cta {
+    color: #241503 !important;
+    background: var(--amber);
+    padding: 7px 14px;
+    border-radius: 8px;
+    font-weight: 600;
+  }
+  .nav-cta:hover { background: var(--amber-bright); }
+
+  /* ---------- hero ---------- */
+  .hero {
+    text-align: center;
+    padding: 96px 0 72px;
+    background:
+      radial-gradient(ellipse 700px 340px at 50% -80px, rgba(242, 169, 59, 0.16), transparent 70%),
+      radial-gradient(ellipse 900px 500px at 50% 110%, rgba(95, 214, 139, 0.06), transparent 70%);
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    color: var(--amber);
+    border: 1px solid rgba(242, 169, 59, 0.35);
+    background: rgba(242, 169, 59, 0.08);
+    padding: 5px 12px;
+    border-radius: 999px;
+    margin-bottom: 26px;
+  }
+  .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  h1 {
+    margin: 0 0 14px;
+    font-size: clamp(64px, 11vw, 108px);
+    line-height: 1;
+    letter-spacing: -0.045em;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(12px, 2vw, 22px);
+  }
+  h1 .axe { color: var(--amber); flex: none; }
+  h1 .name {
+    background: linear-gradient(180deg, #ffe3a8 10%, var(--amber) 55%, var(--amber-deep) 110%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .tagline {
+    margin: 0 0 18px;
+    font-size: clamp(22px, 3.4vw, 30px);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .lede {
+    max-width: 620px;
+    margin: 0 auto 40px;
+    color: var(--muted);
+    font-size: 17px;
+  }
+  .lede strong { color: var(--text); font-weight: 600; }
+
+  /* terminal card */
+  .term {
+    max-width: 660px;
+    margin: 0 auto 26px;
+    background: #0b100d;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    text-align: left;
+    overflow: hidden;
+    box-shadow: 0 24px 60px -28px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(242, 169, 59, 0.06);
+  }
+  .term-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.02);
+  }
+  .term-head .dots { display: flex; gap: 6px; margin-right: 6px; }
+  .term-head .dots i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+  .term-head .dots i:nth-child(1) { background: #ff5f57; }
+  .term-head .dots i:nth-child(2) { background: #febc2e; }
+  .term-head .dots i:nth-child(3) { background: #28c840; }
+  .term-head .title { color: var(--dim); font-family: var(--mono); font-size: 12px; }
+  .term-head .copy {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .term-head .copy:hover { border-color: var(--amber); color: var(--amber-bright); }
+  .term-body { padding: 16px 18px; overflow-x: auto; }
+  .term-body pre { margin: 0; font-family: var(--mono); font-size: 14px; line-height: 1.7; white-space: pre; }
+  .prompt { color: var(--green); user-select: none; }
+  .cmd { color: var(--text); }
+  .comment { color: var(--dim); }
+  .alt {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--dim);
+    margin: 0 auto;
+    max-width: 660px;
+  }
+  .alt .prompt { color: var(--dim); }
+
+  .hero-actions { display: flex; justify-content: center; gap: 14px; margin-top: 34px; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 15px;
+    padding: 11px 20px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    transition: background 0.15s, border-color 0.15s, transform 0.15s;
+  }
+  .btn:hover { text-decoration: none; transform: translateY(-1px); }
+  .btn-primary { background: var(--amber); color: #241503; }
+  .btn-primary:hover { background: var(--amber-bright); }
+  .btn-ghost { color: var(--text); border-color: var(--line); background: var(--surface); }
+  .btn-ghost:hover { border-color: var(--amber); }
+
+  /* ---------- sections ---------- */
+  section { padding: 72px 0; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin: 0 0 12px;
+  }
+  h2 {
+    margin: 0 0 14px;
+    font-size: clamp(26px, 4vw, 36px);
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+  }
+  .section-lede { color: var(--muted); max-width: 560px; margin: 0 0 40px; font-size: 16px; }
+
+  /* demo terminal */
+  .demo .term { max-width: 720px; }
+  .demo .term-body .out { color: var(--muted); }
+  .demo .term-body .num { color: var(--amber); }
+  .demo .term-body .pri { color: var(--green); }
+  .demo .term-body .dim { color: var(--dim); }
+
+  /* features */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 24px;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .card:hover { border-color: rgba(242, 169, 59, 0.4); transform: translateY(-2px); }
+  .card .icon {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: rgba(242, 169, 59, 0.1);
+    border: 1px solid rgba(242, 169, 59, 0.25);
+    color: var(--amber);
+    margin-bottom: 16px;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 17px; letter-spacing: -0.01em; }
+  .card p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  .card code { color: var(--amber-bright); font-size: 13px; }
+
+  /* loop */
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px; }
+  .step {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 24px;
+    position: relative;
+  }
+  .step .n {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--amber);
+    border: 1px solid rgba(242, 169, 59, 0.35);
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 999px;
+    margin-bottom: 14px;
+  }
+  .step code {
+    display: block;
+    font-size: 14px;
+    color: var(--text);
+    margin-bottom: 8px;
+  }
+  .step p { margin: 0; color: var(--muted); font-size: 14px; }
+  .loop-note {
+    margin-top: 22px;
+    color: var(--dim);
+    font-size: 13.5px;
+  }
+  .loop-note code { color: var(--dim); }
+
+  /* install */
+  .install .term { max-width: 660px; margin: 0 0 24px; }
+  .reqs { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; max-width: 660px; }
+  .req {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .req svg { color: var(--green); flex: none; margin-top: 3px; }
+  .req code { color: var(--text); }
+
+  /* ---------- footer ---------- */
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 44px 0 56px;
+    margin-top: 24px;
+  }
+  .footer-inner { display: flex; flex-wrap: wrap; gap: 16px 32px; align-items: center; }
+  .footer-brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 700; }
+  .footer-brand .mark { width: 24px; height: 24px; border-radius: 7px; }
+  .footer-tag { color: var(--dim); font-size: 13px; }
+  .footer-links { margin-left: auto; display: flex; gap: 20px; }
+  .footer-links a { color: var(--muted); font-size: 14px; }
+  .footer-links a:hover { color: var(--text); text-decoration: none; }
+  .fine { width: 100%; margin-top: 8px; color: var(--dim); font-size: 12.5px; }
+
+  @media (max-width: 640px) {
+    .nav-links { gap: 14px; }
+    .nav-links a.hide-sm { display: none; }
+    .hero { padding: 64px 0 48px; }
+    section { padding: 56px 0; }
+    .footer-links { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <a class="brand" href="#top">
+      <span class="mark" aria-hidden="true">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m14 12-8.5 8.5a2.121 2.121 0 1 1-3-3L11 9"/><path d="M15 13 9 7l4-4 6 6h3a8 8 0 0 1-7 7z"/></svg>
+      </span>
+      hew
+    </a>
+    <div class="nav-links">
+      <a href="https://github.com/lumberbarons/hew" class="hide-sm">GitHub</a>
+      <a href="https://github.com/lumberbarons/hew#readme" class="hide-sm">README</a>
+      <a class="nav-cta" href="#install">Install</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="container">
+    <span class="badge"><span class="dot"></span>open source · MIT · built for GitHub Issues</span>
+    <h1>
+      <svg class="axe" width="0.62em" height="0.62em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 12-8.5 8.5a2.121 2.121 0 1 1-3-3L11 9"/><path d="M15 13 9 7l4-4 6 6h3a8 8 0 0 1-7 7z"/></svg>
+      <span class="name">hew</span>
+    </h1>
+    <p class="tagline">Cut the issue backlog down to size.</p>
+    <p class="lede"><strong>hew</strong> is an opinionated, agentic-first CLI for tracking work in GitHub Issues. It tells you what's actually <strong>ready</strong> to work, primes an agent session with the whole tracker state in ~1200 tokens, and keeps every issue sharp with enforced conventions.</p>
+
+    <div class="term">
+      <div class="term-head">
+        <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="title">install</span>
+        <button class="copy" data-copy="curl -fsSL https://lumberbarons.github.io/hew/install.sh | bash" aria-label="Copy install command">copy</button>
+      </div>
+      <div class="term-body"><pre><span class="prompt">$ </span><span class="cmd">curl -fsSL https://lumberbarons.github.io/hew/install.sh | bash</span></pre></div>
+    </div>
+    <p class="alt">installs to <code>~/.local/bin</code> — never sudo · linux &amp; macOS, arm64 &amp; x86_64<br>
+    <span class="comment"># or, with Go:</span><br>
+    <span class="prompt">$ </span><span class="cmd">go install github.com/lumberbarons/hew/cmd/hew@latest</span></p>
+
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="https://github.com/lumberbarons/hew#readme">Read the README</a>
+      <a class="btn btn-ghost" href="https://github.com/lumberbarons/hew">View on GitHub</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="demo">
+    <div class="container">
+      <p class="eyebrow">the workflow</p>
+      <h2>Ready work, one line at a time</h2>
+      <p class="section-lede">hew sorts what's blocked, claimed, and epic-shaped out of the way. An agent loop can take the first line and just go.</p>
+      <div class="term">
+        <div class="term-head">
+          <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="title">hew</span>
+        </div>
+        <div class="term-body"><pre><span class="prompt">$ </span><span class="cmd">hew ready</span>
+<span class="out"><span class="num">#142</span> <span class="pri">P2</span> bug   crash when the branch is unborn</span>
+<span class="out"><span class="num">#139</span> <span class="pri">P1</span> bug   checksum mismatch after interrupted download</span>
+<span class="out"><span class="num">#137</span> <span class="pri">P3</span> task  tighten test gates: per-package coverage floor</span>
+<span class="dim">… 8 more — hew ready</span>
+
+<span class="prompt">$ </span><span class="cmd">hew start 142</span>
+<span class="out">started <span class="num">#142</span> — claim is yours. <span class="dim">branch feat/fix-unborn-branch, push, then hew pr</span></span></pre></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="features">
+    <div class="container">
+      <p class="eyebrow">features</p>
+      <h2>Built for agents. Opinionated for humans.</h2>
+      <p class="section-lede">Every behavior — read and write — exists so an agent session can run the loop without a human in it.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="0.5"/></svg></div>
+          <h3>Ready work, found for you</h3>
+          <p><code>hew ready</code> lists only what's truly ready — unblocked, unclaimed, not an epic. Claim one and it's yours; try one that's already taken and hew points you at the next.</p>
+        </div>
+        <div class="card">
+          <div class="icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+          <h3>Prime the session</h3>
+          <p><code>hew prime</code> hands your agent the conventions, the ready queue, and the commands — the whole tracker state in ~1200 tokens. No URL spelunking, no raw GraphQL.</p>
+        </div>
+        <div class="card">
+          <div class="icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+          <h3>Conventions that stick</h3>
+          <p>Exactly one priority, one type, template bodies, native dependencies. The write path enforces them; the read path normalizes issues filed elsewhere instead of hiding them.</p>
+        </div>
+        <div class="card">
+          <div class="icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></div>
+          <h3>Native edges, not prose</h3>
+          <p>Blockers and sub-issues are real graph edges; epics are sub-issue trees. Cycle checks run client-side before every mutation — GitHub won't catch them all.</p>
+        </div>
+        <div class="card">
+          <div class="icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m6 9 3 3-3 3"/><line x1="12" y1="15" x2="16" y2="15"/></svg></div>
+          <h3>Machine-readable by default</h3>
+          <p>One compact line per issue, NDJSON when you ask, no ANSI off a TTY, stable sort. Output that survives truncation and a <code>--json</code> that stays flat.</p>
+        </div>
+        <div class="card">
+          <div class="icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></div>
+          <h3>Batch by plan</h3>
+          <p><code>hew apply</code> turns a JSONL plan into issues with local IDs — dangling references and cycles rejected before anything is written.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="loop">
+    <div class="container">
+      <p class="eyebrow">the loop</p>
+      <h2>Three moves, all of them hew</h2>
+      <p class="section-lede">The whole day fits in a pocket — no triage meetings, no spreadsheets.</p>
+      <div class="steps">
+        <div class="step">
+          <span class="n">1</span>
+          <code>hew ready</code>
+          <p>See what's actually ready — sorted, filtered, one line per issue.</p>
+        </div>
+        <div class="step">
+          <span class="n">2</span>
+          <code>hew start &lt;n&gt;</code>
+          <p>Claim it. If someone beat you to it, hew hands you the next ready item.</p>
+        </div>
+        <div class="step">
+          <span class="n">3</span>
+          <code>branch → push → hew pr</code>
+          <p>The PR composes itself from the issue — exactly one <code>Fixes #n</code>. Closing it closes the issue.</p>
+        </div>
+      </div>
+      <p class="loop-note">hew close is for wontfix and duplicates only — work always closes through the PR.</p>
+    </div>
+  </section>
+
+  <section class="install" id="install">
+    <div class="container">
+      <p class="eyebrow">install</p>
+      <h2>Grab an axe</h2>
+      <p class="section-lede">One line, no sudo. Auth comes from the <code>gh</code> CLI you already have.</p>
+      <div class="term">
+        <div class="term-head">
+          <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="title">install</span>
+          <button class="copy" data-copy="curl -fsSL https://lumberbarons.github.io/hew/install.sh | bash" aria-label="Copy install command">copy</button>
+        </div>
+        <div class="term-body"><pre><span class="prompt">$ </span><span class="cmd">curl -fsSL https://lumberbarons.github.io/hew/install.sh | bash</span></pre></div>
+      </div>
+      <div class="reqs">
+        <div class="req">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4 10-10"/></svg>
+          <span><code>git</code> — the target repo is read from the checkout</span>
+        </div>
+        <div class="req">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4 10-10"/></svg>
+          <span><code>gh</code> CLI — run <code>gh auth login</code> once</span>
+        </div>
+        <div class="req">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4 10-10"/></svg>
+          <span><code>curl</code> + <code>tar</code> — for the script</span>
+        </div>
+        <div class="req">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4 10-10"/></svg>
+          <span>checksum-verified releases; the script nudges you if <code>~/.local/bin</code> is off your PATH</span>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="container footer-inner">
+    <span class="footer-brand">
+      <span class="mark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m14 12-8.5 8.5a2.121 2.121 0 1 1-3-3L11 9"/><path d="M15 13 9 7l4-4 6 6h3a8 8 0 0 1-7 7z"/></svg></span>
+      hew
+    </span>
+    <span class="footer-tag">cut the backlog down to size</span>
+    <div class="footer-links">
+      <a href="https://github.com/lumberbarons/hew">GitHub</a>
+      <a href="https://github.com/lumberbarons/hew#readme">README</a>
+      <a href="https://github.com/lumberbarons/hew/blob/main/DESIGN.md">DESIGN.md</a>
+    </div>
+    <div class="fine">MIT licensed · built by Lumberbarons · © 2026</div>
+  </div>
+</footer>
+
+<script>
+  document.querySelectorAll("[data-copy]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      navigator.clipboard.writeText(btn.dataset.copy).then(function () {
+        var label = btn.textContent;
+        btn.textContent = "copied";
+        setTimeout(function () { btn.textContent = label; }, 1500);
+      });
+    });
+  });
+</script>
+
+</body>
+</html>
