@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -629,6 +630,53 @@ func TestPrime(t *testing.T) {
 	}
 }
 
+func TestPrimeCapsEpics(t *testing.T) {
+	// prime names only the highest-priority epics; the pointer tells the
+	// agent where the rest live, and the JSON schema carries the total.
+	var epics []*model.Issue
+	for i, p := range []string{"P0", "P1", "P2", "P3", "P4", "P4"} {
+		e := issue(20+i, fmt.Sprintf("Epic %d", i), p)
+		e.SubIssues = []model.Ref{{Number: 100 + i, State: "OPEN"}}
+		epics = append(epics, e)
+	}
+	app, out, _ := newApp(newFake(epics...))
+	if err := app.Prime(ctx, PrimeOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"## Epics",
+		"#20 P0  Epic 0  0/1",
+		"#24 P4  Epic 4  0/1",
+		"… 1 more: hew epic status",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Prime missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "#25") {
+		t.Errorf("prime listed the sixth epic:\n%s", got)
+	}
+
+	app, out, _ = newApp(newFake(epics...))
+	app.JSON = true
+	if err := app.Prime(ctx, PrimeOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		EpicsTotal int `json:"epicsTotal"`
+		Epics      []struct {
+			Number int `json:"number"`
+		} `json:"epics"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
+		t.Fatalf("prime --json: %v\n%s", err, out.String())
+	}
+	if parsed.EpicsTotal != 6 || len(parsed.Epics) != 5 {
+		t.Errorf("json epics = %d of %d, want 5 of 6", len(parsed.Epics), parsed.EpicsTotal)
+	}
+}
+
 func TestPrimeOmitsUntriagedTitles(t *testing.T) {
 	// prime is installed as a SessionStart hook, so its text lands in an
 	// agent's context with no human in between. Untriaged titles carry no
@@ -967,8 +1015,61 @@ func TestPrimeCapsReady(t *testing.T) {
 	if err := app.Prime(ctx, PrimeOpts{}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "… 5 more: hew ready") {
-		t.Errorf("Prime cap:\n%s", out.String())
+	got := out.String()
+	if !strings.Contains(got, "… 10 more: hew ready") {
+		t.Errorf("Prime cap pointer:\n%s", got)
+	}
+	listed := 0
+	for _, ln := range strings.Split(got, "\n") {
+		if len(ln) > 1 && ln[0] == '#' && ln[1] >= '0' && ln[1] <= '9' {
+			listed++
+		}
+	}
+	if listed != primeReadyCap {
+		t.Errorf("prime listed %d ready issues, want %d:\n%s", listed, primeReadyCap, got)
+	}
+}
+
+func TestPrimeCapsInProgress(t *testing.T) {
+	// The in-progress section grows with humans, not priorities, so it is
+	// capped too — `hew list` sorts claimed work right behind ready.
+	var claimed []*model.Issue
+	for n := 1; n <= 6; n++ {
+		c := issue(n, "Claimed", "P2", "bug", "in-progress")
+		c.Assignees = []string{fmt.Sprintf("user%d", n)}
+		claimed = append(claimed, c)
+	}
+	f := newFake(claimed...)
+	app, out, _ := newApp(f)
+	if err := app.Prime(ctx, PrimeOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{"## In progress (6)", "… 1 more: hew list"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Prime missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "user6") {
+		t.Errorf("prime listed the sixth claimed issue:\n%s", got)
+	}
+
+	app, out, _ = newApp(newFake(claimed...))
+	app.JSON = true
+	if err := app.Prime(ctx, PrimeOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		InProgressTotal int `json:"inProgressTotal"`
+		InProgress      []struct {
+			Number int `json:"number"`
+		} `json:"inProgress"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
+		t.Fatalf("prime --json: %v\n%s", err, out.String())
+	}
+	if parsed.InProgressTotal != 6 || len(parsed.InProgress) != 5 {
+		t.Errorf("json inProgress = %d of %d, want 5 of 6", len(parsed.InProgress), parsed.InProgressTotal)
 	}
 }
 

@@ -15,7 +15,7 @@ import (
 // primeBudget is the target DESIGN.md sets for the primer. The harness
 // measures against it rather than asserting it: a primer that grows is a
 // judgement call, not a build failure.
-const primeBudget = 600
+const primeBudget = 1200
 
 // primeCommand is the entry whose token count is checked against primeBudget.
 const primeCommand = "prime"

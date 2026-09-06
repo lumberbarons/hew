@@ -172,13 +172,15 @@ func TestPrimeColored(t *testing.T) {
 		SubIssues: []model.Ref{{Number: 120, State: "OPEN"}},
 	}
 	d := PrimeData{
-		Repo:       "lumberbarons/solar-controller",
-		Ready:      model.Ready(issues),
-		ReadyTotal: 3,
-		OpenTotal:  14,
-		InProgress: []model.Issue{inProgress},
-		Epics:      []model.Issue{epic},
-		Untriaged:  7,
+		Repo:            "lumberbarons/solar-controller",
+		Ready:           model.Ready(issues),
+		ReadyTotal:      3,
+		OpenTotal:       14,
+		InProgress:      []model.Issue{inProgress},
+		InProgressTotal: 1,
+		Epics:           []model.Issue{epic},
+		EpicsTotal:      1,
+		Untriaged:       7,
 	}
 	var buf bytes.Buffer
 	Prime(&buf, "Workflow: hew ready → hew start <n>.", d, StyleFor(true))

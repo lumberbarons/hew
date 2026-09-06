@@ -3,8 +3,8 @@
 <!--
 The conventions and command sections below are `conventions.PrimerStatic`
 verbatim — keep them in sync when you change that constant. Only the state
-sections (Ready/In progress/Blocked/Epics) are invented, standing in for a
-repo with enough work in flight to show every section at once.
+sections (Ready/In progress/Epics) are invented, standing in for a repo with
+enough work in flight to show the live sections and their caps at once.
 -->
 
 Workflow: hew ready → hew start <n> → branch (feat/|fix/|chore/) → push → hew pr.
@@ -46,20 +46,20 @@ apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew appl
 #119 P2 enhancement (web-ui)  Proper auth: login flow with sessions, API keys
 #118 P2 enhancement (web-ui)  Simple bearer-token auth, prompting only when required
 #126 P2 bug (collector)  Modbus reconnect loops forever on stale file descriptor
-#131 P3 task (tests)  Golden-file tests for renderer output
-#133 P3 task  Extract shared retry/backoff helper from collectors
-#135 P4 enhancement (docs)  Architecture overview diagram in README
+… 3 more: hew ready
 
-## In progress (2)
-#124 P2 bug (tests)  /api/info verified by substring matching  @lumberbarons
-#128 P1 bug (collector)  Victron collector drops readings during BLE rescan  @lumberbarons
-
-## Blocked (4)
-#121 P2 enhancement  Voltgo poller wiring  ← blocked by #120
-#122 P2 enhancement  Voltgo web-ui cards  ← blocked by #120 #121
-#127 P2 task (deploy)  Canary rollout for collector config  ← blocked by #126
-#134 P3 task  Remove legacy /api/v0 endpoints  ← blocked by #119
+## In progress (6)
+#124 P2 bug (tests)           /api/info verified by substring matching  @lumberbarons
+#128 P1 bug (collector)       Victron collector drops readings during BLE rescan  @lumberbarons
+#130 P2 task (deploy)         Canary rollout for collector config  @octocat
+#132 P2 enhancement (web-ui)  Session-based auth for the web UI  @octocat
+#136 P3 task (docs)           Architecture overview diagram in README  @octocat
+… 1 more: hew list
 
 ## Epics
-#137 Voltgo BLE battery controller support  1/6
-#140 Epic: Auth and session hardening  0/4
+#137 P2  Voltgo BLE battery controller support  1/6
+#140 P2  Epic: Auth and session hardening  0/4
+#142 P3  Epic: Collector reliability pass  0/3
+#144 P3  Epic: Web UI parity with API  0/2
+#146 P4  Epic: Deployment tooling  0/1
+… 1 more: hew epic status

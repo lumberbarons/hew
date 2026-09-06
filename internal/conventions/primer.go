@@ -1,7 +1,8 @@
 package conventions
 
 // PrimerStatic is the conventions-and-cheatsheet half of `hew prime`,
-// kept deliberately terse: the whole primer targets ~600 tokens.
+// kept deliberately terse: the whole primer targets ~1200 tokens (measured,
+// see DESIGN.md's token-efficiency section).
 const PrimerStatic = `Workflow: hew ready → hew start <n> → branch (feat/|fix/|chore/) → push → hew pr.
 Close via PR; hew close is for wontfix/duplicate only. Never work an epic directly.
 Dedup before filing: hew search <terms> (triaged, open+closed) first; hew triage --search <terms> for the

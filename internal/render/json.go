@@ -124,14 +124,16 @@ type WarningJSON struct {
 
 // PrimeJSON is the structured form of the primer's live state.
 type PrimeJSON struct {
-	Repo       string        `json:"repo"`
-	OpenTotal  int           `json:"openTotal"`
-	ReadyTotal int           `json:"readyTotal"`
-	Ready      []IssueJSON   `json:"ready"`
-	InProgress []IssueJSON   `json:"inProgress"`
-	Epics      []IssueJSON   `json:"epics"`
-	Untriaged  int           `json:"untriaged"`
-	Warnings   []WarningJSON `json:"warnings"`
+	Repo            string        `json:"repo"`
+	OpenTotal       int           `json:"openTotal"`
+	ReadyTotal      int           `json:"readyTotal"`
+	Ready           []IssueJSON   `json:"ready"`
+	InProgress      []IssueJSON   `json:"inProgress"`
+	InProgressTotal int           `json:"inProgressTotal"`
+	Epics           []IssueJSON   `json:"epics"`
+	EpicsTotal      int           `json:"epicsTotal"`
+	Untriaged       int           `json:"untriaged"`
+	Warnings        []WarningJSON `json:"warnings"`
 }
 
 // warningsJSON maps structured warnings to their JSON form, attaching the
@@ -155,14 +157,16 @@ func warningsJSON(ws []model.Warning) []WarningJSON {
 // is for context injection, not machine consumption).
 func JSONPrime(w io.Writer, d PrimeData) error {
 	out := PrimeJSON{
-		Repo:       d.Repo,
-		OpenTotal:  d.OpenTotal,
-		ReadyTotal: d.ReadyTotal,
-		Ready:      toJSONList(d.Ready),
-		InProgress: toJSONList(d.InProgress),
-		Epics:      toJSONList(d.Epics),
-		Untriaged:  d.Untriaged,
-		Warnings:   warningsJSON(d.Warnings),
+		Repo:            d.Repo,
+		OpenTotal:       d.OpenTotal,
+		ReadyTotal:      d.ReadyTotal,
+		Ready:           toJSONList(d.Ready),
+		InProgress:      toJSONList(d.InProgress),
+		InProgressTotal: d.InProgressTotal,
+		Epics:           toJSONList(d.Epics),
+		EpicsTotal:      d.EpicsTotal,
+		Untriaged:       d.Untriaged,
+		Warnings:        warningsJSON(d.Warnings),
 	}
 	return writeJSON(w, out)
 }

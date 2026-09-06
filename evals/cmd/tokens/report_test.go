@@ -182,7 +182,7 @@ func TestTextReportMarksAndExplainsPartialBaselines(t *testing.T) {
 		"same-information ratios:",
 		"median",
 		"prime: ",
-		"DESIGN.md's ~600-token target",
+		"DESIGN.md's ~1200-token target",
 		"tiktoken o200k_base",
 	} {
 		if !strings.Contains(out, want) {

@@ -15,8 +15,11 @@ go build -o /tmp/hew ../cmd/hew
 
 # capture: reads a live repo, records both sides' raw output into a fixture
 go run ./cmd/tokens capture \
-  --repo lumberbarons/solar-controller --show 123 --epic 137 \
+  --repo lumberbarons/solar-controller --show 119 \
   --hew /tmp/hew --out fixtures/solar-controller
+go run ./cmd/tokens capture \
+  --repo lumberbarons/hew --show 82 \
+  --hew /tmp/hew --out fixtures/hew
 
 # report: tokenizes the committed fixture — offline, deterministic
 go run ./cmd/tokens report fixtures/solar-controller fixtures/hew
@@ -24,8 +27,10 @@ go run ./cmd/tokens report --format markdown fixtures/solar-controller  # for DE
 go run ./cmd/tokens report --format json fixtures/solar-controller
 ```
 
-`--epic` is optional: omit it for a repo with no open epic (the `hew` fixture has
-none). Published figures live in [DESIGN.md](../DESIGN.md#token-efficiency-measured-2026-07-29).
+`--epic` is optional: omit it for a repo with no open epic — both fixtures
+omit it. The `--show` targets are ordinary open issues; pick a fresh one when
+they close and re-capture. Published figures live in
+[DESIGN.md](../DESIGN.md#token-efficiency-measured-2026-09-06).
 
 ### What a fixture is
 
