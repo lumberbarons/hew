@@ -130,6 +130,7 @@ type PrimeJSON struct {
 	Ready      []IssueJSON   `json:"ready"`
 	InProgress []IssueJSON   `json:"inProgress"`
 	Epics      []IssueJSON   `json:"epics"`
+	EpicsTotal int           `json:"epicsTotal"`
 	Untriaged  int           `json:"untriaged"`
 	Warnings   []WarningJSON `json:"warnings"`
 }
@@ -161,6 +162,7 @@ func JSONPrime(w io.Writer, d PrimeData) error {
 		Ready:      toJSONList(d.Ready),
 		InProgress: toJSONList(d.InProgress),
 		Epics:      toJSONList(d.Epics),
+		EpicsTotal: d.EpicsTotal,
 		Untriaged:  d.Untriaged,
 		Warnings:   warningsJSON(d.Warnings),
 	}

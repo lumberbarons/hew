@@ -28,6 +28,7 @@
   ],
   "inProgress": [],
   "epics": [],
+  "epicsTotal": 0,
   "untriaged": 1,
   "warnings": []
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -626,6 +627,53 @@ func TestPrime(t *testing.T) {
 	}
 	if strings.Contains(got, "## Warnings") {
 		t.Errorf("clean repo grew warnings:\n%s", got)
+	}
+}
+
+func TestPrimeCapsEpics(t *testing.T) {
+	// prime names only the highest-priority epics; the pointer tells the
+	// agent where the rest live, and the JSON schema carries the total.
+	var epics []*model.Issue
+	for i, p := range []string{"P0", "P1", "P2", "P3", "P4", "P4"} {
+		e := issue(20+i, fmt.Sprintf("Epic %d", i), p)
+		e.SubIssues = []model.Ref{{Number: 100 + i, State: "OPEN"}}
+		epics = append(epics, e)
+	}
+	app, out, _ := newApp(newFake(epics...))
+	if err := app.Prime(ctx, PrimeOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"## Epics",
+		"#20 P0  Epic 0  0/1",
+		"#24 P4  Epic 4  0/1",
+		"… 1 more: hew epic status",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Prime missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "#25") {
+		t.Errorf("prime listed the sixth epic:\n%s", got)
+	}
+
+	app, out, _ = newApp(newFake(epics...))
+	app.JSON = true
+	if err := app.Prime(ctx, PrimeOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		EpicsTotal int `json:"epicsTotal"`
+		Epics      []struct {
+			Number int `json:"number"`
+		} `json:"epics"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
+		t.Fatalf("prime --json: %v\n%s", err, out.String())
+	}
+	if parsed.EpicsTotal != 6 || len(parsed.Epics) != 5 {
+		t.Errorf("json epics = %d of %d, want 5 of 6", len(parsed.Epics), parsed.EpicsTotal)
 	}
 }
 

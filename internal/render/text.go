@@ -255,7 +255,8 @@ type PrimeData struct {
 	ReadyTotal int
 	OpenTotal  int
 	InProgress []model.Issue
-	Epics      []model.Issue
+	Epics      []model.Issue // already capped to top N
+	EpicsTotal int
 	Warnings   []model.Warning
 	Untriaged  int
 }
@@ -281,6 +282,9 @@ func Prime(w io.Writer, static string, d PrimeData, s Style) {
 	if len(d.Epics) > 0 {
 		fmt.Fprintln(w, "\n## Epics")
 		lines(w, d.Epics, lineOpts{progress: true}, s)
+		if d.EpicsTotal > len(d.Epics) {
+			fmt.Fprintln(w, s.dim(fmt.Sprintf("… %d more: hew epic status", d.EpicsTotal-len(d.Epics))))
+		}
 	}
 	if d.Untriaged > 0 {
 		fmt.Fprintln(w, s.dim(fmt.Sprintf("\n%d untriaged → hew triage", d.Untriaged)))

@@ -360,8 +360,11 @@ workflow prose. Three parts:
 
 1. **Static primer** — the conventions and workflow above, compressed to a few
    hundred tokens, including the tool's own command cheatsheet.
-2. **Live state** — ready work (top N by priority), in-progress issues and their
-   assignee, epics with progress (`#137 Voltgo 2/6`), and open-blocker counts.
+2. **Live state** — ready work (top 10 by priority), in-progress issues and their
+   assignee, epics with progress (top 5 by priority; the rest sit behind one
+   `hew epic status`), and open-blocker counts. The ready and epic caps keep
+   the live half bounded; `hew ready` and `hew epic status` are the unbounded
+   reads, one call away.
 3. **Warnings** — contradictions only (`⚠ #42 has two priority labels`,
    `⚠ dependency cycle #3 → #4 → #5 → #3: none will be ready`). Absences
    are not warnings: untriaged work rolls up to a single line (`7 untriaged →
