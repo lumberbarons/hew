@@ -48,10 +48,18 @@ apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew appl
 #126 P2 bug (collector)  Modbus reconnect loops forever on stale file descriptor
 … 3 more: hew ready
 
-## In progress (2)
-#124 P2 bug (tests)  /api/info verified by substring matching  @lumberbarons
-#128 P1 bug (collector)  Victron collector drops readings during BLE rescan  @lumberbarons
+## In progress (6)
+#124 P2 bug (tests)           /api/info verified by substring matching  @lumberbarons
+#128 P1 bug (collector)       Victron collector drops readings during BLE rescan  @lumberbarons
+#130 P2 task (deploy)         Canary rollout for collector config  @octocat
+#132 P2 enhancement (web-ui)  Session-based auth for the web UI  @octocat
+#136 P3 task (docs)           Architecture overview diagram in README  @octocat
+… 1 more: hew list
 
 ## Epics
-#137 Voltgo BLE battery controller support  1/6
-#140 Epic: Auth and session hardening  0/4
+#137 P2  Voltgo BLE battery controller support  1/6
+#140 P2  Epic: Auth and session hardening  0/4
+#142 P3  Epic: Collector reliability pass  0/3
+#144 P3  Epic: Web UI parity with API  0/2
+#146 P4  Epic: Deployment tooling  0/1
+… 1 more: hew epic status
