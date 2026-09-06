@@ -38,12 +38,7 @@ apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew appl
 #125 P2 bug (tests)           Data race on receivedAuth in TestPublishWithBearerToken
 #126 P2 bug (tests)           Tests claim scenarios never exercised (ControllerRegistration, factory RemoteWrite mislabel)
 #127 P2 bug (tests)           MQTT timeout and error tests verify nothing about those branches
-#128 P2 bug (tests)           Mock-recorded side effects never asserted (SetMetrics, register failures, lastStatus, SNS payloads)
-#129 P2 task (tests)          Cover publisher enabled paths (Solace publish/close, SNS NewPublisher, MQTT constructor)
-#130 P2 task (tests)          Add coverage for epever client, configurer handlers, and PrometheusCollector (zero-coverage files)
-#143 P2 task (tests,ci)       Raise backend coverage threshold to 90%
-#133 P3 task (tests)          Epever decoding tested only with non-discriminating inputs
-… 3 more: hew ready
+… 8 more: hew ready
 
 ## In progress (1)
 #187 P2 enhancement  Support multiple Voltgo batteries across config, backend, and web UI  @lumberbarons

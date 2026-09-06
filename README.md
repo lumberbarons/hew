@@ -302,8 +302,8 @@ See [DESIGN.md](DESIGN.md) for the conventions the tool enforces, the read-path
 normalization rules, and the API strategy.
 
 The token-lean claim is measured, not asserted: `hew ready` and `hew list` cost
-19–25 tokens per open issue against 76–84 for the leanest equivalent GraphQL query
-and 105–141 for `gh issue list --json`, which cannot answer readiness at all.
-[DESIGN.md](DESIGN.md#token-efficiency-measured-2026-09-05) has the full table,
+18–25 tokens per open issue against 76–84 for the leanest equivalent GraphQL query
+and 109–141 for `gh issue list --json`, which cannot answer readiness at all.
+[DESIGN.md](DESIGN.md#token-efficiency-measured-2026-09-06) has the full table,
 including the one command where the tool currently loses (`list --json`, filed
 as #62); [evals/](evals/) is the harness that produced it.

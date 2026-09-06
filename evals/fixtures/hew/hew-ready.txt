@@ -2,7 +2,6 @@
 #57  P3 enhancement  pr composes bullet lists from repeatable section flags
 #61  P3 task         Tighten test gates: per-package coverage floor and shuffled test order
 #62  P3 enhancement  list --json costs more tokens than the raw GraphQL it replaces
-#63  P3 enhancement  prime exceeds its ~600-token budget on real repos
 #70  P3 enhancement  pr warns when a bug's derived title names the defect rather than the fix
 #73  P3 enhancement  pr can edit an existing PR body, not only compose it at creation
 #74  P3 enhancement  Test backend: run hew against ephemeral local state instead of GitHub

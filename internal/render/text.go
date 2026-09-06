@@ -250,15 +250,16 @@ func FormatWarning(w model.Warning) string {
 
 // PrimeData is everything the primer needs, precomputed by the command.
 type PrimeData struct {
-	Repo       string
-	Ready      []model.Issue // already capped to top N
-	ReadyTotal int
-	OpenTotal  int
-	InProgress []model.Issue
-	Epics      []model.Issue // already capped to top N
-	EpicsTotal int
-	Warnings   []model.Warning
-	Untriaged  int
+	Repo            string
+	Ready           []model.Issue // already capped to top N
+	ReadyTotal      int
+	OpenTotal       int
+	InProgress      []model.Issue // already capped to top N
+	InProgressTotal int
+	Epics           []model.Issue // already capped to top N
+	EpicsTotal      int
+	Warnings        []model.Warning
+	Untriaged       int
 }
 
 // Prime renders the session-start primer: static conventions, live state,
@@ -276,8 +277,11 @@ func Prime(w io.Writer, static string, d PrimeData, s Style) {
 		}
 	}
 	if len(d.InProgress) > 0 {
-		fmt.Fprintf(w, "\n## In progress (%d)\n", len(d.InProgress))
+		fmt.Fprintf(w, "\n## In progress (%d)\n", d.InProgressTotal)
 		lines(w, d.InProgress, lineOpts{assignees: true}, s)
+		if d.InProgressTotal > len(d.InProgress) {
+			fmt.Fprintln(w, s.dim(fmt.Sprintf("… %d more: hew list", d.InProgressTotal-len(d.InProgress))))
+		}
 	}
 	if len(d.Epics) > 0 {
 		fmt.Fprintln(w, "\n## Epics")

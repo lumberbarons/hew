@@ -25,7 +25,7 @@ go run ./cmd/tokens report --format json fixtures/solar-controller
 ```
 
 `--epic` is optional: omit it for a repo with no open epic (the `hew` fixture has
-none). Published figures live in [DESIGN.md](../DESIGN.md#token-efficiency-measured-2026-09-05).
+none). Published figures live in [DESIGN.md](../DESIGN.md#token-efficiency-measured-2026-09-06).
 
 ### What a fixture is
 

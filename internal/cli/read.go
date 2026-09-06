@@ -12,13 +12,15 @@ import (
 	"github.com/lumberbarons/hew/internal/render"
 )
 
-// primeReadyCap keeps the primer's live half inside its token budget; the
-// full list is one `hew ready` away.
-const primeReadyCap = 10
-
-// primeEpicsCap caps the primer's epic section the same way: `hew epic
-// status` lists every epic, so prime only names the highest-priority few.
-const primeEpicsCap = 5
+// The primer caps every live section and points at the command that lists
+// the rest, so its size is bounded by section count rather than repo size:
+// ready → `hew ready`, in-progress → `hew list` (claimed sorts right behind
+// ready), epics → `hew epic status`.
+const (
+	primeReadyCap      = 5
+	primeInProgressCap = 5
+	primeEpicsCap      = 5
+)
 
 var (
 	openStates   = []gh.IssueState{gh.StateOpen}
@@ -255,20 +257,25 @@ func (a *App) Prime(ctx context.Context, opts PrimeOpts) error {
 		return err
 	}
 	ready := model.Ready(issues)
+	inProgress := model.InProgressIssues(issues)
 	epics := model.Epics(issues)
 	d := render.PrimeData{
-		Repo:       a.Repo.String(),
-		Ready:      ready,
-		ReadyTotal: len(ready),
-		OpenTotal:  len(issues),
-		InProgress: model.InProgressIssues(issues),
-		Epics:      epics,
-		EpicsTotal: len(epics),
-		Warnings:   model.Warnings(issues),
-		Untriaged:  len(model.UntriagedIssues(issues)),
+		Repo:            a.Repo.String(),
+		Ready:           ready,
+		ReadyTotal:      len(ready),
+		OpenTotal:       len(issues),
+		InProgress:      inProgress,
+		InProgressTotal: len(inProgress),
+		Epics:           epics,
+		EpicsTotal:      len(epics),
+		Warnings:        model.Warnings(issues),
+		Untriaged:       len(model.UntriagedIssues(issues)),
 	}
 	if len(d.Ready) > primeReadyCap {
 		d.Ready = d.Ready[:primeReadyCap]
+	}
+	if len(d.InProgress) > primeInProgressCap {
+		d.InProgress = d.InProgress[:primeInProgressCap]
 	}
 	if len(d.Epics) > primeEpicsCap {
 		d.Epics = d.Epics[:primeEpicsCap]

@@ -170,7 +170,8 @@ func TestPrime_NeutralizesHostileFields(t *testing.T) {
 	var buf bytes.Buffer
 	Prime(&buf, "static conventions", PrimeData{
 		Repo: "owner/repo" + hostile, Ready: []model.Issue{hostileIssue()}, ReadyTotal: 1, OpenTotal: 1,
-		InProgress: []model.Issue{hostileIssue()},
+		InProgress:      []model.Issue{hostileIssue()},
+		InProgressTotal: 1,
 		Epics: []model.Issue{{
 			Number: 7, Title: "Epic: " + hostile, State: "OPEN", CreatedAt: ts(1),
 			Labels: []string{"P2"}, SubIssuesTotal: 1, SubIssues: []model.Ref{{Number: 42, State: "OPEN"}},

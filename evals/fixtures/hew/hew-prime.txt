@@ -32,15 +32,13 @@ block <n> --on <m> | unblock <n> --from <m> |
 epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n>] |
 apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew apply --help). All take --json.
 
-## Ready (18 of 18 open)
+## Ready (17 of 18 open)
 #100 P2 enhancement  triage flags invisible and confusable content in issue text
 #57  P3 enhancement  pr composes bullet lists from repeatable section flags
 #61  P3 task         Tighten test gates: per-package coverage floor and shuffled test order
 #62  P3 enhancement  list --json costs more tokens than the raw GraphQL it replaces
-#63  P3 enhancement  prime exceeds its ~600-token budget on real repos
 #70  P3 enhancement  pr warns when a bug's derived title names the defect rather than the fix
-#73  P3 enhancement  pr can edit an existing PR body, not only compose it at creation
-#74  P3 enhancement  Test backend: run hew against ephemeral local state instead of GitHub
-#75  P3 enhancement  Code-span check treats a bare filename differently from a path
-#82  P3 task         Document the agent trust boundary for tracker content
-… 8 more: hew ready
+… 12 more: hew ready
+
+## In progress (1)
+#63 P3 enhancement  prime exceeds its ~600-token budget on real repos  @lumberbarons

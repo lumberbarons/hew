@@ -27,6 +27,7 @@
     }
   ],
   "inProgress": [],
+  "inProgressTotal": 0,
   "epics": [],
   "epicsTotal": 0,
   "untriaged": 1,
