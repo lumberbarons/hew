@@ -161,6 +161,25 @@ primer so agents know what they're looking at:
   spelling of the command matches them; `hooks install` deliberately writes
   no such block itself.
 
+  Both `triage` modes scan raw titles and bodies for zero-width/default-ignorable
+  characters, bidi controls, Unicode tags, and non-ASCII characters with ASCII
+  alphanumeric skeletons in Unicode's confusables data. Findings are advisory
+  annotations, never a filter or an automatic rejection. Text output appends
+  the categories once per issue; NDJSON adds `textFindings` only when nonempty,
+  with `zeroWidth`, `bidiControl`, `unicodeTags`, and `confusable` booleans.
+  Scanning lives pure in `internal/model` and is called only by the triage
+  renderers, so automatic paths and their token fixtures are unaffected.
+
+  The confusables subset and exact emoji exceptions are generated from pinned
+  Unicode 17.0.0 data; `internal/model/generate_textscan.py` records the sources
+  and regeneration procedure. Emoji exceptions are matched per grapheme cluster,
+  allowing ordinary joiners, selectors, and subdivision flag tags without
+  exempting extra invisible characters. Curly quotes, dashes, normal accents,
+  and decomposed accents are ordinary prose: punctuation lookalikes and non-NFC
+  text alone are deliberately not flagged. This is not a full UTS #39 identifier
+  validator or a semantic prompt-injection detector; legitimate scripts and
+  notation can contain flagged characters and still require human judgment.
+
 ## Command surface (v1)
 
 ```

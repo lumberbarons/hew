@@ -118,6 +118,14 @@ func (a *App) emitListBodies(issues []model.Issue, emptyMsg string, renderText f
 	return nil
 }
 
+// emitTriage keeps text scanning confined to the explicit triage command.
+func (a *App) emitTriage(issues []model.Issue, emptyMsg string) error {
+	if a.JSON {
+		return render.JSONTriage(a.Out, issues)
+	}
+	return a.emitList(issues, emptyMsg, render.Triage)
+}
+
 // emitIssue renders one issue in full.
 func (a *App) emitIssue(issue model.Issue) error {
 	if a.JSON {

@@ -105,6 +105,25 @@ func JSONList(w io.Writer, issues []model.Issue, withBodies bool) error {
 	return nil
 }
 
+// JSONTriage adds findings to the normal NDJSON issue schema only on triage.
+// Clean issues omit textFindings, preserving their ordinary list representation.
+func JSONTriage(w io.Writer, issues []model.Issue) error {
+	enc := json.NewEncoder(w)
+	for _, i := range issues {
+		out := struct {
+			IssueJSON
+			TextFindings *model.TextFindings `json:"textFindings,omitempty"`
+		}{IssueJSON: ToJSON(i, false)}
+		if f := model.ScanText(i.Title, i.Body); f != (model.TextFindings{}) {
+			out.TextFindings = &f
+		}
+		if err := enc.Encode(out); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // JSONIssue writes one issue with full detail.
 func JSONIssue(w io.Writer, i model.Issue) error {
 	return writeJSON(w, ToJSON(i, true))
