@@ -81,6 +81,7 @@ type lineOpts struct {
 	state     bool // append [closed] (mixed-state views)
 	progress  bool // append sub-issue rollup n/m (epic views)
 	annotate  bool // append [blocked by #n; epic n/m; ...] (list views)
+	triage    bool // scan raw title and body for suspicious Unicode (triage only)
 }
 
 // annotations explains, inline, why an issue isn't plain ready work.
@@ -138,6 +139,9 @@ func lines(w io.Writer, issues []model.Issue, opts lineOpts, s Style) {
 		if opts.annotate {
 			fmt.Fprint(w, s.dim(annotations(i)))
 		}
+		if opts.triage {
+			fmt.Fprint(w, s.dim(textAnnotations(model.ScanText(i.Title, i.Body))))
+		}
 		fmt.Fprintln(w)
 	}
 }
@@ -146,6 +150,31 @@ func lines(w io.Writer, issues []model.Issue, opts lineOpts, s Style) {
 // it from being plain ready work.
 func List(w io.Writer, issues []model.Issue, s Style) {
 	lines(w, issues, lineOpts{annotate: true}, s)
+}
+
+// Triage adds advisory Unicode findings without filtering or rewriting issues.
+func Triage(w io.Writer, issues []model.Issue, s Style) {
+	lines(w, issues, lineOpts{annotate: true, triage: true}, s)
+}
+
+func textAnnotations(f model.TextFindings) string {
+	var parts []string
+	if f.ZeroWidth {
+		parts = append(parts, "contains zero-width characters")
+	}
+	if f.BidiControl {
+		parts = append(parts, "contains bidi controls")
+	}
+	if f.UnicodeTags {
+		parts = append(parts, "contains Unicode tags")
+	}
+	if f.Confusable {
+		parts = append(parts, "contains confusable characters")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "  [" + strings.Join(parts, "; ") + "]"
 }
 
 // ListWithAssignees renders lines with @assignee suffixes (in-progress view).

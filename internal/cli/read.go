@@ -214,7 +214,7 @@ func (a *App) Triage(ctx context.Context, opts TriageOpts) error {
 			return err
 		}
 		untriaged := model.UntriagedIssues(issues)
-		return a.emitList(untriaged, "no untriaged issues", render.List)
+		return a.emitTriage(untriaged, "no untriaged issues")
 	}
 	terms := strings.TrimSpace(opts.Search)
 	if terms == "" {
@@ -228,7 +228,7 @@ func (a *App) Triage(ctx context.Context, opts TriageOpts) error {
 	if total > len(issues) {
 		a.warnf("showing %d of %d matches; refine the terms", len(untriaged), total)
 	}
-	return a.emitList(untriaged, "no untriaged matches", render.List)
+	return a.emitTriage(untriaged, "no untriaged matches")
 }
 
 // PrimeOpts re-targets the primer's output at a caller with its own

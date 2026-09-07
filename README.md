@@ -175,6 +175,18 @@ so "does this already exist?" is answered in two calls, one per population:
 
 Then file with `hew create ... --discovered-from <n>`.
 
+Both triage modes scan titles and bodies for suspicious Unicode and annotate
+the issue line with findings such as `[contains zero-width characters]`,
+`[contains bidi controls]`, `[contains Unicode tags]`, or
+`[contains confusable characters]`. Confusables are non-ASCII characters that
+resemble ASCII letters or digits, including Greek/Cyrillic lookalikes and
+mathematical alphabets. Recognized Unicode 17 emoji sequences are exempt,
+including their joiners and flag tags; ordinary accents and punctuation are
+allowed. These are review hints: legitimate language or notation may trigger
+them, and issues are never hidden or rejected. Under `--json`, flagged issues
+carry a `textFindings` object with `zeroWidth`, `bidiControl`, `unicodeTags`,
+and `confusable` booleans; clean issues omit it.
+
 ### Denying untriaged content in a harness
 
 `hew triage` is the only command that emits untriaged titles and bodies (`hew
