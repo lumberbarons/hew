@@ -111,7 +111,7 @@ func hostileIssue() model.Issue { return hostileIssueWith(hostile) }
 
 func TestShow_NeutralizesHostileFields(t *testing.T) {
 	var buf bytes.Buffer
-	Show(&buf, hostileIssue(), Style{})
+	Show(&buf, hostileIssue(), nil, Style{})
 	assertNeutralized(t, "Show", buf.String())
 	// Neutralized, not dropped: the read path never hides what GitHub holds.
 	if !strings.Contains(buf.String(), "?[31m") {

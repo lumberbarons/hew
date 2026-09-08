@@ -170,6 +170,25 @@ func findCommand(t *testing.T, cmd *ucli.Command, path ...string) *ucli.Command 
 	return cmd
 }
 
+// TestEpicListAliasReachesStatus pins the alias the workflow reaches for:
+// `hew epic list` is how agents guess the epic rollup, and it must land on
+// status rather than "No help topic for 'list'".
+func TestEpicListAliasReachesStatus(t *testing.T) {
+	app := root()
+	var invoked bool
+	findCommand(t, app, "epic", "status").Action = func(_ context.Context, cmd *ucli.Command) error {
+		invoked = true
+		return nil
+	}
+	if err := app.Run(context.Background(), []string{"hew", "epic", "list"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !invoked {
+		t.Fatal("hew epic list did not reach the status action")
+	}
+}
+
+// TestHooksRequireAgent pins the hook verbs' usage guard.
 func TestHooksRequireAgent(t *testing.T) {
 	for _, args := range [][]string{
 		{"hew", "hooks", "install"},

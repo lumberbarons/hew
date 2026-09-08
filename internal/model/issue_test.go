@@ -255,6 +255,43 @@ func TestUntriagedIssuesOldestFirst(t *testing.T) {
 	}
 }
 
+func TestEpicNext(t *testing.T) {
+	ok := func(n int, labels ...string) Issue {
+		return Issue{Number: n, State: "OPEN", Labels: labels}
+	}
+	blocked := ok(20, "P2", "task")
+	blocked.BlockedBy = []Ref{{Number: 99, State: "OPEN"}}
+	closedBlocker := ok(21, "P2", "task")
+	closedBlocker.BlockedBy = []Ref{{Number: 98, State: "CLOSED"}}
+	nested := ok(22, "P2", "task")
+	nested.SubIssuesTotal = 1
+	cases := []struct {
+		name     string
+		children []Issue
+		want     int
+		wantOK   bool
+	}{
+		{"empty", nil, 0, false},
+		{"all closed", []Issue{{Number: 1, State: "CLOSED", Labels: []string{"P2", "task"}}}, 0, false},
+		{"all blocked", []Issue{blocked}, 0, false},
+		{"head wins in order", []Issue{ok(30, "P3", "task"), ok(40, "P3", "task")}, 30, true},
+		{"blocked head falls through", []Issue{blocked, ok(30, "P3", "task")}, 30, true},
+		{"untriaged skipped", []Issue{ok(1, "P2"), ok(30, "P3", "task")}, 30, true},
+		{"only untriaged", []Issue{ok(1, "P2")}, 0, false},
+		{"closed blockers do not block", []Issue{closedBlocker}, 21, true},
+		{"claimed is still next", []Issue{ok(1, "P4", "bug", "in-progress")}, 1, true},
+		{"nested epic skipped", []Issue{nested, ok(30, "P3", "task")}, 30, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := EpicNext(tc.children)
+			if ok != tc.wantOK || got.Number != tc.want {
+				t.Errorf("EpicNext() = %d, %v; want %d, %v", got.Number, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+}
+
 func TestChildren(t *testing.T) {
 	epicNum := 10
 	c1 := Issue{Number: 12, State: "OPEN", Parent: &Ref{Number: epicNum}}

@@ -126,12 +126,13 @@ func (a *App) emitTriage(issues []model.Issue, emptyMsg string) error {
 	return a.emitList(issues, emptyMsg, render.Triage)
 }
 
-// emitIssue renders one issue in full.
-func (a *App) emitIssue(issue model.Issue) error {
+// emitIssue renders one issue in full. Children backs the epic detail view
+// (the next-workable-child line); pass nil for non-epics.
+func (a *App) emitIssue(issue model.Issue, children []model.Issue) error {
 	if a.JSON {
-		return render.JSONIssue(a.Out, issue)
+		return render.JSONIssue(a.Out, issue, children)
 	}
-	render.Show(a.Out, issue, a.style())
+	render.Show(a.Out, issue, children, a.style())
 	return nil
 }
 
@@ -150,7 +151,7 @@ func (a *App) emitEpicStatus(epic model.Issue, children []model.Issue) error {
 // the full issue as JSON, otherwise the given text line.
 func (a *App) emitMutation(issue model.Issue, format string, args ...any) error {
 	if a.JSON {
-		return render.JSONIssue(a.Out, issue)
+		return render.JSONIssue(a.Out, issue, nil)
 	}
 	a.printf(format, args...)
 	return nil

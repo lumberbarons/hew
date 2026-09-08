@@ -187,8 +187,10 @@ func EpicList(w io.Writer, issues []model.Issue, s Style) {
 	lines(w, issues, lineOpts{progress: true}, s)
 }
 
-// Show renders the full detail view for one issue.
-func Show(w io.Writer, i model.Issue, s Style) {
+// Show renders the full detail view for one issue. Children is the issue's
+// parent-backlinked child set (empty for non-epics), used to name the epic's
+// next workable child.
+func Show(w io.Writer, i model.Issue, children []model.Issue, s Style) {
 	fmt.Fprintln(w, Line(i, s))
 	state := strings.ToLower(i.State)
 	if i.StateReason != "" {
@@ -207,6 +209,7 @@ func Show(w io.Writer, i model.Issue, s Style) {
 	}
 	if i.IsEpic() {
 		fmt.Fprintf(w, "sub-issues (%d/%d done): %s\n", i.SubIssuesCompleted, i.SubIssuesTotal, refList(i.SubIssues, s))
+		nextLine(w, children, s)
 	}
 	if body := strings.TrimSpace(i.Body); body != "" {
 		fmt.Fprintln(w)
@@ -234,11 +237,24 @@ func refList(refs []model.Ref, s Style) string {
 	return strings.Join(parts, ", ")
 }
 
+// nextLine names the epic's next workable child: "next: #N" with the usual
+// claim/blocker annotations, or "next: none" when the sequence is dry. The
+// child list that follows carries each child's details, so the line stays a
+// reference rather than a repeat.
+func nextLine(w io.Writer, children []model.Issue, s Style) {
+	if next, ok := model.EpicNext(children); ok {
+		fmt.Fprintf(w, "next: %s%s\n", s.num(next.Number), s.dim(annotations(next)))
+		return
+	}
+	fmt.Fprintf(w, "next: %s\n", s.dim("none"))
+}
+
 // EpicStatus renders one epic and its children. Children are the epic's
 // full parent-backlinked set (complete even when the sub-issue connection
 // was capped); the rollup line keeps the server-side completed/total.
 func EpicStatus(w io.Writer, epic model.Issue, children []model.Issue, s Style) {
 	fmt.Fprintf(w, "%s  %s\n", Line(epic, s), s.dim(fmt.Sprintf("%d/%d", epic.SubIssuesCompleted, epic.SubIssuesTotal)))
+	nextLine(w, children, s)
 	for _, child := range children {
 		mark := "○"
 		if !child.IsOpen() {

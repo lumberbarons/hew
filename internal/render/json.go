@@ -30,6 +30,10 @@ type IssueJSON struct {
 	SubIssuesTotal     int       `json:"subIssuesTotal"`
 	SubIssuesCompleted int       `json:"subIssuesCompleted"`
 	CreatedAt          time.Time `json:"createdAt"`
+	// Next is set only for an epic's detail view (show --json): the next
+	// workable child's number. Absent, not null, for non-epics and when the
+	// sequence is dry — consumers key on the epic field for the difference.
+	Next *int `json:"next,omitempty"`
 	// Body is a pointer so presence tracks the mode (show, list --bodies)
 	// rather than emptiness: modes that carry it emit the field on every
 	// issue, empty or not, and plain list lines stay byte-for-byte body-free.
@@ -124,9 +128,17 @@ func JSONTriage(w io.Writer, issues []model.Issue) error {
 	return nil
 }
 
-// JSONIssue writes one issue with full detail.
-func JSONIssue(w io.Writer, i model.Issue) error {
-	return writeJSON(w, ToJSON(i, true))
+// JSONIssue writes one issue with full detail. Children is the issue's
+// parent-backlinked child set, used to name the next workable child when the
+// issue is an epic.
+func JSONIssue(w io.Writer, i model.Issue, children []model.Issue) error {
+	out := ToJSON(i, true)
+	if i.IsEpic() {
+		if next, ok := model.EpicNext(children); ok {
+			out.Next = &next.Number
+		}
+	}
+	return writeJSON(w, out)
 }
 
 // WarningJSON is one structured warning: a machine-readable kind plus the
@@ -199,9 +211,11 @@ func CursorHookJSON(w io.Writer, primer string) error {
 	return json.NewEncoder(w).Encode(map[string]string{"additional_context": primer})
 }
 
-// EpicStatusJSON pairs an epic with its resolved children.
+// EpicStatusJSON pairs an epic with its resolved children and the next
+// workable one (null when the sequence is dry).
 type EpicStatusJSON struct {
 	Epic     IssueJSON   `json:"epic"`
+	Next     *int        `json:"next"`
 	Children []IssueJSON `json:"children"`
 }
 
@@ -211,6 +225,9 @@ type EpicStatusJSON struct {
 // sub-issue connection was capped.
 func JSONEpicStatus(w io.Writer, epic model.Issue, children []model.Issue) error {
 	out := EpicStatusJSON{Epic: ToJSON(epic, false), Children: []IssueJSON{}}
+	if next, ok := model.EpicNext(children); ok {
+		out.Next = &next.Number
+	}
 	for _, child := range children {
 		out.Children = append(out.Children, ToJSON(child, false))
 	}

@@ -337,6 +337,24 @@ func UntriagedIssues(issues []Issue) []Issue {
 	return out
 }
 
+// EpicNext returns the epic's next workable child: the first child, in
+// Children's creation order, that is open, has no open blockers, and is
+// triaged. For epics whose children are sequenced by blocked-by, that order
+// is the sequence itself. A claimed child is still next — the claim is an
+// annotation to resolve (resume yours, skip someone else's), and `start`'s
+// exit codes say which. Untriaged children and nested epics are skipped
+// exactly as ready skips them: next feeds the same automatic paths, and an
+// epic is never worked directly.
+func EpicNext(children []Issue) (r Issue, ok bool) {
+	for _, c := range children {
+		if !c.IsOpen() || c.IsEpic() || c.Untriaged() || len(c.OpenBlockers()) > 0 {
+			continue
+		}
+		return c, true
+	}
+	return Issue{}, false
+}
+
 // Children returns the issues whose parent is the given epic, oldest first.
 // It is derived from parent backlinks over the full fetched set, so it stays
 // complete even when the epic's sub-issue connection was capped — unlike the

@@ -128,7 +128,10 @@ hew block <n> --on <m> [--closed]      # native dependency, cycle-checked
 hew unblock <n> --from <m> [--closed]
 hew epic create --title "..." [--children N,N]
                    [--goal "..." --done-when "..." | --body-file F | --edit]
-hew epic status [<n>]
+hew epic status [<n>]                    # rollup per open epic; with <n>, that epic's
+                                         # children plus "next:" — the next workable
+                                         # child (open, unblocked, in child order);
+                                         # also reachable as: hew epic list
 hew apply <plan.jsonl> [--dry-run] [--state F] [--throttle D]
                                  # batch-create a whole set of issues from a JSONL
                                  # plan — labels, bodies, parents, dependencies —
