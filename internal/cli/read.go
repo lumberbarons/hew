@@ -154,12 +154,24 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 }
 
 // Show prints one issue in full: body, deps, parent, children, comments.
+// An epic's detail view also names its next workable child, which needs each
+// child's blockers — a second two-state fetch, but only when the subject is
+// an epic.
 func (a *App) Show(ctx context.Context, number int) error {
 	issue, err := a.Client.GetIssue(ctx, number)
 	if err != nil {
 		return err
 	}
-	return a.emitIssue(issue)
+	var children []model.Issue
+	if issue.IsEpic() {
+		issues, err := a.Client.ListIssues(ctx, allStates)
+		if err != nil {
+			return err
+		}
+		children = model.Children(issues, number)
+		a.warnChildrenBlockersCapped(children, issues)
+	}
+	return a.emitIssue(issue, children)
 }
 
 // Search runs a repo-scoped text search over open and closed issues — the
@@ -289,7 +301,7 @@ func (a *App) Prime(ctx context.Context, opts PrimeOpts) error {
 }
 
 // EpicStatus with number <= 0 lists all open epics with progress rollups;
-// with a number it shows that epic's children.
+// with a number it shows that epic's children and the next workable one.
 func (a *App) EpicStatus(ctx context.Context, number int) error {
 	if number <= 0 {
 		issues, err := a.Client.ListIssues(ctx, openStates)
@@ -313,5 +325,22 @@ func (a *App) EpicStatus(ctx context.Context, number int) error {
 		return genericErr("#%d has no sub-issues; not an epic", number)
 	}
 	children := model.Children(issues, number)
+	a.warnChildrenBlockersCapped(children, issues)
 	return a.emitEpicStatus(epic, children)
+}
+
+// warnChildrenBlockersCapped surfaces the one case that can make `next`
+// wrong: a capped blocker list may hide an open blocker, so an unworkable
+// child could be named. The warning stays per-child so the agent can see
+// which child of the sequence is suspect.
+func (a *App) warnChildrenBlockersCapped(children []model.Issue, issues []model.Issue) {
+	members := make(map[int]bool, len(children))
+	for _, c := range children {
+		members[c.Number] = true
+	}
+	for _, w := range model.WarningsOfKind(model.Warnings(issues), model.WarnBlockersCapped) {
+		if members[w.Issue] {
+			a.warnf("#%d has %d blockers, only %d fetched; next may be wrong", w.Issue, w.Total, w.Fetched)
+		}
+	}
 }

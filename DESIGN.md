@@ -252,7 +252,18 @@ hew block <n> --on <m> [--closed]      # add dependency (cycle-checked)
 hew unblock <n> --from <m> [--closed]
 hew epic create --title "..." [--children N,N,N]
                    [section flags | --body-file F | --edit]
-hew epic status [<n>]          # progress rollup per epic
+hew epic status [<n>]          # progress rollup per epic; with <n>, its children
+                                  # plus the next workable child ("next: #k" — the
+                                  # first open, unblocked, triaged child in creation
+                                  # order, i.e. the sequence head for epics whose
+                                  # children chain by blocked-by). Also `hew epic
+                                  # list`. Children come from parent backlinks over
+                                  # both states, so the view survives a capped
+                                  # sub-issue connection; a capped blocker list on a
+                                  # child warns that next may be wrong, matching
+                                  # ready's honesty. show of an epic names the same
+                                  # next line (and --json field) — its one
+                                  # two-query read, for epics only.
 hew apply <plan.jsonl>         # batch-create from a JSONL plan: one entry per line
                                   # (title/type/priority/areas, the same section
                                   # fields as the create flags or a raw body, parent

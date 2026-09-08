@@ -119,7 +119,7 @@ func TestShow(t *testing.T) {
 		CommentsTotal: 12,
 	}
 	var buf bytes.Buffer
-	Show(&buf, i, Style{})
+	Show(&buf, i, nil, Style{})
 	checkGolden(t, "show", buf.Bytes())
 }
 
@@ -129,7 +129,7 @@ func TestShowClosedMinimal(t *testing.T) {
 		CreatedAt: ts(4), Labels: []string{"P3", "task"},
 	}
 	var buf bytes.Buffer
-	Show(&buf, i, Style{})
+	Show(&buf, i, nil, Style{})
 	checkGolden(t, "show_closed", buf.Bytes())
 }
 
@@ -140,9 +140,30 @@ func TestShowEpic(t *testing.T) {
 		SubIssuesTotal: 2, SubIssuesCompleted: 1,
 		SubIssues: []model.Ref{{Number: 120, State: "OPEN"}, {Number: 121, State: "CLOSED"}},
 	}
+	children := []model.Issue{
+		{Number: 120, Title: "Open child", State: "OPEN", CreatedAt: ts(4), Labels: []string{"P1", "bug"}},
+		{Number: 121, Title: "Done child", State: "CLOSED", CreatedAt: ts(3), Labels: []string{"P2", "task"}},
+	}
 	var buf bytes.Buffer
-	Show(&buf, i, Style{})
+	Show(&buf, i, children, Style{})
 	checkGolden(t, "show_epic", buf.Bytes())
+}
+
+func TestShowEpicNextNone(t *testing.T) {
+	i := model.Issue{
+		Number: 137, Title: "Epic: Voltgo", State: "OPEN", CreatedAt: ts(5),
+		Labels:         []string{"P2"},
+		SubIssuesTotal: 1, SubIssuesCompleted: 1,
+		SubIssues: []model.Ref{{Number: 121, State: "CLOSED"}},
+	}
+	children := []model.Issue{
+		{Number: 121, Title: "Done child", State: "CLOSED", CreatedAt: ts(3), Labels: []string{"P2", "task"}},
+	}
+	var buf bytes.Buffer
+	Show(&buf, i, children, Style{})
+	if out := buf.String(); !strings.Contains(out, "next: none") {
+		t.Errorf("dry sequence lacks next: none:\n%s", out)
+	}
 }
 
 func TestEpicStatus(t *testing.T) {
@@ -158,6 +179,25 @@ func TestEpicStatus(t *testing.T) {
 	var buf bytes.Buffer
 	EpicStatus(&buf, epic, children, Style{})
 	checkGolden(t, "epic_status", buf.Bytes())
+	if !strings.Contains(buf.String(), "next: #120") {
+		t.Errorf("EpicStatus missing next line:\n%s", buf.String())
+	}
+}
+
+func TestEpicStatusNextNone(t *testing.T) {
+	epic := model.Issue{
+		Number: 137, Title: "Epic: Voltgo", State: "OPEN", CreatedAt: ts(5),
+		Labels:         []string{"P2"},
+		SubIssuesTotal: 1, SubIssuesCompleted: 1,
+	}
+	children := []model.Issue{
+		{Number: 121, Title: "Done child", State: "CLOSED", Labels: []string{"P2", "task"}},
+	}
+	var buf bytes.Buffer
+	EpicStatus(&buf, epic, children, Style{})
+	if !strings.Contains(buf.String(), "next: none") {
+		t.Errorf("EpicStatus missing dry next:\n%s", buf.String())
+	}
 }
 
 func TestPrime(t *testing.T) {
@@ -265,7 +305,7 @@ func TestJSONIssue(t *testing.T) {
 		CommentsTotal: 3,
 	}
 	var buf bytes.Buffer
-	if err := JSONIssue(&buf, i); err != nil {
+	if err := JSONIssue(&buf, i, nil); err != nil {
 		t.Fatal(err)
 	}
 	checkGolden(t, "show_json", buf.Bytes())
@@ -330,6 +370,35 @@ func TestJSONEpicStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkGolden(t, "epic_status_json", buf.Bytes())
+	var got EpicStatusJSON
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Next == nil || *got.Next != 120 {
+		t.Errorf("next = %v, want 120", got.Next)
+	}
+}
+
+func TestJSONEpicStatusNextNull(t *testing.T) {
+	epic := model.Issue{
+		Number: 137, Title: "Epic: Voltgo", State: "OPEN", CreatedAt: ts(5),
+		Labels:         []string{"P2"},
+		SubIssuesTotal: 1, SubIssuesCompleted: 1,
+	}
+	children := []model.Issue{
+		{Number: 121, Title: "Done child", State: "CLOSED", CreatedAt: ts(3), Labels: []string{"P2", "task"}},
+	}
+	var buf bytes.Buffer
+	if err := JSONEpicStatus(&buf, epic, children); err != nil {
+		t.Fatal(err)
+	}
+	var got EpicStatusJSON
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Next != nil {
+		t.Errorf("next = %v, want null", *got.Next)
+	}
 }
 
 func TestLine(t *testing.T) {

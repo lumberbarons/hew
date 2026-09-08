@@ -567,6 +567,62 @@ func TestShowJSON(t *testing.T) {
 	}
 }
 
+func TestShowEpicNamesNext(t *testing.T) {
+	epicIssue := issue(10, "Epic: big", "P2")
+	epicIssue.SubIssues = []model.Ref{{Number: 11, State: "OPEN"}, {Number: 12, State: "CLOSED"}}
+	child := issue(11, "Child", "P2", "task")
+	child.Parent = &model.Ref{Number: 10, State: "OPEN"}
+	done := issue(12, "Done child", "P2", "task")
+	done.State = "CLOSED"
+	done.Parent = &model.Ref{Number: 10, State: "OPEN"}
+	f := newFake(epicIssue, child, done)
+	app, out, _ := newApp(f)
+	if err := app.Show(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, "next: #11") {
+		t.Errorf("epic show lacks next line:\n%s", got)
+	}
+}
+
+func TestShowEpicNamesNextJSON(t *testing.T) {
+	epicIssue := issue(10, "Epic: big", "P2")
+	epicIssue.SubIssues = []model.Ref{{Number: 11, State: "OPEN"}}
+	child := issue(11, "Child", "P2", "task")
+	child.Parent = &model.Ref{Number: 10, State: "OPEN"}
+	f := newFake(epicIssue, child)
+	app, out, _ := newApp(f)
+	app.JSON = true
+	if err := app.Show(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	next, ok := got["next"]
+	if !ok || next.(float64) != 11 {
+		t.Errorf("JSON next = %v (present=%v):\n%s", next, ok, out.String())
+	}
+}
+
+func TestShowEpicWarnsOnCappedBlockers(t *testing.T) {
+	epicIssue := issue(10, "Epic: big", "P2")
+	epicIssue.SubIssues = []model.Ref{{Number: 11, State: "OPEN"}}
+	child := issue(11, "Child", "P2", "task")
+	child.Parent = &model.Ref{Number: 10, State: "OPEN"}
+	child.BlockedBy = []model.Ref{{Number: 9, State: "CLOSED"}}
+	child.BlockedByTotal = 5
+	f := newFake(epicIssue, child)
+	app, _, errOut := newApp(f)
+	if err := app.Show(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if got := errOut.String(); !strings.Contains(got, "next may be wrong") {
+		t.Errorf("missing capped-blockers warning:\n%s", got)
+	}
+}
+
 func TestTriage(t *testing.T) {
 	f := newFake(
 		issue(3, "No labels at all"),
@@ -1121,10 +1177,70 @@ func TestEpicStatusOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{"1/2", "○ #11", "✓ #12"} {
+	for _, want := range []string{"1/2", "next: #11", "○ #11", "✓ #12"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("EpicStatus missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestEpicStatusNextSkipsBlockedHead(t *testing.T) {
+	// Children sequenced by blocked-by: the open head is blocked, so next
+	// falls through to the first workable child.
+	epicIssue := issue(10, "Epic: big", "P2")
+	epicIssue.SubIssues = []model.Ref{{Number: 11, State: "OPEN"}, {Number: 12, State: "OPEN"}}
+	head := issue(11, "Blocked head", "P2", "task")
+	head.Parent = &model.Ref{Number: 10, State: "OPEN"}
+	head.BlockedBy = []model.Ref{{Number: 99, State: "OPEN"}}
+	free := issue(12, "Free child", "P2", "task")
+	free.Parent = &model.Ref{Number: 10, State: "OPEN"}
+	f := newFake(epicIssue, head, free)
+	app, out, _ := newApp(f)
+	if err := app.EpicStatus(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, "next: #12") {
+		t.Errorf("EpicStatus next:\n%s", got)
+	}
+}
+
+func TestEpicStatusNextAnnotatesClaim(t *testing.T) {
+	// A claimed child is still next — the claim resolves via start's exit
+	// codes — and the annotation says whose it is.
+	epicIssue := issue(10, "Epic: big", "P2")
+	epicIssue.SubIssues = []model.Ref{{Number: 11, State: "OPEN"}}
+	claimed := issue(11, "Taken child", "P2", "task", "in-progress")
+	claimed.Parent = &model.Ref{Number: 10, State: "OPEN"}
+	claimed.Assignees = []string{"lumberbarons"}
+	f := newFake(epicIssue, claimed)
+	app, out, _ := newApp(f)
+	if err := app.EpicStatus(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{"next: #11", "in progress @lumberbarons"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("EpicStatus missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestEpicStatusNextWarnsOnCappedBlockers(t *testing.T) {
+	// A capped blocker list can hide an open blocker, which would make the
+	// named next wrong — surface it like ready does.
+	epicIssue := issue(10, "Epic: big", "P2")
+	epicIssue.SubIssues = []model.Ref{{Number: 11, State: "OPEN"}}
+	child := issue(11, "Child", "P2", "task")
+	child.Parent = &model.Ref{Number: 10, State: "OPEN"}
+	child.BlockedBy = []model.Ref{{Number: 9, State: "CLOSED"}}
+	child.BlockedByTotal = 5
+	f := newFake(epicIssue, child)
+	app, _, errOut := newApp(f)
+	if err := app.EpicStatus(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if got := errOut.String(); !strings.Contains(got, "next may be wrong") {
+		t.Errorf("missing capped-blockers warning:\n%s", got)
 	}
 }
 
@@ -1185,6 +1301,7 @@ func TestEpicStatusOneJSON(t *testing.T) {
 	}
 	var got struct {
 		Epic     map[string]any   `json:"epic"`
+		Next     *float64         `json:"next"`
 		Children []map[string]any `json:"children"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
@@ -1192,5 +1309,8 @@ func TestEpicStatusOneJSON(t *testing.T) {
 	}
 	if got.Epic["number"].(float64) != 10 || len(got.Children) != 1 {
 		t.Errorf("JSON = %s", out.String())
+	}
+	if got.Next == nil || *got.Next != 11 {
+		t.Errorf("JSON next = %v, want 11:\n%s", got.Next, out.String())
 	}
 }

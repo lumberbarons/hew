@@ -153,7 +153,7 @@ func TestShowColored(t *testing.T) {
 		CommentsTotal: 12,
 	}
 	var buf bytes.Buffer
-	Show(&buf, i, StyleFor(true))
+	Show(&buf, i, nil, StyleFor(true))
 	checkGolden(t, "show_color", buf.Bytes())
 }
 

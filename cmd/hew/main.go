@@ -41,7 +41,7 @@ func main() {
 // parsed value with an empty one (#25), so leaves must not repeat them.
 func globalFlags() []ucli.Flag {
 	return []ucli.Flag{
-		&ucli.BoolFlag{Name: "json", Usage: "structured output with a stable schema"},
+		&ucli.BoolFlag{Name: "json", Usage: "structured output with a stable schema; list-shaped output is NDJSON (one object per line)"},
 		&ucli.StringFlag{Name: "repo", Usage: "target `owner/name` (default: detect from git remote)"},
 	}
 }
@@ -503,8 +503,11 @@ func epicCmd() *ucli.Command {
 				},
 			},
 			{
-				Name:      "status",
-				Usage:     "progress rollup for all epics, or one epic's children",
+				Name:    "status",
+				Aliases: []string{"list"},
+				Usage:   "progress rollup for all epics, or one epic's children",
+				Description: `With a number: the epic's rollup, the next workable child (next:),
+then every child. Without one: one rollup line per open epic.`,
 				ArgsUsage: "[<n>]",
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
 					n := 0
