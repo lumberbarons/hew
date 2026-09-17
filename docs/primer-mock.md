@@ -8,6 +8,7 @@ enough work in flight to show the live sections and their caps at once.
 -->
 
 Workflow: hew ready → hew start <n> → branch (feat/|fix/|chore/) → push → hew pr.
+An issue is not done until its PR exists: when the work is complete, create the PR with hew pr before reporting done — a local commit is not a deliverable.
 Close via PR; hew close is for wontfix/duplicate only. Never work an epic directly.
 Dedup before filing: hew search <terms> (triaged, open+closed) first; hew triage --search <terms> for the
 untriaged rest — only when the user asked; show <n> only to read a specific candidate. Then

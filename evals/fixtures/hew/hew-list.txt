@@ -1,4 +1,4 @@
-#100 P2 enhancement  triage flags invisible and confusable content in issue text
+#128 P2 enhancement  show flags invisible and confusable content in issue details
 #57  P3 enhancement  pr composes bullet lists from repeatable section flags
 #61  P3 task         Tighten test gates: per-package coverage floor and shuffled test order
 #62  P3 enhancement  list --json costs more tokens than the raw GraphQL it replaces
@@ -6,13 +6,12 @@
 #73  P3 enhancement  pr can edit an existing PR body, not only compose it at creation
 #74  P3 enhancement  Test backend: run hew against ephemeral local state instead of GitHub
 #75  P3 enhancement  Code-span check treats a bare filename differently from a path
-#82  P3 task         Document the agent trust boundary for tracker content
 #88  P3 enhancement  list and ready filter by priority, including ranges
 #90  P3 enhancement  list --label reports a label that matches nothing instead of an empty result
 #92  P3 task         Correct the documented CI coverage command
 #93  P3 task         Point exit-code documentation at its implementation
-#94  P3 task         Document Codex hook configuration in the CLI guide
 #105 P3 enhancement  Installed prime hook fails open with an install nudge when hew is missing
 #35  P4 task         Agentic accuracy eval: issues vs raw gh on a seeded fixture repo
 #77  P4 enhancement  start's closed refusal doesn't name the close state
-#63  P3 enhancement  prime exceeds its ~600-token budget on real repos  [in progress @lumberbarons]
+#129 P2 enhancement  epic status and show name the next actionable child  [in progress @lumberbarons]
+#132 P2 enhancement  prime states that work is not done until a PR exists  [in progress @lumberbarons]

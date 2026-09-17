@@ -241,6 +241,19 @@ func TestPrimerStaticForbidsAutonomousTriage(t *testing.T) {
 	}
 }
 
+// An agent that stops at a green local test run leaves finished work
+// invisible to the tracker: the issue stays open, no PR carries the fix, and
+// the next session redoes it. The primer has to define done as the PR
+// existing, not as the code compiling.
+func TestPrimerStaticDefinesDoneAsPR(t *testing.T) {
+	line := primerLineContaining(t, "not done until its PR exists")
+	for _, want := range []string{"when the work is complete", "create the PR with hew pr", "not a deliverable"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("definition of done missing %q:\n%s", want, line)
+		}
+	}
+}
+
 // primerLineContaining returns the single primer line mentioning substr,
 // failing when zero or several match — scoping the assertion to one line is
 // what stops the command cheatsheet satisfying it by coincidence.
