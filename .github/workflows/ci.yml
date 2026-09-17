@@ -70,17 +70,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          # The action passes go-version and go-version-file straight through
-          # to setup-go, where a non-empty go-version wins. Blanking its
-          # 'stable' default is what makes go-version-file take effect, so
-          # stdlib advisories are reported against the version CI builds with
-          # rather than whatever is newest.
-          go-version-input: ''
           go-version-file: go.mod
-          # Our own checkout above is the pinned one; the action's is not.
-          repo-checkout: false
+      # govulncheck is installed at an explicit version rather than @latest.
+      # The scan's point is to report advisories against the toolchain go.mod
+      # pins, and @latest can resolve to a tool release that refuses to build
+      # under it (x/vuln v1.8.0 requires go 1.26) — which fails the job at
+      # install time, before any scanning happens. The vulnerability database
+      # still updates at run time, so the pin costs analysis features, not
+      # advisories. Raise it when the go directive moves.
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+      - run: govulncheck ./...
 
   # A broken .goreleaser.yaml, or a target that quietly stops cross-compiling,
   # would otherwise surface only when a tag is pushed — too late, since the tag
