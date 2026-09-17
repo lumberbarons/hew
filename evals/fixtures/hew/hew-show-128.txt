@@ -1,0 +1,25 @@
+#128 P2 enhancement  show flags invisible and confusable content in issue details
+state: open  created: 2026-09-07
+blocked by: #100 (closed)
+
+### Where
+
+`hew show`; `internal/render`; `internal/cli`
+
+### Problem
+
+`hew show` is the deliberate inspection path for a specific issue, including untriaged reports. Invisible Unicode and confusable characters can conceal content in its title, body, or displayed comments. Triage annotations do not cover comments or accompany a direct detail read.
+
+### Approach
+
+Reuse the pure Unicode scanner introduced by #100 to annotate suspicious content in `hew show`, preserving its emoji exceptions. Identify each finding as belonging to the title, body, or a specific displayed comment. Provide equivalent source information in `--json`. Keep findings advisory and preserve existing text sanitization and issue visibility. Limit this follow-up to the detail view.
+
+### Done when
+
+- [ ] `hew show` reports zero-width characters, bidi controls, Unicode tags, and confusables in the title, body, and displayed comment bodies.
+- [ ] Each finding identifies the affected field or displayed comment in both text and JSON output.
+- [ ] Clean text and recognized emoji produce no findings; suspicious content remains inspectable under the existing rendering rules.
+- [ ] Tests cover title, body, and comment findings, clean content, both output formats, and the existing capped-comment behavior.
+- [ ] Documentation explains the detail-view annotations; automatic commands retain their current behavior.
+
+Discovered while working on #100

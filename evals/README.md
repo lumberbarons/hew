@@ -18,7 +18,7 @@ go run ./cmd/tokens capture \
   --repo lumberbarons/solar-controller --show 119 \
   --hew /tmp/hew --out fixtures/solar-controller
 go run ./cmd/tokens capture \
-  --repo lumberbarons/hew --show 82 \
+  --repo lumberbarons/hew --show 128 \
   --hew /tmp/hew --out fixtures/hew
 
 # report: tokenizes the committed fixture — offline, deterministic
@@ -30,7 +30,7 @@ go run ./cmd/tokens report --format json fixtures/solar-controller
 `--epic` is optional: omit it for a repo with no open epic — both fixtures
 omit it. The `--show` targets are ordinary open issues; pick a fresh one when
 they close and re-capture. Published figures live in
-[DESIGN.md](../DESIGN.md#token-efficiency-measured-2026-09-06).
+[DESIGN.md](../DESIGN.md#token-efficiency-measured-2026-09-17).
 
 ### What a fixture is
 

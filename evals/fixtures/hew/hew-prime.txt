@@ -1,5 +1,6 @@
 # hew primer — lumberbarons/hew
 Workflow: hew ready → hew start <n> → branch (feat/|fix/|chore/) → push → hew pr.
+An issue is not done until its PR exists: when the work is complete, create the PR with hew pr before reporting done — a local commit is not a deliverable.
 Close via PR; hew close is for wontfix/duplicate only. Never work an epic directly.
 Dedup before filing: hew search <terms> (triaged, open+closed) first; hew triage --search <terms> for the
 untriaged rest — only when the user asked; show <n> only to read a specific candidate. Then
@@ -32,13 +33,14 @@ block <n> --on <m> | unblock <n> --from <m> |
 epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n>] |
 apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew apply --help). All take --json.
 
-## Ready (17 of 18 open)
-#100 P2 enhancement  triage flags invisible and confusable content in issue text
+## Ready (15 of 17 open)
+#128 P2 enhancement  show flags invisible and confusable content in issue details
 #57  P3 enhancement  pr composes bullet lists from repeatable section flags
 #61  P3 task         Tighten test gates: per-package coverage floor and shuffled test order
 #62  P3 enhancement  list --json costs more tokens than the raw GraphQL it replaces
 #70  P3 enhancement  pr warns when a bug's derived title names the defect rather than the fix
-… 12 more: hew ready
+… 10 more: hew ready
 
-## In progress (1)
-#63 P3 enhancement  prime exceeds its ~600-token budget on real repos  @lumberbarons
+## In progress (2)
+#129 P2 enhancement  epic status and show name the next actionable child  @lumberbarons
+#132 P2 enhancement  prime states that work is not done until a PR exists  @lumberbarons
