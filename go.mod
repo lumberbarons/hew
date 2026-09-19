@@ -1,12 +1,12 @@
 module github.com/lumberbarons/hew
 
-go 1.25.13
+go 1.26.0
 
 require (
 	github.com/cli/go-gh/v2 v2.16.0
 	github.com/rivo/uniseg v0.4.7
 	github.com/urfave/cli/v3 v3.11.0
-	golang.org/x/term v0.45.0
+	golang.org/x/term v0.46.0
 )
 
 require (
@@ -19,7 +19,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/thlib/go-timezone-local v0.0.8 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
