@@ -27,8 +27,8 @@ case "$arch" in
     ;;
 esac
 
-tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" |
-  grep -m1 '"tag_name"' | cut -d'"' -f4)
+release_json=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest")
+tag=$(printf '%s' "$release_json" | grep -m1 '"tag_name"' | cut -d'"' -f4)
 if [ -z "$tag" ]; then
   echo "cannot resolve the latest release of $REPO" >&2
   exit 1
