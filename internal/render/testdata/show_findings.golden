@@ -1,0 +1,12 @@
+#12 P?  Report pаypal
+state: open  created: 2026-07-02
+text findings:
+  title: contains confusable characters
+  body: contains zero-width characters
+  comment 2 (@mallory): contains bidi controls; contains Unicode tags
+
+Steps​ to reproduce
+
+comments (showing last 2 of 5):
+  @alice (2026-07-03): same here 👩‍💻
+  @mallory (2026-07-04): a‮b󠁩

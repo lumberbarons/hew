@@ -190,6 +190,25 @@ them, and issues are never hidden or rejected. Under `--json`, flagged issues
 carry a `textFindings` object with `zeroWidth`, `bidiControl`, `unicodeTags`,
 and `confusable` booleans; clean issues omit it.
 
+`hew show <n>` runs the same scan over the title, the body, and each displayed
+comment separately, and says which one to look at. Text output adds a block
+ahead of the body:
+
+```text
+text findings:
+  title: contains confusable characters
+  comment 2 (@mallory): contains bidi controls
+```
+
+Comments are numbered in the order shown, so when the thread is capped the
+number counts the comments displayed, not the whole thread. Under `--json`, a
+`textFindings` array carries one entry per flagged field: `source` is
+`title`, `body`, or `comment`, a comment entry adds `commentIndex` (its
+position in the `comments` array), and each carries the same four booleans.
+Clean issues omit both the block and the array. The text itself is rendered
+exactly as before. Other reads and write commands' `--json` output don't
+scan.
+
 ### Denying untriaged content in a harness
 
 `hew triage` is the only command that emits untriaged titles and bodies (`hew

@@ -158,6 +158,15 @@ func Triage(w io.Writer, issues []model.Issue, s Style) {
 }
 
 func textAnnotations(f model.TextFindings) string {
+	parts := textFindingParts(f)
+	if len(parts) == 0 {
+		return ""
+	}
+	return "  [" + strings.Join(parts, "; ") + "]"
+}
+
+// textFindingParts phrases findings the same way in triage and show.
+func textFindingParts(f model.TextFindings) []string {
 	var parts []string
 	if f.ZeroWidth {
 		parts = append(parts, "contains zero-width characters")
@@ -171,10 +180,26 @@ func textAnnotations(f model.TextFindings) string {
 	if f.Confusable {
 		parts = append(parts, "contains confusable characters")
 	}
-	if len(parts) == 0 {
-		return ""
+	return parts
+}
+
+// textFindingLines lists show's findings per field, ahead of the text they
+// describe so the warning is read first. Comments are numbered in display
+// order — the comments shown below, not the server-side thread — with the
+// author for orientation. Nothing is written for a clean issue.
+func textFindingLines(w io.Writer, i model.Issue, s Style) {
+	findings := model.ScanIssue(i)
+	if len(findings) == 0 {
+		return
 	}
-	return "  [" + strings.Join(parts, "; ") + "]"
+	fmt.Fprintln(w, s.dim("text findings:"))
+	for _, f := range findings {
+		source := f.Source
+		if f.Source == model.SourceComment {
+			source = fmt.Sprintf("comment %d (@%s)", f.Comment+1, SanitizeInline(i.Comments[f.Comment].Author))
+		}
+		fmt.Fprintln(w, s.dim("  "+source+": "+strings.Join(textFindingParts(f.TextFindings), "; ")))
+	}
 }
 
 // ListWithAssignees renders lines with @assignee suffixes (in-progress view).
@@ -211,6 +236,7 @@ func Show(w io.Writer, i model.Issue, children []model.Issue, s Style) {
 		fmt.Fprintf(w, "sub-issues (%d/%d done): %s\n", i.SubIssuesCompleted, i.SubIssuesTotal, refList(i.SubIssues, s))
 		nextLine(w, children, s)
 	}
+	textFindingLines(w, i, s)
 	if body := strings.TrimSpace(i.Body); body != "" {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, sanitizeBlock(body))

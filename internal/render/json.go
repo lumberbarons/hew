@@ -132,11 +132,44 @@ func JSONTriage(w io.Writer, issues []model.Issue) error {
 // parent-backlinked child set, used to name the next workable child when the
 // issue is an epic.
 func JSONIssue(w io.Writer, i model.Issue, children []model.Issue) error {
+	return writeJSON(w, detailJSON(i, children))
+}
+
+// detailJSON is the full-detail schema shared by JSONIssue and JSONShow.
+func detailJSON(i model.Issue, children []model.Issue) IssueJSON {
 	out := ToJSON(i, true)
 	if i.IsEpic() {
 		if next, ok := model.EpicNext(children); ok {
 			out.Next = &next.Number
 		}
+	}
+	return out
+}
+
+// TextFindingJSON is one field's advisory Unicode findings in show --json.
+// Source is "title", "body" or "comment"; CommentIndex is set only for a
+// comment and indexes the emitted comments array.
+type TextFindingJSON struct {
+	Source       string `json:"source"`
+	CommentIndex *int   `json:"commentIndex,omitempty"`
+	model.TextFindings
+}
+
+// JSONShow is JSONIssue plus attributed findings, for the show read only —
+// write commands reuse JSONIssue and stay unannotated. Clean issues omit
+// textFindings, so their detail output is unchanged.
+func JSONShow(w io.Writer, i model.Issue, children []model.Issue) error {
+	out := struct {
+		IssueJSON
+		TextFindings []TextFindingJSON `json:"textFindings,omitempty"`
+	}{IssueJSON: detailJSON(i, children)}
+	for _, f := range model.ScanIssue(i) {
+		tf := TextFindingJSON{Source: f.Source, TextFindings: f.TextFindings}
+		if f.Source == model.SourceComment {
+			idx := f.Comment
+			tf.CommentIndex = &idx
+		}
+		out.TextFindings = append(out.TextFindings, tf)
 	}
 	return writeJSON(w, out)
 }

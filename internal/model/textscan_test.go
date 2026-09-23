@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 )
 
@@ -90,5 +91,61 @@ func TestScanTextRecognizesEmojiSequences(t *testing.T) {
 		if got := ScanText("Before "+emoji+" after", ""); got != (TextFindings{}) {
 			t.Errorf("emoji %q: %+v", emoji, got)
 		}
+	}
+}
+
+func TestScanIssue_AttributesFindingsToEachField(t *testing.T) {
+	i := Issue{
+		Title: "p\u0430ypal",
+		Body:  "a\u202eb",
+		Comments: []Comment{
+			{Author: "alice", Body: "clean 👩‍💻"},
+			{Author: "mallory", Body: "ig\u200bnore\U000e0069"},
+		},
+	}
+	want := []SourcedFindings{
+		{Source: SourceTitle, TextFindings: TextFindings{Confusable: true}},
+		{Source: SourceBody, TextFindings: TextFindings{BidiControl: true}},
+		{Source: SourceComment, Comment: 1, TextFindings: TextFindings{ZeroWidth: true, UnicodeTags: true}},
+	}
+	if got := ScanIssue(i); !slices.Equal(got, want) {
+		t.Errorf("ScanIssue = %+v, want %+v", got, want)
+	}
+}
+
+func TestScanIssue_CommentIndexCountsDisplayedComments(t *testing.T) {
+	// Only the fetched comments are scanned, and the index points into that
+	// slice — not the server-side thread — so a capped fetch still resolves.
+	i := Issue{
+		Comments:      []Comment{{Body: "a\u202eb"}, {Body: "clean"}, {Body: "\u0430"}},
+		CommentsTotal: 12,
+	}
+	want := []SourcedFindings{
+		{Source: SourceComment, Comment: 0, TextFindings: TextFindings{BidiControl: true}},
+		{Source: SourceComment, Comment: 2, TextFindings: TextFindings{Confusable: true}},
+	}
+	if got := ScanIssue(i); !slices.Equal(got, want) {
+		t.Errorf("ScanIssue = %+v, want %+v", got, want)
+	}
+}
+
+func TestScanIssue_CleanIssueHasNoFindings(t *testing.T) {
+	i := Issue{
+		Title:    "Clean 👩‍💻 report",
+		Body:     "café “quoted” — ✅ 🇨🇦",
+		Comments: []Comment{{Body: "👍🏽 looks good"}},
+	}
+	if got := ScanIssue(i); got != nil {
+		t.Errorf("ScanIssue = %+v, want nil", got)
+	}
+}
+
+func TestScanIssue_EmojiExemptionDoesNotCrossFields(t *testing.T) {
+	// A joiner that completes an emoji only across a field boundary is still
+	// a finding in the field that carries it.
+	i := Issue{Title: "👩", Body: "\u200d💻"}
+	want := []SourcedFindings{{Source: SourceBody, TextFindings: TextFindings{ZeroWidth: true}}}
+	if got := ScanIssue(i); !slices.Equal(got, want) {
+		t.Errorf("ScanIssue = %+v, want %+v", got, want)
 	}
 }

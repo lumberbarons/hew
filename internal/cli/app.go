@@ -127,10 +127,11 @@ func (a *App) emitTriage(issues []model.Issue, emptyMsg string) error {
 }
 
 // emitIssue renders one issue in full. Children backs the epic detail view
-// (the next-workable-child line); pass nil for non-epics.
+// (the next-workable-child line); pass nil for non-epics. Only this read
+// carries text findings; emitMutation's JSON does not.
 func (a *App) emitIssue(issue model.Issue, children []model.Issue) error {
 	if a.JSON {
-		return render.JSONIssue(a.Out, issue, children)
+		return render.JSONShow(a.Out, issue, children)
 	}
 	render.Show(a.Out, issue, children, a.style())
 	return nil
