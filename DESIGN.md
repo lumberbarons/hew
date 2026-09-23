@@ -167,8 +167,18 @@ primer so agents know what they're looking at:
   annotations, never a filter or an automatic rejection. Text output appends
   the categories once per issue; NDJSON adds `textFindings` only when nonempty,
   with `zeroWidth`, `bidiControl`, `unicodeTags`, and `confusable` booleans.
-  Scanning lives pure in `internal/model` and is called only by the triage
-  renderers, so automatic paths and their token fixtures are unaffected.
+  `show` is the other deliberate read of untriaged text, so it scans too, but
+  per field: title, body, and each displayed comment separately, since a
+  finding in a long thread is useless without saying where. Text output adds a
+  `text findings:` block ahead of the body, one line per flagged field, with
+  comments numbered in display order. `show --json` adds a `textFindings`
+  array only when nonempty; each entry names its `source` (`title`, `body`,
+  `comment`), a `commentIndex` into the emitted `comments` array for
+  comments, and the same four booleans. The comment cap is unchanged, and so
+  is the rendering of the text itself: findings annotate, never rewrite.
+  Scanning lives pure in `internal/model` and is called only by the triage and
+  show renderers. Automatic paths, their token fixtures, and write commands'
+  `--json` (which shares show's detail schema) are unaffected.
 
   The confusables subset and exact emoji exceptions are generated from pinned
   Unicode 17.0.0 data; `internal/model/generate_textscan.py` records the sources

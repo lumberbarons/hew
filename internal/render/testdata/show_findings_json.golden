@@ -1,0 +1,58 @@
+{
+  "number": 12,
+  "title": "Report pаypal",
+  "state": "open",
+  "priority": null,
+  "type": null,
+  "areas": [],
+  "assignees": [],
+  "epic": false,
+  "inProgress": false,
+  "untriaged": true,
+  "parent": null,
+  "blockedBy": [],
+  "blockedByTotal": 0,
+  "openBlockers": [],
+  "subIssues": [],
+  "subIssuesTotal": 0,
+  "subIssuesCompleted": 0,
+  "createdAt": "2026-07-02T12:00:00Z",
+  "body": "Steps​ to reproduce",
+  "comments": [
+    {
+      "author": "alice",
+      "createdAt": "2026-07-03T12:00:00Z",
+      "body": "same here 👩‍💻"
+    },
+    {
+      "author": "mallory",
+      "createdAt": "2026-07-04T12:00:00Z",
+      "body": "a‮b󠁩"
+    }
+  ],
+  "commentsTotal": 5,
+  "textFindings": [
+    {
+      "source": "title",
+      "zeroWidth": false,
+      "bidiControl": false,
+      "unicodeTags": false,
+      "confusable": true
+    },
+    {
+      "source": "body",
+      "zeroWidth": true,
+      "bidiControl": false,
+      "unicodeTags": false,
+      "confusable": false
+    },
+    {
+      "source": "comment",
+      "commentIndex": 1,
+      "zeroWidth": false,
+      "bidiControl": true,
+      "unicodeTags": true,
+      "confusable": false
+    }
+  ]
+}

@@ -66,6 +66,91 @@ func TestTriageUnicodeFindings(t *testing.T) {
 	}
 }
 
+func TestShowUnicodeFindings(t *testing.T) {
+	for _, asJSON := range []bool{false, true} {
+		t.Run(fmt.Sprintf("json=%v", asJSON), func(t *testing.T) {
+			// Untriaged on purpose: show is the deliberate read path for them.
+			i := issue(1, "Report p\u0430ypal")
+			i.Body = "Steps\u200b to reproduce"
+			i.Comments = []model.Comment{
+				{Author: "alice", Body: "same here 👩‍💻"},
+				{Author: "mallory", Body: "a\u202eb"},
+			}
+			i.CommentsTotal = 4
+			app, out, stderr := newApp(newFake(i))
+			app.JSON = asJSON
+			if err := app.Show(ctx, 1); err != nil {
+				t.Fatal(err)
+			}
+			if stderr.Len() != 0 {
+				t.Errorf("findings should annotate the issue, got stderr: %s", stderr.String())
+			}
+			if !asJSON {
+				for _, want := range []string{
+					"  title: contains confusable characters\n",
+					"  body: contains zero-width characters\n",
+					"  comment 2 (@mallory): contains bidi controls\n",
+					"comments (showing last 2 of 4):",
+					i.Body,
+				} {
+					if !strings.Contains(out.String(), want) {
+						t.Errorf("show missing %q:\n%s", want, out.String())
+					}
+				}
+				return
+			}
+			var got struct {
+				Body         string `json:"body"`
+				TextFindings []struct {
+					Source       string `json:"source"`
+					CommentIndex *int   `json:"commentIndex"`
+					model.TextFindings
+				} `json:"textFindings"`
+			}
+			if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Body != i.Body || len(got.TextFindings) != 3 {
+				t.Fatalf("JSON = %s", out.String())
+			}
+			title, body, comment := got.TextFindings[0], got.TextFindings[1], got.TextFindings[2]
+			if title.Source != "title" || title.TextFindings != (model.TextFindings{Confusable: true}) || title.CommentIndex != nil ||
+				body.Source != "body" || body.TextFindings != (model.TextFindings{ZeroWidth: true}) || body.CommentIndex != nil ||
+				comment.Source != "comment" || comment.TextFindings != (model.TextFindings{BidiControl: true}) ||
+				comment.CommentIndex == nil || *comment.CommentIndex != 1 {
+				t.Errorf("textFindings = %s", out.String())
+			}
+		})
+	}
+}
+
+func TestShowCleanIssueHasNoFindings(t *testing.T) {
+	for _, asJSON := range []bool{false, true} {
+		i := issue(1, "Clean 👩‍💻 report", "P2", "bug")
+		i.Body = "café ✅"
+		i.Comments = []model.Comment{{Author: "alice", Body: "👍🏽"}}
+		app, out, _ := newApp(newFake(i))
+		app.JSON = asJSON
+		if err := app.Show(ctx, 1); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String(), "contains ") || strings.Contains(out.String(), "textFindings") {
+			t.Errorf("JSON=%v clean issue was flagged: %s", asJSON, out.String())
+		}
+	}
+}
+
+func TestMutationsDoNotAnnotateUnicode(t *testing.T) {
+	app, out, _ := newApp(newFake(issue(1, "Report p\u0430ypal\u200b", "P2", "bug")))
+	app.JSON = true
+	if err := app.Start(ctx, 1, "", false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "textFindings") {
+		t.Errorf("start --json scans outside show and triage: %s", out.String())
+	}
+}
+
 func TestOtherReadsDoNotAnnotateUnicode(t *testing.T) {
 	for _, asJSON := range []bool{false, true} {
 		app, out, stderr := newApp(newFake(issue(1, "Report p\u0430ypal\u200b", "P2", "bug")))
@@ -78,7 +163,6 @@ func TestOtherReadsDoNotAnnotateUnicode(t *testing.T) {
 			{"prime", func() error { return app.Prime(ctx, PrimeOpts{}) }},
 			{"list", func() error { return app.List(ctx, ListOpts{}) }},
 			{"search", func() error { return app.Search(ctx, "report") }},
-			{"show", func() error { return app.Show(ctx, 1) }},
 		} {
 			out.Reset()
 			stderr.Reset()
