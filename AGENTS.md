@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents working with code in this repository.
 
 ## What this is
 
@@ -36,7 +36,7 @@ The layering exists so everything with behavior is testable without hitting GitH
 | Directory | What | When to read |
 |---|---|---|
 | `cmd/hew/` | main + urfave/cli v3 flag wiring only — no behavior, excluded from coverage | Adding a command or flag |
-| `internal/cli/` | The commands, written against the `gh.Client` interface — see [internal/cli/CLAUDE.md](internal/cli/CLAUDE.md) | Changing command behavior or guarded flows |
+| `internal/cli/` | The commands, written against the `gh.Client` interface — see [internal/cli/AGENTS.md](internal/cli/AGENTS.md) | Changing command behavior or guarded flows |
 | `internal/gh/` | Thin API layer: the `Client` interface and its go-gh-backed implementation; auth reuses the `gh` CLI's stored credentials (no auth flow of our own), repo detection comes from the git remote | Changing queries, auth, or API calls |
 | `internal/model/` | Pure domain logic: readiness, label normalization, cycle detection — no I/O, plain unit tests | Changing readiness or label semantics |
 | `internal/render/` | Text and JSON renderers, golden-file tested (`testdata/*.golden`) | Changing output format |
