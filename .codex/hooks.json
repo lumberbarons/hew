@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "hew prime",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}
