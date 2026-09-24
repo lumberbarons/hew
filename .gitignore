@@ -4,3 +4,7 @@ coverage.out
 .claude/worktrees
 # `go build ./...` in evals/ drops the harness binary here.
 /evals/tokens
+.opencode/worktrees/
+.opencode/plugins/worktree.ts
+.codex/worktrees
+.opencode/worktree/
