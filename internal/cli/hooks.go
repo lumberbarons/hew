@@ -229,9 +229,11 @@ func hookEntryDetails(agent HookAgent) (event, command string) {
 
 // hooksInstallOpencode writes the auto-discovered opencode plugin
 // .opencode/plugins/hew-prime.js. Unlike the JSON settings files, the whole
-// file is hew's: installing is idempotent by the hew marker, and a file
-// without it — a user's own plugin of the same name — is refused, never
-// clobbered.
+// file is hew's: installing is idempotent by the hew marker, a file without
+// it — a user's own plugin of the same name — is refused, never clobbered,
+// and a hew-managed file from an older release is refreshed in place so a
+// plugin fix ships on the next `hooks install` rather than needing a manual
+// remove/install round trip.
 func (a *App) hooksInstallOpencode(projectRoot string) error {
 	file, err := openHookSettings(projectRoot, HookAgentOpencode)
 	if err != nil {
@@ -246,8 +248,16 @@ func (a *App) hooksInstallOpencode(projectRoot string) error {
 		if !bytes.Contains(existing, []byte(opencodeMarker)) {
 			return fmt.Errorf("%s already exists and is not managed by hew, refusing to modify it", file.path)
 		}
-		return a.emitResult(map[string]any{"agent": HookAgentOpencode, "installed": false, "path": file.path}, func() {
-			a.printf("opencode plugin already installed in %s\n", file.path)
+		if bytes.Equal(existing, opencodePlugin) {
+			return a.emitResult(map[string]any{"agent": HookAgentOpencode, "installed": false, "path": file.path}, func() {
+				a.printf("opencode plugin already installed in %s\n", file.path)
+			})
+		}
+		if err := file.writeRaw(opencodePlugin); err != nil {
+			return err
+		}
+		return a.emitResult(map[string]any{"agent": HookAgentOpencode, "installed": true, "path": file.path}, func() {
+			a.printf("updated opencode plugin in %s\n", file.path)
 		})
 	}
 	if err := file.writeRaw(opencodePlugin); err != nil {
