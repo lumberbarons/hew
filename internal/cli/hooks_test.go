@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -436,6 +437,34 @@ func TestHooksInstallOpencodeIdempotent(t *testing.T) {
 	}
 }
 
+// A hew-managed plugin left by an older release is refreshed in place: the
+// marker means the whole file is hew's, so an upgrade must not require a
+// manual remove/install round trip to pick up a plugin fix.
+func TestHooksInstallOpencodeRefreshesManagedPlugin(t *testing.T) {
+	app, out, root := hooksApp(t)
+	if err := app.HooksInstall(root, HookAgentOpencode); err != nil {
+		t.Fatal(err)
+	}
+	stale := []byte("// " + opencodeMarker + "\n// an older release\n" +
+		"export const HewPrimePlugin = async () => ({})\n")
+	if err := os.WriteFile(opencodePluginPath(root), stale, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.HooksInstall(root, HookAgentOpencode); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(opencodePluginPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, opencodePlugin) {
+		t.Errorf("managed plugin not refreshed: %s", got)
+	}
+	if !strings.Contains(out.String(), "updated opencode plugin") {
+		t.Errorf("output = %q", out.String())
+	}
+}
+
 func TestHooksInstallOpencodePreservesNeighbors(t *testing.T) {
 	app, _, root := hooksApp(t)
 	plugins := filepath.Join(root, ".opencode", "plugins")
@@ -584,9 +613,10 @@ func TestOpencodePluginDoesNotPrompt(t *testing.T) {
 }
 
 // TestOpencodePluginRuns executes the asset under node the way opencode does,
-// against a stub shell runner, so the claim the grep above can only gesture at
-// — the primer reaches the model as system context, once per session, before
-// the first turn — is actually exercised. A syntax error fails here too.
+// under both the V1 and V2 plugin APIs, against a fake `hew` on PATH, so the
+// claim the grep above can only gesture at — the primer reaches the model as
+// system context, once per session, before the first turn — is actually
+// exercised for each entrypoint. A syntax error fails here too.
 //
 // The asset ships as .js and is copied to .mjs to run: with no package.json
 // beside it node parses a .js file as CommonJS, and a CommonJS parse accepts
@@ -595,6 +625,9 @@ func TestOpencodePluginRuns(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not installed")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake hew executable is a POSIX shell script")
 	}
 	dir := t.TempDir()
 	plugin := filepath.Join(dir, "hew-prime.mjs")
@@ -613,47 +646,66 @@ func TestOpencodePluginRuns(t *testing.T) {
 		t.Fatalf("plugin failed to run: %v\n%s", err, stderr.String())
 	}
 	var got struct {
-		Created     []string `json:"created"`
-		Cached      []string `json:"cached"`
-		Lazy        []string `json:"lazy"`
-		Anonymous   []string `json:"anonymous"`
-		AfterDelete []string `json:"afterDelete"`
-		Calls       []struct {
-			Command string `json:"command"`
-			Cwd     string `json:"cwd"`
-		} `json:"calls"`
+		Worktree string            `json:"worktree"`
+		V1       opencodePluginRun `json:"v1"`
+		V2       opencodePluginRun `json:"v2"`
 	}
 	if err := json.Unmarshal(stdout, &got); err != nil {
 		t.Fatalf("harness output not JSON: %v\n%s", err, stdout)
 	}
-	// The primer itself, trimmed, is what lands in system context.
+	if got.Worktree == "" {
+		t.Fatalf("harness did not report a worktree: %s", stdout)
+	}
 	for _, tc := range []struct {
 		name string
-		got  []string
+		run  opencodePluginRun
 	}{
-		{"announced session", got.Created},
-		{"same session again", got.Cached},
-		{"session never announced", got.Lazy},
-		{"session announced again after deletion", got.AfterDelete},
+		{"OpenCode 1", got.V1},
+		{"OpenCode 2", got.V2},
 	} {
-		if len(tc.got) != 1 || tc.got[0] != "PRIMER-SENTINEL" {
-			t.Errorf("%s: system context = %q, want [PRIMER-SENTINEL]", tc.name, tc.got)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			// The primer itself, trimmed, is what lands in system context.
+			for _, c := range []struct {
+				name string
+				got  []string
+			}{
+				{"announced session", tc.run.Created},
+				{"same session again", tc.run.Cached},
+				{"session never announced", tc.run.Lazy},
+				{"session announced again after deletion", tc.run.AfterDelete},
+			} {
+				if len(c.got) != 1 || c.got[0] != "PRIMER-SENTINEL" {
+					t.Errorf("%s: system context = %q, want [PRIMER-SENTINEL]", c.name, c.got)
+				}
+			}
+			if len(tc.run.Anonymous) != 0 {
+				t.Errorf("transform without a session contributed %q", tc.run.Anonymous)
+			}
+			// Three sessions were primed — s1, the unannounced one, and s1
+			// again once deletion evicted it — and the cached second transform
+			// of s1 adds no fourth: `hew prime` runs once per session, in the
+			// plugin's worktree.
+			if len(tc.run.Calls) != 3 {
+				t.Errorf("hew prime ran %d times, want 3 (once per session): %+v", len(tc.run.Calls), tc.run.Calls)
+			}
+			for _, call := range tc.run.Calls {
+				if call != got.Worktree {
+					t.Errorf("plugin ran hew prime in %q, want %q", call, got.Worktree)
+				}
+			}
+		})
 	}
-	if len(got.Anonymous) != 0 {
-		t.Errorf("transform without a session contributed %q", got.Anonymous)
-	}
-	// Three sessions were primed — s1, the unannounced one, and s1 again
-	// once deletion evicted it — and the cached second transform of s1 adds
-	// no fourth: `hew prime` runs once per session, in the worktree.
-	if len(got.Calls) != 3 {
-		t.Errorf("hew prime ran %d times, want 3 (once per session): %+v", len(got.Calls), got.Calls)
-	}
-	for _, call := range got.Calls {
-		if call.Command != primeHookCommand || call.Cwd != "/stub/worktree" {
-			t.Errorf("plugin ran %q in %q, want %q in the worktree", call.Command, call.Cwd, primeHookCommand)
-		}
-	}
+}
+
+// opencodePluginRun is one entrypoint's output: the system context each
+// transform produced and the directories `hew prime` ran in.
+type opencodePluginRun struct {
+	Created     []string `json:"created"`
+	Cached      []string `json:"cached"`
+	Lazy        []string `json:"lazy"`
+	Anonymous   []string `json:"anonymous"`
+	AfterDelete []string `json:"afterDelete"`
+	Calls       []string `json:"calls"`
 }
 
 func opencodePluginPath(root string) string {
