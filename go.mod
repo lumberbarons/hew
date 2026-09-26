@@ -3,7 +3,7 @@ module github.com/lumberbarons/hew
 go 1.25.13
 
 require (
-	github.com/cli/go-gh/v2 v2.16.0
+	github.com/cli/go-gh/v2 v2.16.1
 	github.com/rivo/uniseg v0.4.7
 	github.com/urfave/cli/v3 v3.11.0
 	golang.org/x/term v0.45.0
