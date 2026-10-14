@@ -1,6 +1,6 @@
 module github.com/lumberbarons/hew
 
-go 1.25.13
+go 1.26.9
 
 require (
 	github.com/cli/go-gh/v2 v2.16.1
