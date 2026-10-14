@@ -4,7 +4,7 @@
       {
         "hooks": [
           {
-            "command": "hew prime",
+            "command": "if command -v hew >/dev/null 2>&1; then hew prime; fi",
             "type": "command"
           }
         ]

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +20,15 @@ import (
 //
 //go:embed testdata/opencode_plugin_harness.mjs
 var opencodePluginHarness []byte
+
+// The installed commands, spelled out rather than read from the constants
+// under test: these exact strings are what an agent's shell runs, and a test
+// that asks the code what it wrote would follow a typo straight into a hook
+// that never fires. The guard makes a contributor without hew a silent no-op.
+const (
+	guardedClaudeCommand = "if command -v hew >/dev/null 2>&1; then hew prime; fi"
+	guardedCursorCommand = "if command -v hew >/dev/null 2>&1; then hew prime --hook-format cursor; fi"
+)
 
 func hooksApp(t *testing.T) (*App, *bytes.Buffer, string) {
 	t.Helper()
@@ -46,7 +57,7 @@ func TestHooksInstallFresh(t *testing.T) {
 	settings := readHooksFile(t, root, HookAgentClaude)
 	entries := settings["hooks"].(map[string]any)["SessionStart"].([]any)
 	hook := entries[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)
-	if hook["command"] != "hew prime" || hook["type"] != "command" {
+	if hook["command"] != guardedClaudeCommand || hook["type"] != "command" {
 		t.Errorf("hook = %v", hook)
 	}
 	if !strings.Contains(out.String(), "installed") {
@@ -222,7 +233,7 @@ func TestHooksInstallCodex(t *testing.T) {
 		t.Fatalf("hook duplicated: %v", entries)
 	}
 	hook := entries[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)
-	if hook["command"] != "hew prime" || hook["type"] != "command" {
+	if hook["command"] != guardedClaudeCommand || hook["type"] != "command" {
 		t.Errorf("hook = %v", hook)
 	}
 }
@@ -273,7 +284,7 @@ func TestHooksInstallCursor(t *testing.T) {
 		t.Fatalf("sessionStart entries = %v", entries)
 	}
 	hook := entries[0].(map[string]any)
-	if hook["command"] != "hew prime --hook-format cursor" {
+	if hook["command"] != guardedCursorCommand {
 		t.Errorf("command = %v", hook["command"])
 	}
 	if hook["timeout"].(float64) != 30 {
@@ -344,7 +355,7 @@ func TestHooksInstallCursorDetectsHandwrittenHook(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	existing := `{"version":1,"hooks":{"sessionStart":[{"command":"hew prime --hook-format cursor"}]}}`
+	existing := `{"version":1,"hooks":{"sessionStart":[{"command":"hew prime --hook-format cursor 2>/dev/null"}]}}`
 	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -950,5 +961,172 @@ func TestHooksErrorsNameTheProjectPath(t *testing.T) {
 				t.Errorf("error does not name the checkout: %v", err)
 			}
 		})
+	}
+}
+
+// installedHookCommand installs the agent's hook into a fresh project and
+// returns the command string the agent will hand to its shell.
+func installedHookCommand(t *testing.T, agent HookAgent) string {
+	t.Helper()
+	app, _, root := hooksApp(t)
+	if err := app.HooksInstall(root, agent); err != nil {
+		t.Fatal(err)
+	}
+	hooks := readHooksFile(t, root, agent)["hooks"].(map[string]any)
+	if agent == HookAgentCursor {
+		return hooks["sessionStart"].([]any)[0].(map[string]any)["command"].(string)
+	}
+	return hooks["SessionStart"].([]any)[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"].(string)
+}
+
+// runHookCommand runs command under sh the way an agent does, with PATH
+// confined to dir so the only hew that can be found is one the test put there.
+func runHookCommand(t *testing.T, command, dir string) (stdout, stderr string, exit int) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("hook commands are POSIX sh")
+	}
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not available")
+	}
+	cmd := exec.Command(sh, "-c", command)
+	cmd.Env = []string{"PATH=" + dir}
+	var o, e bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &o, &e
+	err = cmd.Run()
+	var ee *exec.ExitError
+	switch {
+	case err == nil:
+	case errors.As(err, &ee):
+		exit = ee.ExitCode()
+	default:
+		t.Fatal(err)
+	}
+	return o.String(), e.String(), exit
+}
+
+func writeFakeHew(t *testing.T, dir, script string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "hew"), []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInstalledHookCommand_MissingBinaryPassesThroughSilently(t *testing.T) {
+	for _, agent := range []HookAgent{HookAgentClaude, HookAgentCodex, HookAgentCursor} {
+		t.Run(string(agent), func(t *testing.T) {
+			stdout, stderr, exit := runHookCommand(t, installedHookCommand(t, agent), t.TempDir())
+			if exit != 0 || stdout != "" || stderr != "" {
+				t.Errorf("exit=%d stdout=%q stderr=%q, want a silent exit 0", exit, stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestInstalledHookCommand_RunsHewWhenPresent(t *testing.T) {
+	for _, tc := range []struct {
+		agent HookAgent
+		want  string
+	}{
+		{HookAgentClaude, "args: prime\n"},
+		{HookAgentCodex, "args: prime\n"},
+		{HookAgentCursor, "args: prime --hook-format cursor\n"},
+	} {
+		t.Run(string(tc.agent), func(t *testing.T) {
+			dir := t.TempDir()
+			writeFakeHew(t, dir, `echo "args: $*"`)
+			stdout, stderr, exit := runHookCommand(t, installedHookCommand(t, tc.agent), dir)
+			if exit != 0 || stdout != tc.want || stderr != "" {
+				t.Errorf("exit=%d stdout=%q stderr=%q, want exit 0 stdout %q", exit, stdout, stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestInstalledHookCommand_HewFailuresStayLoud(t *testing.T) {
+	// Auth (4) and network (1) failures belong to users who have the tool;
+	// the guard must only absorb a missing binary, never a failing one.
+	for _, code := range []int{1, 4} {
+		dir := t.TempDir()
+		writeFakeHew(t, dir, fmt.Sprintf("echo boom >&2; exit %d", code))
+		for _, agent := range []HookAgent{HookAgentClaude, HookAgentCursor} {
+			_, stderr, exit := runHookCommand(t, installedHookCommand(t, agent), dir)
+			if exit != code || stderr != "boom\n" {
+				t.Errorf("%s: exit=%d stderr=%q, want exit %d and hew's stderr", agent, exit, stderr, code)
+			}
+		}
+	}
+}
+
+func TestHooksInstallUpgradesBareEntry(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		agent  HookAgent
+		legacy string
+		want   string
+	}{
+		{"claude", HookAgentClaude, `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo hello"},{"type":"command","command":"hew prime"}]}]}}`, guardedClaudeCommand},
+		{"codex", HookAgentCodex, `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"hew prime"}]}]}}`, guardedClaudeCommand},
+		{"cursor", HookAgentCursor, `{"version":1,"hooks":{"sessionStart":[{"command":"hew prime --hook-format cursor","timeout":30}]}}`, guardedCursorCommand},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, out, root := hooksApp(t)
+			path := hooksPath(root, tc.agent)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(tc.legacy), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := app.HooksInstall(root, tc.agent); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), "upgraded") {
+				t.Errorf("output = %q, want it to say upgraded", out.String())
+			}
+			data, _ := os.ReadFile(path)
+			if strings.Count(string(data), "hew prime") != 1 || !strings.Contains(string(data), tc.want) {
+				t.Errorf("settings = %s, want one entry with %q", data, tc.want)
+			}
+			if tc.name == "claude" && !strings.Contains(string(data), "echo hello") {
+				t.Errorf("sibling hook dropped: %s", data)
+			}
+			if tc.name == "cursor" && !strings.Contains(string(data), `"timeout": 30`) {
+				t.Errorf("timeout dropped: %s", data)
+			}
+			// Running again finds the guarded form and changes nothing.
+			out.Reset()
+			if err := app.HooksInstall(root, tc.agent); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), "already installed") {
+				t.Errorf("second install output = %q", out.String())
+			}
+		})
+	}
+}
+
+func TestHooksInstallLeavesHandwrittenCommandAlone(t *testing.T) {
+	// Only the exact bare form hew itself used to write is rewritten; a
+	// command someone phrased by hand is theirs.
+	app, out, root := hooksApp(t)
+	path := hooksPath(root, HookAgentClaude)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"hew prime | head -50"}]}]}}`
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.HooksInstall(root, HookAgentClaude); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "already installed") {
+		t.Errorf("output = %q", out.String())
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != existing {
+		t.Errorf("handwritten hook rewritten: %s", data)
 	}
 }

@@ -24,8 +24,23 @@ const opencodeMarker = "@hew-managed"
 
 // primeHookCommand is what the SessionStart hook runs; its stdout is
 // injected into the agent's context at session start, which is the whole
-// point of prime.
-const primeHookCommand = "hew prime"
+// point of prime. The guard makes the hook a silent no-op for a contributor
+// without hew: SessionStart cannot block, but an unguarded `hew: command not
+// found` shows as a red hook error on every start, which invites deleting the
+// hook from the shared settings file. Only a missing binary is absorbed — the
+// if's status is hew's own, so auth (4) and network (1) failures stay loud.
+// POSIX sh only, to run under Claude Code's shell and Git Bash on Windows.
+const primeHookCommand = "if command -v hew >/dev/null 2>&1; then hew prime; fi"
+
+// primeHookMatch identifies a hook that runs prime however it is phrased —
+// the guarded form, the bare `hew prime` older releases wrote, or a user's
+// own variant. Install and remove match on it, never on the full command.
+const primeHookMatch = "hew prime"
+
+// legacyPrimeHookCommand is the exact bare command releases before the guard
+// wrote; install rewrites it in place. Anything else a user phrased by hand
+// is left as theirs.
+const legacyPrimeHookCommand = "hew prime"
 
 const hookEvent = "SessionStart"
 
@@ -92,7 +107,8 @@ func (a *App) HooksInstall(projectRoot string, agent HookAgent) error {
 	if err != nil {
 		return err
 	}
-	changed := addHookEntry(agent, settings)
+	result := addHookEntry(agent, settings)
+	changed := result != hookUnchanged
 	if changed {
 		if err := file.write(settings); err != nil {
 			return err
@@ -100,9 +116,12 @@ func (a *App) HooksInstall(projectRoot string, agent HookAgent) error {
 	}
 	event, command := hookEntryDetails(agent)
 	return a.emitResult(map[string]any{"agent": agent, "installed": changed, "path": file.path}, func() {
-		if changed {
+		switch result {
+		case hookAdded:
 			a.printf("installed %s %s hook running `%s` in %s\n", agent, event, command, file.path)
-		} else {
+		case hookUpgraded:
+			a.printf("upgraded %s %s hook to run `%s` in %s\n", agent, event, command, file.path)
+		default:
 			a.printf("%s %s hook already installed in %s\n", agent, event, file.path)
 		}
 	})
@@ -144,18 +163,37 @@ func (a *App) HooksRemove(projectRoot string, agent HookAgent) error {
 	})
 }
 
+// hookInstallResult is what addHookEntry did to the settings.
+type hookInstallResult int
+
+const (
+	hookUnchanged hookInstallResult = iota
+	hookAdded
+	hookUpgraded // an existing bare entry was rewritten to the guarded command
+)
+
 // addHookEntry appends the session-start hook in the agent's own shape —
 // claude and codex share the nested {"hooks": [...]} form, cursor writes
 // flat entries under its own event key — via the agent's hookShape, so a
 // third shape is one new hookShape value rather than a new pair of
-// traversal functions.
-func addHookEntry(agent HookAgent, settings map[string]any) bool {
+// traversal functions. An entry already running prime is not duplicated; if it
+// is the exact bare command older releases wrote, it is upgraded in place.
+func addHookEntry(agent HookAgent, settings map[string]any) hookInstallResult {
 	shape := hookShapeFor(agent)
 	if shape.ensureDefaults != nil {
 		shape.ensureDefaults(settings)
 	}
 	if hasHookMatch(shape, settings) {
-		return false
+		upgraded := false
+		for _, entry := range hookEventEntries(shape.eventKey, settings) {
+			if shape.matches(entry) && shape.upgrade(entry) {
+				upgraded = true
+			}
+		}
+		if upgraded {
+			return hookUpgraded
+		}
+		return hookUnchanged
 	}
 	hooks, _ := settings["hooks"].(map[string]any)
 	if hooks == nil {
@@ -164,7 +202,7 @@ func addHookEntry(agent HookAgent, settings map[string]any) bool {
 	}
 	entries, _ := hooks[shape.eventKey].([]any)
 	hooks[shape.eventKey] = append(entries, shape.newEntry())
-	return true
+	return hookAdded
 }
 
 // removeHookEntry strips the session-start hook, again via the agent's
@@ -414,11 +452,17 @@ func (h *hookSettings) write(settings map[string]any) error {
 			return pathErr("creating", filepath.Dir(h.path), err)
 		}
 	}
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
+	// HTML escaping off: the guarded command carries `>` and `&`, which the
+	// default encoder would write as \u003e and \u0026 — valid, but unreadable
+	// in a checked-in file and a rewrite of any such text already in it.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(settings); err != nil {
 		return err
 	}
-	return pathErr("writing", h.path, h.root.WriteFile(h.rel, append(data, '\n'), 0o644))
+	return pathErr("writing", h.path, h.root.WriteFile(h.rel, buf.Bytes(), 0o644))
 }
 
 // readRaw returns the file's bytes, or nil when it does not exist — the
@@ -495,6 +539,10 @@ type hookShape struct {
 	// matches reports whether a top-level entry runs hew prime, however
 	// the user phrased it.
 	matches func(entry any) bool
+	// upgrade rewrites the legacy bare command in entry to the guarded one,
+	// reporting whether it changed anything. Called only when matches(entry)
+	// is true.
+	upgrade func(entry any) bool
 	// strip returns entry with its hew-prime hook(s) removed, or nil if
 	// nothing should remain and the whole entry should be dropped. Called
 	// only when matches(entry) is true.
@@ -525,11 +573,23 @@ var nestedHookShape = hookShape{
 		inner, _ := m["hooks"].([]any)
 		for _, h := range inner {
 			hm, _ := h.(map[string]any)
-			if cmd, _ := hm["command"].(string); strings.Contains(cmd, primeHookCommand) {
+			if cmd, _ := hm["command"].(string); strings.Contains(cmd, primeHookMatch) {
 				return true
 			}
 		}
 		return false
+	},
+	upgrade: func(entry any) bool {
+		m, _ := entry.(map[string]any)
+		inner, _ := m["hooks"].([]any)
+		upgraded := false
+		for _, h := range inner {
+			if hm, _ := h.(map[string]any); hm["command"] == legacyPrimeHookCommand {
+				hm["command"] = primeHookCommand
+				upgraded = true
+			}
+		}
+		return upgraded
 	},
 	strip: func(entry any) any {
 		m := entry.(map[string]any)
@@ -537,7 +597,7 @@ var nestedHookShape = hookShape{
 		var kept []any
 		for _, h := range inner {
 			hm, _ := h.(map[string]any)
-			if cmd, _ := hm["command"].(string); strings.Contains(cmd, primeHookCommand) {
+			if cmd, _ := hm["command"].(string); strings.Contains(cmd, primeHookMatch) {
 				continue
 			}
 			kept = append(kept, h)
@@ -563,8 +623,13 @@ var nestedHookShape = hookShape{
 // bounds a stuck prime run.
 const (
 	cursorHookEvent   = "sessionStart"
-	cursorHookCommand = "hew prime --hook-format cursor"
+	cursorHookCommand = "if command -v hew >/dev/null 2>&1; then hew prime --hook-format cursor; fi"
 	cursorHookTimeout = 30
+
+	// legacyCursorHookCommand is the bare form older releases wrote; install
+	// upgrades it in place. A guard that printed anything would break
+	// Cursor's JSON parse, so a missing hew must stay silent here too.
+	legacyCursorHookCommand = "hew prime --hook-format cursor"
 )
 
 // cursorHookShape is Cursor's flat SessionStart shape: an entry is the hook,
@@ -585,7 +650,15 @@ var cursorHookShape = hookShape{
 	matches: func(entry any) bool {
 		m, _ := entry.(map[string]any)
 		cmd, _ := m["command"].(string)
-		return strings.Contains(cmd, primeHookCommand)
+		return strings.Contains(cmd, primeHookMatch)
+	},
+	upgrade: func(entry any) bool {
+		m, _ := entry.(map[string]any)
+		if m["command"] != legacyCursorHookCommand {
+			return false
+		}
+		m["command"] = cursorHookCommand
+		return true
 	},
 	strip: func(entry any) any { return nil },
 }
