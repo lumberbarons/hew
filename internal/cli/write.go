@@ -216,12 +216,25 @@ func (a *App) claimRefusal(ctx context.Context, issue model.Issue) error {
 	return &ExitError{Code: ExitClaimed, Message: fmt.Sprintf("#%d already claimed (%s); pick the next ready item or --force", issue.Number, who)}
 }
 
+// StartOpts are the claim inputs; zero values mean the default behavior.
+type StartOpts struct {
+	// Priority is required when the issue is untriaged (claiming is triage).
+	Priority string
+	// Force steals an already-claimed issue.
+	Force bool
+	// Show follows the claim confirmation with the issue's detail view, so
+	// claiming and reading are one call. --json already carries the full
+	// issue, so it ignores this.
+	Show bool
+}
+
 // Start claims an issue: assign @me plus the in-progress label. The guard
 // refuses issues that are already assigned or in-progress — exit 3 for
 // someone else's claim so an agent loop moves on to the next ready item,
 // exit 5 when the claim is already yours; --force steals. Claiming an
 // untriaged issue requires --priority — claiming forces triage.
-func (a *App) Start(ctx context.Context, number int, priorityFlag string, force bool) error {
+func (a *App) Start(ctx context.Context, number int, opts StartOpts) error {
+	priorityFlag, force := opts.Priority, opts.Force
 	issue, err := a.Client.GetIssue(ctx, number)
 	if err != nil {
 		return err
@@ -274,6 +287,12 @@ func (a *App) Start(ctx context.Context, number int, priorityFlag string, force 
 	}
 	if len(after.Assignees) != 1 || after.Assignees[0] != viewer {
 		a.warnf("claim may have raced: #%d now assigned to @%s", number, render.SanitizeInline(strings.Join(after.Assignees, " @")))
+	}
+	if opts.Show && !a.JSON {
+		// The detail view leads with the issue's own line, title included,
+		// so the confirmation shrinks to the claim itself.
+		a.printf("started #%d\n", number)
+		return a.emitIssue(after, nil)
 	}
 	return a.emitMutation(after, "started #%d: %s\n", number, render.SanitizeInline(issue.Title))
 }

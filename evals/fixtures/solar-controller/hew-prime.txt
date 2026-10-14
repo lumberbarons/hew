@@ -1,5 +1,5 @@
 # hew primer — lumberbarons/solar-controller
-Workflow: hew ready → hew start <n> → branch (feat/|fix/|chore/) → push → hew pr.
+Workflow: hew ready → hew start <n> --show → branch (feat/|fix/|chore/) → push → hew pr.
 An issue is not done until its PR exists: when the work is complete, create the PR with hew pr before reporting done — a local commit is not a deliverable.
 Close via PR; hew close is for wontfix/duplicate only. Never work an epic directly.
 Dedup before filing: hew search <terms> (triaged, open+closed) first; hew triage --search <terms> for the
@@ -24,7 +24,7 @@ Commands: ready [--limit N (0 for all)] | list [--label X --epic N --state open/
 show <n> | search <terms> | triage [--search <terms>] |
 create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
-start <n> [--priority Pn] | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |
+start <n> [--priority Pn --show] (--show or --json returns the issue itself — no show <n> after claiming) | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |
 pr [--for N --testing "..." --what "..." --why "..." --title "..." --ready] (draft PR for the claimed issue; body
   composed from the issue, exactly one "Fixes #n"; title defaults to feat:|fix:|chore: from the type —
   push the branch first) |

@@ -1,5 +1,5 @@
 #128 P2 enhancement  show flags invisible and confusable content in issue details
-state: open  created: 2026-09-07
+state: closed (completed)  created: 2026-09-07  assignee: @lumberbarons
 blocked by: #100 (closed)
 
 ### Where

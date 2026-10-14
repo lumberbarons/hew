@@ -40,8 +40,8 @@ hew init          # bootstrap the label set in a repo; prints a CLAUDE.md snippe
 hew hooks install <claude|codex|cursor|opencode> # agent session-start hook running `hew prime`
 hew prime         # session-start context: conventions + ready work + live state
 hew ready         # what should I work on? (priority-sorted, zero open blockers)
-hew start 42      # claim it: assign @me + in-progress (refuses claimed work: exit 3,
-                  #   or exit 5 when the claim is already yours)
+hew start 42 --show  # claim it and read it: assign @me + in-progress, then the issue's
+                  #   detail (refuses claimed work: exit 3, or exit 5 when already yours)
 # ...branch (feat/|fix/|chore/), commit, push...
 hew pr            # draft PR for the claimed issue, body composed, "Fixes #42" enforced
 ```
@@ -115,7 +115,9 @@ hew create --type bug|enhancement|task --title "..."
               [--priority P0..P4] [--area X] [--blocked-by N] [--parent N]
               [--discovered-from N]
               [--body-file F | --edit] # long-form escape hatch / $EDITOR
-hew start <n> [--priority P0..P4] [--force]
+hew start <n> [--priority P0..P4] [--force] [--show]
+                                   # --show appends the issue's detail (as show would);
+                                   # --json already returns the full issue, body included
 hew triage [--search <terms>]  # issues missing priority/type labels; --search runs
                                    # the same search over untriaged titles and bodies
                                    # (open+closed) — the untriaged half of dedup
