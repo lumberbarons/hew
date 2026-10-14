@@ -223,8 +223,9 @@ type StartOpts struct {
 	// Force steals an already-claimed issue.
 	Force bool
 	// Show follows the claim confirmation with the issue's detail view, so
-	// claiming and reading are one call. --json already carries the full
-	// issue, so it ignores this.
+	// claiming and reading are one call. --json already includes the body
+	// (as every mutation's JSON does, without text findings), so it ignores
+	// this.
 	Show bool
 }
 

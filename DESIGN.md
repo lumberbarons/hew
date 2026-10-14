@@ -231,9 +231,10 @@ hew start <n> [--priority P0..P4] [--force] [--show]
                                   # work); --force steals; untriaged issues
                                   # require --priority (claim = triage); --show
                                   # follows the claim with the show detail from the
-                                  # post-claim read (no extra fetch), and --json
-                                  # already carries the full issue — either replaces
-                                  # a separate show after claiming
+                                  # post-claim read (no extra fetch); --json also
+                                  # includes the body but, like every mutation, omits
+                                  # text-findings annotations — either replaces a
+                                  # separate show after claiming
 hew triage [--search <terms>] # untriaged issues (missing priority/type), oldest
                                   # first — work through them with `set`. The sole
                                   # emitter of untriaged content, the unit a harness
@@ -444,7 +445,7 @@ File discovered work with --discovered-from. Never work an epic directly.
 
 Everything after the header is one line per issue: `#n priority type (areas) title`.
 No URLs, no timestamps, no prose. Target: whole primer under ~1200 tokens for a
-typical repo — measured 1017–1028 on the two fixtures below, ~860 of it the
+typical repo — measured 1014–1025 on the two fixtures below, ~860 of it the
 static conventions half (see the token-efficiency section).
 
 Agent hooks consume prime differently: Claude Code and Codex inject its stdout
@@ -618,7 +619,7 @@ any product code.
   slightly higher). The real primer does not: the static conventions half alone
   costs ~860 tokens, because the cheatsheet documents every command and flag
   (`TestPrimerMatchesCommandSurface` pins that surface), and live primers
-  measure 1017–1028. The budget was restated to ~1200 on the measurement (#63),
+  measure 1014–1025. The budget was restated to ~1200 on the measurement (#63),
   and the live sections are each capped at five with pointers (#63 again), so
   the bound holds for repos larger than the fixtures too.
 - **Cycle rejection — partial; client-side check confirmed necessary.** Tested live
@@ -662,7 +663,7 @@ lumberbarons/solar-controller — 14 open issues:
 | `hew ready` | 324 | 1969 | 6.1x | gh issue list --json † |
 | `hew list` | 353 | 1172 | 3.3x | gh api graphql (open issues) |
 | `hew list --json` | 1607 | 1172 | 0.7x | gh api graphql (open issues) |
-| `hew prime` | 1028 | 1172 | 1.1x | gh api graphql (open issues) |
+| `hew prime` | 1025 | 1172 | 1.1x | gh api graphql (open issues) |
 | `hew show #119` | 430 | 590 | 1.4x | gh issue view --json + gh api graphql |
 
 Findings, including the ones that don't flatter the tool:
@@ -680,7 +681,7 @@ Findings, including the ones that don't flatter the tool:
   empty arrays, derived booleans, `createdAt` — where the lean query writes seven
   fields. The schema's stability is deliberate (agents parse it), but the token
   cost is a real regression against the tool's own claim, filed as #62.
-- **`prime` measures 1017–1028 tokens against its ~1200 target, restated in
+- **`prime` measures 1014–1025 tokens against its ~1200 target, restated in
   #63.** The ~600 target came from the mock, not from output: the static
   conventions half alone measures ~860 tokens under o200k_base, and the live
   sections add ~160 on both fixtures. Every command and flag of the cheatsheet

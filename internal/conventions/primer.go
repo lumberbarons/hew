@@ -28,7 +28,7 @@ Commands: ready [--limit N (0 for all)] | list [--label X --epic N --state open/
 show <n> | search <terms> | triage [--search <terms>] |
 create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
-start <n> [--priority Pn --show] (--show or --json returns the issue itself — no show <n> after claiming) | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |
+start <n> [--priority Pn --show] (--show or --json includes the body, so skip show <n>) | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |
 pr [--for N --testing "..." --what "..." --why "..." --title "..." --ready] (draft PR for the claimed issue; body
   composed from the issue, exactly one "Fixes #n"; title defaults to feat:|fix:|chore: from the type —
   push the branch first) |

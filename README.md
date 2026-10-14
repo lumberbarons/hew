@@ -117,7 +117,7 @@ hew create --type bug|enhancement|task --title "..."
               [--body-file F | --edit] # long-form escape hatch / $EDITOR
 hew start <n> [--priority P0..P4] [--force] [--show]
                                    # --show appends the issue's detail (as show would);
-                                   # --json already returns the full issue, body included
+                                   # --json includes the body too (without text-findings annotations)
 hew triage [--search <terms>]  # issues missing priority/type labels; --search runs
                                    # the same search over untriaged titles and bodies
                                    # (open+closed) — the untriaged half of dedup
