@@ -297,7 +297,15 @@ hew init                       # bootstrap labels in a repo; print CLAUDE.md sni
 hew hooks install|remove <claude|codex|cursor|opencode>
                                   # session-start injection of `hew prime` in the
                                   # selected agent's project configuration: a
-                                  # SessionStart hook for claude and codex, a
+                                  # SessionStart hook for claude and codex (guarded
+                                  # with `command -v hew`, so a contributor without
+                                  # hew gets an install hint for the agent, not a
+                                  # red hook error; codex adds a commandWindows
+                                  # override of bare `hew prime`, as cmd and
+                                  # PowerShell can't run the guard; install
+                                  # upgrades the old bare
+                                  # form; cursor stays unguarded, having no
+                                  # Windows override), a
                                   # sessionStart hook for cursor whose command
                                   # runs `hew prime --hook-format cursor` — the
                                   # JSON additional_context wrapper Cursor's

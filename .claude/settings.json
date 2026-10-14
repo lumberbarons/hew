@@ -4,7 +4,7 @@
       {
         "hooks": [
           {
-            "command": "hew prime",
+            "command": "if command -v hew >/dev/null 2>&1; then hew prime; else echo 'hew is not installed or not on PATH, so the tracker primer was not loaded. Tell the user once that this repo tracks work with hew and how to install it: curl -fsSL https://lumberbarons.github.io/hew/install.sh | bash (or: go install github.com/lumberbarons/hew/cmd/hew@latest).'; fi",
             "type": "command"
           }
         ]
