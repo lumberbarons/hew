@@ -60,7 +60,7 @@ agent explicitly:
   project's `.cursor/hooks.json`. Cursor's stdout contract differs from the
   others': the hook must print valid JSON and the primer travels in the
   `additional_context` field (snake_case — Cursor ignores Claude Code's
-  camelCase `additionalContext`), so the installed command runs
+  camelCase `additionalContext`), so the installed command is
   `hew prime --hook-format cursor`, which JSON-encodes the primer. Don't copy
   a Claude or Codex hook entry verbatim: bare `hew prime` text fails Cursor's
   JSON parse and the primer never lands.
@@ -68,15 +68,20 @@ agent explicitly:
   to `.opencode/plugins/hew-prime.js`; it injects the primer into system
   context, so it is present before the first turn without appearing in chat.
 
-The Claude Code, Codex, and Cursor hooks are guarded: they run `hew prime`
-only when `hew` is on `PATH`, and otherwise exit 0 printing nothing. A
-contributor without hew gets a normal session, not a red hook error on every
-start, so the shared settings file has no reason to lose the hook. Only a
-missing binary is absorbed: hew's own failures, such as exit `4` before
-`gh auth login`, still surface. The opencode plugin is silent without hew the
-same way. `hew hooks install` upgrades the bare `hew prime` entry older
-releases wrote to the guarded command in place; a command you phrased
-yourself is left alone.
+The Claude Code and Codex hooks are guarded: they run `hew prime` only when
+`hew` is on `PATH`, and otherwise print a one-line hint, addressed to the
+agent, saying hew is missing and how to install it. A contributor without hew
+gets a normal session and a nudge instead of a red hook error on every start,
+so the shared settings file has no reason to lose the hook. Only a missing
+binary is absorbed: hew's own failures, such as exit `4` before `gh auth
+login`, still surface. The guard is POSIX sh, which cmd and PowerShell cannot
+run, so the Codex entry also carries a `commandWindows` override of plain
+`hew prime`; Windows contributors without hew see the hook error. The Cursor
+hook is not guarded and has no hint: Cursor has no Windows-only override, runs
+hook commands through PowerShell there, and needs JSON on stdout. The opencode
+plugin is silent without hew. `hew hooks install` upgrades the bare `hew prime`
+entry older releases wrote for Claude Code and Codex in place; a command you
+phrased yourself is left alone, and install says so.
 
 All of them refuse to write through a symlink. A checkout is untrusted input, so hew
 never follows a link standing where it expects its own directory or settings
