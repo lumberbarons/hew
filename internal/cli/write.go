@@ -31,6 +31,9 @@ type CreateOpts struct {
 // priority and one type label, template-scaffolded body, native
 // dependencies and parent links.
 func (a *App) Create(ctx context.Context, opts CreateOpts) error {
+	if opts.Type == "epic" {
+		return usageErr("--type epic is not supported here; use hew epic create")
+	}
 	if opts.Title == "" {
 		return usageErr("--title is required")
 	}

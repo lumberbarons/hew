@@ -79,9 +79,36 @@ func buildApp(cmd *ucli.Command) (*appcli.App, error) {
 	}, nil
 }
 
-// numberArg parses the required positional issue number.
+// numberArg parses the required positional issue number after fixedArgs has
+// checked the command's argument count.
 func numberArg(cmd *ucli.Command, usage string) (int, error) {
 	return appcli.ParseIssueNumber(cmd.Args().First(), usage)
+}
+
+// fixedArgs wires validation ahead of app construction, so malformed input
+// cannot reach GitHub or the filesystem. Search alone takes arbitrary words.
+func fixedArgs(min, max int) ucli.BeforeFunc {
+	return func(ctx context.Context, cmd *ucli.Command) (context.Context, error) {
+		usage := strings.TrimSpace(cmd.FullName() + " " + cmd.ArgsUsage)
+		if err := appcli.ValidateArgCount(cmd.Args().Slice(), min, max, usage); err != nil {
+			return ctx, err
+		}
+		for _, name := range []string{"parent", "epic", "for", "duplicate-of", "discovered-from", "on", "from"} {
+			if cmd.IsSet(name) {
+				if err := appcli.ValidateIssueNumbers(name, cmd.Int(name)); err != nil {
+					return ctx, err
+				}
+			}
+		}
+		for _, name := range []string{"blocked-by", "children"} {
+			if cmd.IsSet(name) {
+				if err := appcli.ValidateIssueNumbers(name, cmd.IntSlice(name)...); err != nil {
+					return ctx, err
+				}
+			}
+		}
+		return ctx, nil
+	}
 }
 
 func root() *ucli.Command {
@@ -106,6 +133,7 @@ func primeCmd() *ucli.Command {
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{Name: "hook-format", Usage: "emit for a session-start hook instead of text: `cursor` JSON-wraps the primer in additional_context"},
 		},
+		Before: fixedArgs(0, 0),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
 			if err != nil {
@@ -127,6 +155,7 @@ func readyCmd() *ucli.Command {
 				Usage: "print at most `N` issues (0 for all); truncation warns on stderr",
 			},
 		},
+		Before: fixedArgs(0, 0),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
 			if err != nil {
@@ -148,6 +177,7 @@ func listCmd() *ucli.Command {
 			&ucli.BoolFlag{Name: "closed", Usage: "alias for --state closed"},
 			&ucli.BoolFlag{Name: "bodies", Usage: "include issue bodies (requires --json) for single-call dedup"},
 		},
+		Before: fixedArgs(0, 0),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
 			if err != nil {
@@ -169,6 +199,7 @@ func showCmd() *ucli.Command {
 		Name:      "show",
 		Usage:     "issue detail: body, deps, parent, children, recent comments",
 		ArgsUsage: "<n>",
+		Before:    fixedArgs(1, 1),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			n, err := numberArg(cmd, "hew show <n>")
 			if err != nil {
@@ -246,6 +277,7 @@ func createCmd() *ucli.Command {
 			&ucli.IntFlag{Name: "parent", Usage: "attach as sub-issue of epic `N`"},
 			&ucli.IntFlag{Name: "discovered-from", Usage: "link back to issue `N` this was discovered under"},
 		}, bodyFlags()...),
+		Before: fixedArgs(0, 0),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
 			if err != nil {
@@ -289,6 +321,7 @@ Epic bodies compose the same way: use ` + "`hew epic create --body-file FILE`" +
 			&ucli.StringFlag{Name: "out", Usage: "write the composed body to `FILE` instead of stdout"},
 			&ucli.StringFlag{Name: "check", Usage: "revalidate the existing draft `FILE` instead of composing"},
 		),
+		Before: fixedArgs(0, 0),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			// An explicitly empty value (an unset shell variable) must not
 			// fall through to the other mode.
@@ -320,6 +353,7 @@ func startCmd() *ucli.Command {
 			&ucli.BoolFlag{Name: "force", Usage: "steal an already-claimed issue"},
 			&ucli.BoolFlag{Name: "show", Usage: "print the claimed issue's detail after the claim, as show would (--json includes the body but no annotations)"},
 		},
+		Before: fixedArgs(1, 1),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			n, err := numberArg(cmd, "hew start <n>")
 			if err != nil {
@@ -345,6 +379,7 @@ func triageCmd() *ucli.Command {
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{Name: "search", Usage: "match untriaged issues by `terms`, open and closed"},
 		},
+		Before: fixedArgs(0, 0),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
 			if err != nil {
@@ -371,6 +406,7 @@ func setCmd() *ucli.Command {
 			&ucli.StringFlag{Name: "body-file", Usage: "replace the body with the contents of `FILE`"},
 			closedOverrideFlag(),
 		},
+		Before: fixedArgs(1, 1),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			n, err := numberArg(cmd, "hew set <n>")
 			if err != nil {
@@ -427,6 +463,7 @@ repository. --ready and --base are creation-only flags.
 			&ucli.StringFlag{Name: "base", Usage: "target `BRANCH` (default: the repo's default branch)"},
 			&ucli.BoolFlag{Name: "ready", Usage: "open for review instead of as a draft"},
 		},
+		Before: fixedArgs(0, 0),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
 			if err != nil {
@@ -466,6 +503,7 @@ func closeCmd() *ucli.Command {
 			&ucli.BoolFlag{Name: "completed", Usage: "close as completed"},
 			&ucli.IntFlag{Name: "duplicate-of", Usage: "close as duplicate of issue `N`"},
 		},
+		Before: fixedArgs(1, 1),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			n, err := numberArg(cmd, "hew close <n> --reason \"...\"")
 			if err != nil {
@@ -488,6 +526,7 @@ func reopenCmd() *ucli.Command {
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{Name: "reason", Usage: "reopening comment (required)"},
 		},
+		Before: fixedArgs(1, 1),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			n, err := numberArg(cmd, "hew reopen <n> --reason \"...\"")
 			if err != nil {
@@ -511,6 +550,7 @@ func blockCmd() *ucli.Command {
 			&ucli.IntFlag{Name: "on", Usage: "blocking issue `N` (required)", Required: true},
 			closedOverrideFlag(),
 		},
+		Before: fixedArgs(1, 1),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			n, err := numberArg(cmd, "hew block <n> --on <m>")
 			if err != nil {
@@ -534,6 +574,7 @@ func unblockCmd() *ucli.Command {
 			&ucli.IntFlag{Name: "from", Usage: "blocking issue `N` (required)", Required: true},
 			closedOverrideFlag(),
 		},
+		Before: fixedArgs(1, 1),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			n, err := numberArg(cmd, "hew unblock <n> --from <m>")
 			if err != nil {
@@ -560,6 +601,7 @@ func epicCmd() *ucli.Command {
 					&ucli.StringFlag{Name: "title", Usage: "epic title (required)"},
 					&ucli.IntSliceFlag{Name: "children", Usage: "existing issues to attach"},
 				}, bodyFlags()...),
+				Before: fixedArgs(0, 0),
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
 					app, err := buildApp(cmd)
 					if err != nil {
@@ -581,6 +623,7 @@ func epicCmd() *ucli.Command {
 				Description: `With a number: the epic's rollup, the next workable child (next:),
 then every child. Without one: one rollup line per open epic.`,
 				ArgsUsage: "[<n>]",
+				Before:    fixedArgs(0, 1),
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
 					n := 0
 					if cmd.Args().First() != "" {
@@ -623,8 +666,9 @@ func hooksCmd() *ucli.Command {
 				Name:      "install",
 				Usage:     "add the hook for `claude`, `codex`, `cursor`, or `opencode`",
 				ArgsUsage: "<claude|codex|cursor|opencode>",
+				Before:    fixedArgs(1, 1),
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
-					agent, err := hookAgentArg(cmd, "hew hooks install <claude|codex|cursor|opencode>")
+					agent, err := hookAgentArg(cmd)
 					if err != nil {
 						return err
 					}
@@ -639,8 +683,9 @@ func hooksCmd() *ucli.Command {
 				Name:      "remove",
 				Usage:     "remove the hook for `claude`, `codex`, `cursor`, or `opencode`",
 				ArgsUsage: "<claude|codex|cursor|opencode>",
+				Before:    fixedArgs(1, 1),
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
-					agent, err := hookAgentArg(cmd, "hew hooks remove <claude|codex|cursor|opencode>")
+					agent, err := hookAgentArg(cmd)
 					if err != nil {
 						return err
 					}
@@ -655,12 +700,8 @@ func hooksCmd() *ucli.Command {
 	}
 }
 
-func hookAgentArg(cmd *ucli.Command, usage string) (appcli.HookAgent, error) {
-	args := cmd.Args().Slice()
-	if len(args) != 1 {
-		return "", appcli.UsageError("usage: %s", usage)
-	}
-	return appcli.ParseHookAgent(args[0])
+func hookAgentArg(cmd *ucli.Command) (appcli.HookAgent, error) {
+	return appcli.ParseHookAgent(cmd.Args().First())
 }
 
 func applyCmd() *ucli.Command {
@@ -693,6 +734,7 @@ and it is refused rather than trusted.
 			&ucli.BoolFlag{Name: "dry-run", Usage: "print the plan without creating anything"},
 			&ucli.DurationFlag{Name: "throttle", Usage: "pause between writes", Value: 500 * time.Millisecond},
 		},
+		Before: fixedArgs(1, 1),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
 			if err != nil {
@@ -723,6 +765,7 @@ func migrateCmd() *ucli.Command {
 					&ucli.BoolFlag{Name: "include-closed", Usage: "also migrate closed beads (create, comment, close)"},
 					&ucli.DurationFlag{Name: "throttle", Usage: "pause between writes", Value: 500 * time.Millisecond},
 				},
+				Before: fixedArgs(0, 0),
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
 					file := cmd.String("file")
 					if file == "" {
@@ -755,8 +798,9 @@ func migrateCmd() *ucli.Command {
 
 func initCmd() *ucli.Command {
 	return &ucli.Command{
-		Name:  "init",
-		Usage: "bootstrap convention labels; print the CLAUDE.md snippet",
+		Name:   "init",
+		Usage:  "bootstrap convention labels; print the CLAUDE.md snippet",
+		Before: fixedArgs(0, 0),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
 			if err != nil {
