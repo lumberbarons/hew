@@ -545,8 +545,7 @@ func (a *App) Reopen(ctx context.Context, number int, reason string) error {
 		// report: erroring would make an idempotent retry look like a
 		// failure. Commenting is skipped with it — the note would document a
 		// reopen that never happened.
-		a.printf("#%d is already open\n", number)
-		return nil
+		return a.emitNoOp(issue, "#%d is already open\n", number)
 	}
 	if err := a.Client.Comment(ctx, number, reason); err != nil {
 		return err
@@ -621,8 +620,7 @@ func (a *App) Block(ctx context.Context, number, blocker int, allowClosed bool) 
 		return genericErr("#%d is not an open issue in %s; closed blockers don't block", blocker, a.Repo)
 	}
 	if slices.Contains(issue.OpenBlockers(), blocker) {
-		a.printf("#%d is already blocked by #%d\n", number, blocker)
-		return nil
+		return a.emitNoOp(issue, "#%d is already blocked by #%d\n", number, blocker)
 	}
 	check := model.CheckBlockedBy(issues, number, blocker)
 	if check.Cycle != nil {
@@ -654,8 +652,7 @@ func (a *App) Unblock(ctx context.Context, number, blocker int, allowClosed bool
 		}
 	}
 	if !found {
-		a.printf("#%d is not blocked by #%d\n", number, blocker)
-		return nil
+		return a.emitNoOp(issue, "#%d is not blocked by #%d\n", number, blocker)
 	}
 	if err := a.Client.RemoveBlockedBy(ctx, number, blocker); err != nil {
 		return err

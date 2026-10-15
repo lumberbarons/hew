@@ -146,6 +146,16 @@ func detailJSON(i model.Issue, children []model.Issue) IssueJSON {
 	return out
 }
 
+// JSONUnchanged writes one issue with full detail plus unchanged: true, the
+// marker for a write whose requested state already held. Changed writes
+// emit JSONIssue, which omits the field.
+func JSONUnchanged(w io.Writer, i model.Issue) error {
+	return writeJSON(w, struct {
+		IssueJSON
+		Unchanged bool `json:"unchanged"`
+	}{IssueJSON: detailJSON(i, nil), Unchanged: true})
+}
+
 // TextFindingJSON is one field's advisory Unicode findings in show --json.
 // Source is "title", "body" or "comment"; CommentIndex is set only for a
 // comment and indexes the emitted comments array.

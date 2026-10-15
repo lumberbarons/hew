@@ -51,8 +51,12 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 		return genericErr("parsing %s: %v", opts.File, err)
 	}
 	if len(entries) == 0 {
-		a.printf("nothing to apply: %s has no entries\n", opts.File)
-		return nil
+		return a.emitResult(map[string]any{
+			"created": 0, "wired": 0, "warnings": []string{},
+			"mapping": map[string]int{},
+		}, func() {
+			a.printf("nothing to apply: %s has no entries\n", opts.File)
+		})
 	}
 
 	digest := fileDigest(data)
@@ -78,8 +82,7 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	}
 
 	if opts.DryRun {
-		a.applyPlan(entries, state)
-		return nil
+		return a.applyPlan(entries, state)
 	}
 
 	if err := a.ensureLabels(ctx, planAreaLabels(entries)); err != nil {
@@ -101,36 +104,70 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	})
 }
 
-// applyPlan prints what a real run would do.
-func (a *App) applyPlan(entries []plan.Entry, state *batchState) {
-	toCreate := 0
+// applyPlanEntry is one issue a dry run would create, in the shape both the
+// text line and the --json result are built from.
+type applyPlanEntry struct {
+	Key       string   `json:"key"`
+	Priority  string   `json:"priority"`
+	Type      string   `json:"type"`
+	Title     string   `json:"title"`
+	Areas     []string `json:"areas"`
+	Parent    string   `json:"parent,omitempty"`
+	BlockedBy []string `json:"blockedBy"`
+}
+
+// applyPlan reports what a real run would do.
+func (a *App) applyPlan(entries []plan.Entry, state *batchState) error {
+	toCreate := []applyPlanEntry{}
+	already := map[string]int{}
 	for _, e := range entries {
 		if n, ok := state.Mapping[e.Key()]; ok {
-			a.printf("already created: %s → #%d\n", e.Key(), n)
+			already[e.Key()] = n
 			continue
 		}
-		toCreate++
-		line := fmt.Sprintf("create: %s as %s %s  %s", e.Key(), e.Priority, e.Type, applyTitle(e))
-		var marks []string
-		if len(e.Areas) > 0 {
-			marks = append(marks, "areas "+strings.Join(e.Areas, " "))
+		item := applyPlanEntry{
+			Key: e.Key(), Priority: e.Priority.String(), Type: e.Type, Title: applyTitle(e),
+			Areas: append([]string{}, e.Areas...), BlockedBy: []string{},
 		}
 		if e.Parent != nil {
-			marks = append(marks, "parent "+e.Parent.String())
+			item.Parent = e.Parent.String()
 		}
-		if len(e.BlockedBy) > 0 {
-			refs := make([]string, len(e.BlockedBy))
-			for i, b := range e.BlockedBy {
-				refs[i] = b.String()
-			}
-			marks = append(marks, "blocked by "+strings.Join(refs, " "))
+		for _, b := range e.BlockedBy {
+			item.BlockedBy = append(item.BlockedBy, b.String())
 		}
-		if len(marks) > 0 {
-			line += "  [" + strings.Join(marks, "; ") + "]"
-		}
-		a.printf("%s\n", line)
+		toCreate = append(toCreate, item)
 	}
-	a.printf("dry run: %d issues would be created\n", toCreate)
+	return a.emitResult(map[string]any{
+		"dryRun": true, "wouldCreate": toCreate, "alreadyCreated": already,
+	}, func() {
+		// toCreate keeps file order, so walking entries and toCreate together
+		// interleaves the already-created lines where they fall in the plan.
+		next := 0
+		for _, e := range entries {
+			if n, ok := already[e.Key()]; ok {
+				a.printf("already created: %s → #%d\n", e.Key(), n)
+				continue
+			}
+			item := toCreate[next]
+			next++
+			line := fmt.Sprintf("create: %s as %s %s  %s", item.Key, item.Priority, item.Type, item.Title)
+			var marks []string
+			if len(item.Areas) > 0 {
+				marks = append(marks, "areas "+strings.Join(item.Areas, " "))
+			}
+			if item.Parent != "" {
+				marks = append(marks, "parent "+item.Parent)
+			}
+			if len(item.BlockedBy) > 0 {
+				marks = append(marks, "blocked by "+strings.Join(item.BlockedBy, " "))
+			}
+			if len(marks) > 0 {
+				line += "  [" + strings.Join(marks, "; ") + "]"
+			}
+			a.printf("%s\n", line)
+		}
+		a.printf("dry run: %d issues would be created\n", len(toCreate))
+	})
 }
 
 func (a *App) applyCreate(ctx context.Context, entries []plan.Entry, state *batchState, opts ApplyOpts) (int, error) {

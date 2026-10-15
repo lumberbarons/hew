@@ -80,8 +80,13 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 		}
 	}
 	if len(selected) == 0 {
-		a.printf("nothing to migrate (%d closed beads skipped; use --include-closed)\n", skippedClosed)
-		return nil
+		return a.emitResult(map[string]any{
+			"created": 0, "wired": 0, "closed": 0,
+			"skippedClosed": skippedClosed, "warnings": []string{},
+			"mapping": map[string]int{},
+		}, func() {
+			a.printf("nothing to migrate (%d closed beads skipped; use --include-closed)\n", skippedClosed)
+		})
 	}
 
 	digest := fileDigest(data)
@@ -105,8 +110,7 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 	}
 
 	if opts.DryRun {
-		a.migrationPlan(selected, state.Mapping, skippedClosed)
-		return nil
+		return a.migrationPlan(selected, state.Mapping, skippedClosed)
 	}
 
 	if err := a.ensureLabels(ctx, beadAreaLabels(selected)); err != nil {
@@ -134,43 +138,82 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 	})
 }
 
-// migrationPlan prints what a real run would do.
-func (a *App) migrationPlan(selected []beads.Bead, state map[string]int, skippedClosed int) {
+// migrationPlanEntry is one bead a dry run would create, in the shape both
+// the text line and the --json result are built from.
+type migrationPlanEntry struct {
+	ID         string   `json:"id"`
+	Priority   string   `json:"priority"`
+	Type       string   `json:"type,omitempty"`
+	Title      string   `json:"title"`
+	Parent     string   `json:"parent,omitempty"`
+	BlockedBy  []string `json:"blockedBy"`
+	InProgress bool     `json:"inProgress"`
+	ThenClose  bool     `json:"thenClose"`
+}
+
+// migrationPlan reports what a real run would do.
+func (a *App) migrationPlan(selected []beads.Bead, state map[string]int, skippedClosed int) error {
+	wouldMigrate := []migrationPlanEntry{}
+	already := map[string]int{}
 	for _, b := range selected {
 		if n, ok := state[b.ID]; ok {
-			a.printf("already migrated: %s → #%d\n", b.ID, n)
+			already[b.ID] = n
 			continue
 		}
-		line := fmt.Sprintf("create: %s as %s", b.ID, model.Priority(clampPriority(b.Priority)))
-		if t := beadTypeLabels[b.IssueType]; t != "" {
-			line += " " + t
-		} else if b.IssueType == "epic" {
-			line += " epic"
+		item := migrationPlanEntry{
+			ID: b.ID, Priority: model.Priority(clampPriority(b.Priority)).String(),
+			Type: beadTypeLabels[b.IssueType], Title: b.Title, Parent: b.Parent(),
+			BlockedBy:  append([]string{}, b.BlockedBy()...),
+			InProgress: b.Status == "in_progress", ThenClose: b.Closed(),
 		}
-		line += "  " + b.Title
-		var marks []string
-		if p := b.Parent(); p != "" {
-			marks = append(marks, "parent "+p)
+		if item.Type == "" && b.IssueType == "epic" {
+			item.Type = "epic"
 		}
-		if blockers := b.BlockedBy(); len(blockers) > 0 {
-			marks = append(marks, "blocked by "+strings.Join(blockers, " "))
-		}
-		if b.Status == "in_progress" {
-			marks = append(marks, "in progress")
-		}
-		if b.Closed() {
-			marks = append(marks, "then close")
-		}
-		if len(marks) > 0 {
-			line += "  [" + strings.Join(marks, "; ") + "]"
-		}
-		a.printf("%s\n", line)
+		wouldMigrate = append(wouldMigrate, item)
 	}
-	a.printf("dry run: %d beads would be migrated", len(selected))
-	if skippedClosed > 0 {
-		a.printf(" (%d closed skipped; use --include-closed)", skippedClosed)
-	}
-	a.printf("\n")
+	return a.emitResult(map[string]any{
+		"dryRun": true, "wouldMigrate": wouldMigrate, "alreadyMigrated": already,
+		"skippedClosed": skippedClosed,
+	}, func() {
+		// wouldMigrate keeps snapshot order, so walking selected and
+		// wouldMigrate together interleaves the already-migrated lines.
+		next := 0
+		for _, b := range selected {
+			if n, ok := already[b.ID]; ok {
+				a.printf("already migrated: %s → #%d\n", b.ID, n)
+				continue
+			}
+			item := wouldMigrate[next]
+			next++
+			line := fmt.Sprintf("create: %s as %s", item.ID, item.Priority)
+			if item.Type != "" {
+				line += " " + item.Type
+			}
+			line += "  " + item.Title
+			var marks []string
+			if item.Parent != "" {
+				marks = append(marks, "parent "+item.Parent)
+			}
+			if len(item.BlockedBy) > 0 {
+				marks = append(marks, "blocked by "+strings.Join(item.BlockedBy, " "))
+			}
+			if item.InProgress {
+				marks = append(marks, "in progress")
+			}
+			if item.ThenClose {
+				marks = append(marks, "then close")
+			}
+			if len(marks) > 0 {
+				line += "  [" + strings.Join(marks, "; ") + "]"
+			}
+			a.printf("%s\n", line)
+		}
+		a.printf("dry run: %d beads would be migrated", len(selected))
+		if skippedClosed > 0 {
+			a.printf(" (%d closed skipped; use --include-closed)", skippedClosed)
+		}
+		a.printf("\n")
+	})
 }
 
 // beadAreaLabels collects every distinct area label the beads carry, for
