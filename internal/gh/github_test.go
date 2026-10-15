@@ -604,7 +604,7 @@ func TestPullRequestContext(t *testing.T) {
 	f := newFakeServer(t)
 	f.graphql["defaultBranchRef"] = `{"data":{"repository":{
 		"defaultBranchRef":{"name":"main"},
-		"pullRequests":{"nodes":[{"number":12,"url":"https://github.com/o/r/pull/12","isDraft":true}]}}}}`
+		"pullRequests":{"totalCount":2,"nodes":[{"number":12,"headRepository":{"nameWithOwner":"o/r"},"url":"https://github.com/o/r/pull/12","isDraft":true,"title":"feat: original","body":"Original body","baseRefName":"release"}]}}}}`
 	got, err := f.client(t).PullRequestContext(context.Background(), "feat/x")
 	if err != nil {
 		t.Fatal(err)
@@ -614,6 +614,20 @@ func TestPullRequestContext(t *testing.T) {
 	}
 	if got.Existing == nil || got.Existing.Number != 12 || !got.Existing.Draft {
 		t.Errorf("Existing = %+v, want the open draft #12", got.Existing)
+	}
+	if got.Existing != nil && (got.Existing.Title != "feat: original" || got.Existing.Body != "Original body" || got.Existing.Base != "release") {
+		t.Errorf("PR edit context missing: %+v", got.Existing)
+	}
+	if !strings.Contains(f.requests[0].Body, "body") || !strings.Contains(f.requests[0].Body, "baseRefName") {
+		t.Errorf("query does not request edit context: %s", f.requests[0].Body)
+	}
+	if got.OpenCount != 2 || got.Existing == nil || got.Existing.HeadRepository != "o/r" {
+		t.Errorf("missing PR selection evidence: %+v, PR: %+v", got, got.Existing)
+	}
+	for _, field := range []string{"totalCount", "headRepository", "nameWithOwner"} {
+		if !strings.Contains(f.requests[0].Body, field) {
+			t.Errorf("query omits %s", field)
+		}
 	}
 	vars, _ := decodeBody(t, f.requests[0].Body)["variables"].(map[string]any)
 	if vars["head"] != "feat/x" {
@@ -703,5 +717,63 @@ func TestCreatePullRequestError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "A pull request already exists") {
 		t.Errorf("err = %q, want it to carry the server's message", err)
+	}
+}
+
+func TestUpdatePullRequest(t *testing.T) {
+	f := newFakeServer(t)
+	f.rest["PATCH /repos/o/r/pulls/12"] = restResponse{200, `{"number":12}`}
+	if err := f.client(t).UpdatePullRequest(context.Background(), 12, "feat: revised", "Revised body\n\nFixes #30"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.requests) != 1 {
+		t.Fatalf("requests = %v, want one PATCH", f.requests)
+	}
+	req := f.requests[0]
+	if req.Method != "PATCH" || req.Path != "/repos/o/r/pulls/12" {
+		t.Errorf("request = %+v", req)
+	}
+	want := map[string]any{"title": "feat: revised", "body": "Revised body\n\nFixes #30"}
+	if got := decodeBody(t, req.Body); !reflect.DeepEqual(got, want) {
+		t.Errorf("payload = %v, want %v", got, want)
+	}
+}
+
+func TestUpdatePullRequestErrors(t *testing.T) {
+	for _, status := range []int{401, 422} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			f := newFakeServer(t)
+			f.rest["PATCH /repos/o/r/pulls/12"] = restResponse{status, `{"message":"update refused"}`}
+			err := f.client(t).UpdatePullRequest(context.Background(), 12, "new title", "body")
+			if err == nil || !strings.Contains(err.Error(), "update refused") {
+				t.Fatalf("error = %v", err)
+			}
+			if status == 401 {
+				var auth *AuthError
+				if !errors.As(err, &auth) {
+					t.Errorf("error = %T, want AuthError", err)
+				}
+			}
+		})
+	}
+}
+
+func TestPullRequestContextHeadRepository(t *testing.T) {
+	for _, tc := range []struct{ name, repoJSON, want string }{
+		{"same repository", `{"nameWithOwner":"o/r"}`, "o/r"},
+		{"fork", `{"nameWithOwner":"fork/r"}`, "fork/r"},
+		{"deleted repository", `null`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeServer(t)
+			f.graphql["defaultBranchRef"] = fmt.Sprintf(`{"data":{"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"totalCount":1,"nodes":[{"number":12,"headRepository":%s}]}}}}`, tc.repoJSON)
+			got, err := f.client(t).PullRequestContext(context.Background(), "feat/x")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.OpenCount != 1 || got.Existing == nil || got.Existing.HeadRepository != tc.want {
+				t.Errorf("context = %+v, PR = %+v; want one PR with head repository %q", got, got.Existing, tc.want)
+			}
+		})
 	}
 }

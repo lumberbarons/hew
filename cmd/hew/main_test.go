@@ -47,6 +47,7 @@ var omittedFlags = map[string]bool{
 	"set --closed":     true,
 	"block --closed":   true,
 	"unblock --closed": true,
+	"pr --amend":       true, // existing-PR refusal names the revision path
 	"pr --body-file":   true, // long-form escape hatch; the composed body is the point
 	"pr --base":        true, // the repo default is right outside release branches
 	// epic create's body flags mirror create's exactly; the primer shows the

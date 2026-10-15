@@ -17,6 +17,10 @@ import (
 // PROpts are the pr command's inputs. Every section is optional: the point
 // of the command is that tracker state fills the gaps.
 type PROpts struct {
+	// Amend revises the open PR on this branch instead of creating one.
+	Amend bool
+	// SectionFlags records explicitly supplied flags, including empty values.
+	SectionFlags []string
 	// For overrides issue inference; 0 means infer.
 	For      int
 	Title    string
@@ -28,14 +32,17 @@ type PROpts struct {
 	Base string
 }
 
-// PR opens the pull request that closes the claim lifecycle. It is
+// PR opens or revises the pull request that closes the claim lifecycle. It is
 // deliberately thin: infer which issue this branch is for, compose a body
 // from what the issue already says, and refuse the states that leave an
 // issue claimed-but-orphaned after a merge. Reviews, merges and checks stay
 // with `gh`.
 func (a *App) PR(ctx context.Context, opts PROpts) error {
-	if opts.BodyFile != "" && !opts.Sections.IsZero() {
+	if opts.BodyFile != "" && (!opts.Sections.IsZero() || len(opts.SectionFlags) > 0) {
 		return usageErr("section flags (--what/--why/--testing) and --body-file are mutually exclusive")
+	}
+	if opts.Amend && (opts.Ready || opts.Base != "") {
+		return usageErr("--amend cannot be combined with --ready or --base; it edits the title and body only")
 	}
 	if a.Git == nil {
 		return genericErr("pr needs a git checkout; it is not available here")
@@ -69,8 +76,11 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 	if err != nil {
 		return err
 	}
+	if opts.Amend {
+		return a.amendPR(ctx, opts, issue, head, prCtx)
+	}
 	if prCtx.Existing != nil {
-		return genericErr("#%d already has an open PR from %s: #%d — push to the branch instead",
+		return genericErr("#%d already has an open PR from %s: #%d — push to the branch or use --amend to revise its title/body",
 			issue.Number, head, prCtx.Existing.Number)
 	}
 	base := opts.Base
@@ -225,41 +235,138 @@ func formatNumbers(issues []model.Issue) string {
 // composed path always writes exactly one, and a --body-file that already
 // closes the right issue is left alone rather than given a second link.
 func (a *App) composePRBody(opts PROpts, issue model.Issue) (string, error) {
+	if opts.BodyFile != "" {
+		return a.prBodyFile(opts.BodyFile, issue)
+	}
+	sections := opts.Sections
+	// Creation defaults to the issue; amendments default to the PR itself.
+	if sections.What == "" {
+		sections.What = conventions.FirstSection(issue.Body, "Fix", "Approach")
+	}
+	if sections.Why == "" {
+		sections.Why = conventions.FirstSection(issue.Body, "Problem", "Goal")
+	}
+	return a.finishPRSections(sections, issue)
+}
+
+func (a *App) amendPR(ctx context.Context, opts PROpts, issue model.Issue, head string, prCtx gh.PRContext) error {
+	existing := prCtx.Existing
+	if existing == nil {
+		return genericErr("#%d has no open PR from %s; omit --amend to create one", issue.Number, head)
+	}
+	// A head name can match several base branches or a fork. The first
+	// node is sufficient to refuse creation, but mutation needs proof that
+	// this is the only match and its head belongs to our repository.
+	if prCtx.OpenCount != 1 {
+		return genericErr("cannot select an unambiguous PR from %s: found %d open matches; use gh pr edit with an explicit PR number", head, prCtx.OpenCount)
+	}
+	if !strings.EqualFold(existing.HeadRepository, a.Repo.String()) {
+		return genericErr("cannot amend PR #%d: head repository %q does not identify %s; use gh pr edit with an explicit PR number", existing.Number, existing.HeadRepository, a.Repo)
+	}
+	var body string
+	var err error
+	switch {
+	case opts.BodyFile != "":
+		body, err = a.prBodyFile(opts.BodyFile, issue)
+	case opts.Sections.IsZero() && len(opts.SectionFlags) == 0:
+		// A title-only edit preserves even a freeform body.
+		body, err = a.finishPRBody(existing.Body, issue, "PR body")
+	default:
+		content := existing.Body
+		// Section reads to the next heading, so detach our generated trailer
+		// block before reading the final section. Other closing links remain
+		// in the content and are checked along with the replacement sections.
+		trailers := prTrailers(issue)
+		for _, suffix := range []string{trailers.Render(), conventions.FixesLine(issue.Number)} {
+			content = strings.TrimSpace(content)
+			if content == suffix {
+				content = ""
+			} else {
+				content = strings.TrimSuffix(content, "\n\n"+suffix)
+			}
+		}
+		preserved := conventions.PRSections{
+			What:    conventions.Section(content, "What"),
+			Why:     conventions.Section(content, "Why"),
+			Testing: conventions.Section(content, "Testing"),
+		}
+		// Section is a simple template reader, not a Markdown parser. Require
+		// an exact round trip before editing, and refuse fences even when an
+		// example's headings happen to look like the canonical template.
+		safe := preserved.Compose(conventions.PRTrailers{}) == content
+		for _, line := range strings.Split(content, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+				safe = false
+			}
+		}
+		if !safe {
+			return usageErr("cannot safely parse this PR body for section edits; use --amend --body-file to replace the whole body")
+		}
+		sections := opts.Sections
+		if sections.What == "" && !slices.Contains(opts.SectionFlags, "what") {
+			sections.What = preserved.What
+		}
+		if sections.Why == "" && !slices.Contains(opts.SectionFlags, "why") {
+			sections.Why = preserved.Why
+		}
+		if sections.Testing == "" && !slices.Contains(opts.SectionFlags, "testing") {
+			sections.Testing = preserved.Testing
+		}
+		body, err = a.finishPRSections(sections, issue)
+	}
+	if err != nil {
+		return err
+	}
+	title := opts.Title
+	if title == "" {
+		title = existing.Title
+	}
+	if err := a.Client.UpdatePullRequest(ctx, existing.Number, title, body); err != nil {
+		return err
+	}
+	return a.emitResult(prJSON{
+		Number: existing.Number, URL: existing.URL, Draft: existing.Draft,
+		Fixes: issue.Number, Head: head, Base: existing.Base, Title: title,
+	}, func() {
+		a.printf("updated PR #%d for #%d: %s\n", existing.Number, issue.Number, render.SanitizeInline(title))
+		a.printf("%s\n", existing.URL)
+	})
+}
+
+func prTrailers(issue model.Issue) conventions.PRTrailers {
 	trailers := conventions.PRTrailers{Fixes: issue.Number}
 	if issue.Parent != nil {
 		trailers.Epic = issue.Parent.Number
 	}
-	if opts.BodyFile == "" {
-		sections := opts.Sections
-		// The issue already says what the change does and why; carry it over
-		// so the PR isn't a retyping exercise (or, more often, empty).
-		if sections.What == "" {
-			sections.What = conventions.FirstSection(issue.Body, "Fix", "Approach")
-		}
-		if sections.Why == "" {
-			sections.Why = conventions.FirstSection(issue.Body, "Problem", "Goal")
-		}
-		if sections.Testing == "" {
-			a.warnf("no --testing section: say how this was verified")
-		}
-		body := sections.Compose(trailers)
-		a.warnUnmarkedCode(body, "gh pr edit")
-		return body, nil
-	}
+	return trailers
+}
 
-	raw, err := os.ReadFile(opts.BodyFile)
+func (a *App) finishPRSections(sections conventions.PRSections, issue model.Issue) (string, error) {
+	if strings.TrimSpace(sections.Testing) == "" {
+		a.warnf("no --testing section: say how this was verified")
+	}
+	return a.finishPRBody(sections.Compose(conventions.PRTrailers{}), issue, "PR body")
+}
+
+func (a *App) prBodyFile(path string, issue model.Issue) (string, error) {
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return "", genericErr("cannot read --body-file: %v", err)
 	}
-	// A hand-written body keeps whatever links it already makes; the rest are
-	// appended, so the escape hatch ends up with the same set of links the
-	// template would have written — never a second copy of one.
-	body := strings.TrimRight(string(raw), "\n")
+	return a.finishPRBody(string(raw), issue, "--body-file")
+}
+
+// Both paths enforce exactly one closing reference and append only missing
+// trailers, so a section flag cannot bypass the body-file guard either.
+func (a *App) finishPRBody(raw string, issue model.Issue, source string) (string, error) {
+	trailers := prTrailers(issue)
+	body := strings.TrimRight(raw, "\n")
 	switch refs := conventions.FixesReferences(body); {
 	case len(refs) > 1:
-		return "", usageErr("--body-file closes %d issues; a PR closes exactly one", len(refs))
+		return "", usageErr("%s closes %d issues; a PR closes exactly one", source, len(refs))
 	case len(refs) == 1 && refs[0] != issue.Number:
-		return "", usageErr("--body-file closes #%d but this PR is for #%d", refs[0], issue.Number)
+		return "", usageErr("%s closes #%d but this PR is for #%d", source, refs[0], issue.Number)
 	case len(refs) == 1:
 		trailers.Fixes = 0
 	}
@@ -267,8 +374,11 @@ func (a *App) composePRBody(opts PROpts, issue model.Issue) (string, error) {
 		trailers.Epic = 0
 	}
 	if missing := trailers.Render(); missing != "" {
-		body += "\n\n" + missing
+		if body != "" {
+			body += "\n\n"
+		}
+		body += missing
 	}
-	a.warnUnmarkedCode(body, "gh pr edit")
+	a.warnUnmarkedCode(body, "hew pr --amend")
 	return body, nil
 }
