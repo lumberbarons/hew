@@ -75,6 +75,46 @@ func TestBlockAlreadyBlockedIsJSON(t *testing.T) {
 	assertNoWrites(t, f)
 }
 
+// The no-op and the changed write answer with the same document, so a caller
+// parses one shape whichever happened: Block's listing read is leaner than
+// GetIssue, and the no-op has to re-fetch rather than echo it.
+func TestBlockNoOpJSONHasTheSameKeysAsAChangedBlock(t *testing.T) {
+	keys := func(got map[string]any) map[string]bool {
+		m := map[string]bool{}
+		for k := range got {
+			m[k] = true
+		}
+		return m
+	}
+	f := newFake(issue(1, "A", "P2", "bug"), issue(2, "B", "P2", "bug"))
+	app, out, _ := newApp(f)
+	app.JSON = true
+	if err := app.Block(ctx, 1, 2, false); err != nil {
+		t.Fatal(err)
+	}
+	changed := decodeJSON(t, out)
+	out.Reset()
+	if err := app.Block(ctx, 1, 2, false); err != nil {
+		t.Fatal(err)
+	}
+	noop := decodeJSON(t, out)
+	if noop["unchanged"] != true || changed["unchanged"] != nil {
+		t.Fatalf("unchanged: noop = %v, changed = %v", noop["unchanged"], changed["unchanged"])
+	}
+	delete(noop, "unchanged")
+	got, want := keys(noop), keys(changed)
+	for k := range want {
+		if !got[k] {
+			t.Errorf("no-op document lacks %q", k)
+		}
+	}
+	for k := range got {
+		if !want[k] {
+			t.Errorf("no-op document has extra %q", k)
+		}
+	}
+}
+
 func TestUnblockNotBlockedIsJSON(t *testing.T) {
 	f := newFake(issue(1, "A", "P2", "bug"), issue(2, "B", "P2", "bug"))
 	app, out, _ := newApp(f)
@@ -119,6 +159,11 @@ func TestApplyDryRunIsJSON(t *testing.T) {
 	if len(toCreate) != 3 {
 		t.Fatalf("wouldCreate = %v, want 3 entries", got["wouldCreate"])
 	}
+	if epic, _ := toCreate[0].(map[string]any); epic["parent"] != nil {
+		t.Errorf("epic1 parent = %v, want null", epic["parent"])
+	} else if _, ok := epic["parent"]; !ok {
+		t.Errorf("epic1 lacks a parent key: %v", epic)
+	}
 	scaffold, _ := toCreate[1].(map[string]any)
 	if scaffold["key"] != "scaffold" || scaffold["priority"] != "P2" || scaffold["type"] != "task" ||
 		scaffold["title"] != "Scaffold" || scaffold["parent"] != "epic1" {
@@ -130,6 +175,25 @@ func TestApplyDryRunIsJSON(t *testing.T) {
 	}
 	if len(f.calls) != 0 {
 		t.Errorf("dry run made API calls: %v", f.calls)
+	}
+}
+
+func TestApplyEmptyPlanDryRunIsJSON(t *testing.T) {
+	_, app, opts := applySetup(t, "\n")
+	app.JSON = true
+	opts.DryRun = true
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	got := decodeJSON(t, app.Out.(*bytes.Buffer))
+	if got["dryRun"] != true {
+		t.Errorf("dryRun = %v, want true", got["dryRun"])
+	}
+	if c, ok := got["wouldCreate"].([]any); !ok || len(c) != 0 {
+		t.Errorf("wouldCreate = %#v, want an empty array", got["wouldCreate"])
+	}
+	if m, ok := got["alreadyCreated"].(map[string]any); !ok || len(m) != 0 {
+		t.Errorf("alreadyCreated = %#v, want an empty object", got["alreadyCreated"])
 	}
 }
 
@@ -170,6 +234,24 @@ func TestMigrateBeadsNothingToDoIsJSON(t *testing.T) {
 	}
 }
 
+func TestMigrateBeadsNothingToDoDryRunIsJSON(t *testing.T) {
+	fixture := `{"_type":"issue","id":"sc-done","title":"Old","status":"closed","priority":2,"issue_type":"task","created_at":"2026-05-01T00:00:00Z"}
+`
+	_, app, opts := migrateSetup(t, fixture)
+	app.JSON = true
+	opts.DryRun = true
+	if err := app.MigrateBeads(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	got := decodeJSON(t, app.Out.(*bytes.Buffer))
+	if got["dryRun"] != true || got["skippedClosed"] != float64(1) {
+		t.Errorf("dryRun/skippedClosed = %v/%v, want true/1", got["dryRun"], got["skippedClosed"])
+	}
+	if c, ok := got["wouldMigrate"].([]any); !ok || len(c) != 0 {
+		t.Errorf("wouldMigrate = %#v, want an empty array", got["wouldMigrate"])
+	}
+}
+
 func TestMigrateBeadsDryRunIsJSON(t *testing.T) {
 	f, app, opts := migrateSetup(t, migrationFixture)
 	app.JSON = true
@@ -200,6 +282,17 @@ func TestMigrateBeadsDryRunIsJSON(t *testing.T) {
 	}
 	if blockers, _ := byID["sc-2"]["blockedBy"].([]any); len(blockers) != 1 || blockers[0] != "sc-1" {
 		t.Errorf("sc-2 blockedBy = %v", byID["sc-2"]["blockedBy"])
+	}
+	// Absent facts are null, never a missing key: every entry has one shape.
+	for id, e := range byID {
+		for _, k := range []string{"type", "parent", "blockedBy"} {
+			if _, ok := e[k]; !ok {
+				t.Errorf("%s lacks key %q: %v", id, k, e)
+			}
+		}
+	}
+	if byID["sc-epic"]["parent"] != nil {
+		t.Errorf("sc-epic parent = %v, want null", byID["sc-epic"]["parent"])
 	}
 	if byID["sc-done"]["thenClose"] != true {
 		t.Errorf("sc-done = %v", byID["sc-done"])

@@ -80,11 +80,18 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 		}
 	}
 	if len(selected) == 0 {
-		return a.emitResult(map[string]any{
+		result := map[string]any{
 			"created": 0, "wired": 0, "closed": 0,
 			"skippedClosed": skippedClosed, "warnings": []string{},
 			"mapping": map[string]int{},
-		}, func() {
+		}
+		if opts.DryRun {
+			result = map[string]any{
+				"dryRun": true, "wouldMigrate": []migrationPlanEntry{},
+				"alreadyMigrated": map[string]int{}, "skippedClosed": skippedClosed,
+			}
+		}
+		return a.emitResult(result, func() {
 			a.printf("nothing to migrate (%d closed beads skipped; use --include-closed)\n", skippedClosed)
 		})
 	}
@@ -143,9 +150,9 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 type migrationPlanEntry struct {
 	ID         string   `json:"id"`
 	Priority   string   `json:"priority"`
-	Type       string   `json:"type,omitempty"`
+	Type       *string  `json:"type"`
 	Title      string   `json:"title"`
-	Parent     string   `json:"parent,omitempty"`
+	Parent     *string  `json:"parent"`
 	BlockedBy  []string `json:"blockedBy"`
 	InProgress bool     `json:"inProgress"`
 	ThenClose  bool     `json:"thenClose"`
@@ -153,46 +160,58 @@ type migrationPlanEntry struct {
 
 // migrationPlan reports what a real run would do.
 func (a *App) migrationPlan(selected []beads.Bead, state map[string]int, skippedClosed int) error {
+	// One step per selected bead, in snapshot order: either already migrated
+	// or a planned create. Text walks the steps; JSON splits them.
+	type step struct {
+		id       string
+		migrated int
+		planned  bool
+		item     migrationPlanEntry
+	}
+	steps := make([]step, 0, len(selected))
 	wouldMigrate := []migrationPlanEntry{}
 	already := map[string]int{}
 	for _, b := range selected {
 		if n, ok := state[b.ID]; ok {
 			already[b.ID] = n
+			steps = append(steps, step{id: b.ID, migrated: n})
 			continue
 		}
 		item := migrationPlanEntry{
 			ID: b.ID, Priority: model.Priority(clampPriority(b.Priority)).String(),
-			Type: beadTypeLabels[b.IssueType], Title: b.Title, Parent: b.Parent(),
-			BlockedBy:  append([]string{}, b.BlockedBy()...),
+			Title: b.Title, BlockedBy: append([]string{}, b.BlockedBy()...),
 			InProgress: b.Status == "in_progress", ThenClose: b.Closed(),
 		}
-		if item.Type == "" && b.IssueType == "epic" {
-			item.Type = "epic"
+		if t := beadTypeLabels[b.IssueType]; t != "" {
+			item.Type = &t
+		} else if b.IssueType == "epic" {
+			epic := "epic"
+			item.Type = &epic
+		}
+		if p := b.Parent(); p != "" {
+			item.Parent = &p
 		}
 		wouldMigrate = append(wouldMigrate, item)
+		steps = append(steps, step{id: b.ID, planned: true, item: item})
 	}
 	return a.emitResult(map[string]any{
 		"dryRun": true, "wouldMigrate": wouldMigrate, "alreadyMigrated": already,
 		"skippedClosed": skippedClosed,
 	}, func() {
-		// wouldMigrate keeps snapshot order, so walking selected and
-		// wouldMigrate together interleaves the already-migrated lines.
-		next := 0
-		for _, b := range selected {
-			if n, ok := already[b.ID]; ok {
-				a.printf("already migrated: %s → #%d\n", b.ID, n)
+		for _, st := range steps {
+			if !st.planned {
+				a.printf("already migrated: %s → #%d\n", st.id, st.migrated)
 				continue
 			}
-			item := wouldMigrate[next]
-			next++
+			item := st.item
 			line := fmt.Sprintf("create: %s as %s", item.ID, item.Priority)
-			if item.Type != "" {
-				line += " " + item.Type
+			if item.Type != nil {
+				line += " " + *item.Type
 			}
 			line += "  " + item.Title
 			var marks []string
-			if item.Parent != "" {
-				marks = append(marks, "parent "+item.Parent)
+			if item.Parent != nil {
+				marks = append(marks, "parent "+*item.Parent)
 			}
 			if len(item.BlockedBy) > 0 {
 				marks = append(marks, "blocked by "+strings.Join(item.BlockedBy, " "))

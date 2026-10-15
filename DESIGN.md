@@ -479,6 +479,16 @@ object is neither the text primer nor the data schema.
   output is NDJSON, one compact object per line: a truncated JSON array is
   unparseable garbage, a truncated NDJSON stream is just shorter (same feedback).
   The primer states both formats so agents reach for the cheap one.
+  Every exit-0 path honours `--json`, including the idempotent ones an agent
+  hits on a retry. A write whose requested state already held (`reopen` on an
+  open issue, `block` on an existing edge, `unblock` on an absent one) emits the
+  same full issue document a changed write does, plus `"unchanged": true`; the
+  field is absent, not false, on a write that changed something. `apply` and
+  `migrate beads` answer an empty plan in their normal result shape, and
+  `--dry-run` emits `{dryRun: true, wouldCreate | wouldMigrate: [...],
+  alreadyCreated | alreadyMigrated: {key: number}}` — an empty plan under
+  `--dry-run` keeps that shape. Plan entries carry every key on every entry,
+  with `null` for an absent parent or type, so one schema parses them all.
 - Errors are one line, actionable, exit codes meaningful (`ready` with no results
   exits 0 with `no ready work`; `start` on an issue claimed by someone else exits 3
   with `already claimed`; `start` on an issue you already claimed exits 5, because
