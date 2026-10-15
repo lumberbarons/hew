@@ -272,18 +272,24 @@ func TestJSONFlagReachesCommand(t *testing.T) {
 	}
 }
 
-// TestNoCommandRedeclaresGlobalFlag walks the whole command tree: --json and
-// --repo belong to the root alone, and any other command declaring them
-// shadows the root's parsed value with an empty one (#25, #155). The reach
-// tests only cover the commands they name, so this is what catches the next
+// TestNoCommandRedeclaresGlobalFlag walks the whole command tree: the flags
+// in globalFlags() (--json, --repo) belong to the root alone, and any other
+// command declaring them shadows the root's parsed value with an empty one
+// (#25, #155). The reach tests only cover the commands they name, so this is what catches the next
 // command added with `append(globalFlags(), ...)`.
 func TestNoCommandRedeclaresGlobalFlag(t *testing.T) {
+	global := map[string]bool{}
+	for _, f := range globalFlags() {
+		for _, name := range f.Names() {
+			global[name] = true
+		}
+	}
 	var walk func(cmd *ucli.Command, path string)
 	walk = func(cmd *ucli.Command, path string) {
 		if path != "" {
 			for _, f := range cmd.Flags {
 				for _, name := range f.Names() {
-					if name == "json" || name == "repo" {
+					if global[name] {
 						t.Errorf("%s redeclares global flag --%s; declare it on the root only", path, name)
 					}
 				}
