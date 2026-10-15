@@ -143,7 +143,7 @@ func TestShowCleanIssueHasNoFindings(t *testing.T) {
 func TestMutationsDoNotAnnotateUnicode(t *testing.T) {
 	app, out, _ := newApp(newFake(issue(1, "Report p\u0430ypal\u200b", "P2", "bug")))
 	app.JSON = true
-	if err := app.Start(ctx, 1, "", false); err != nil {
+	if err := app.Start(ctx, 1, StartOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(out.String(), "textFindings") {

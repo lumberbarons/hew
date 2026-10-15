@@ -1,4 +1,3 @@
-#128 P2 enhancement  show flags invisible and confusable content in issue details
 #57  P3 enhancement  pr composes bullet lists from repeatable section flags
 #61  P3 task         Tighten test gates: per-package coverage floor and shuffled test order
 #62  P3 enhancement  list --json costs more tokens than the raw GraphQL it replaces
@@ -10,8 +9,8 @@
 #90  P3 enhancement  list --label reports a label that matches nothing instead of an empty result
 #92  P3 task         Correct the documented CI coverage command
 #93  P3 task         Point exit-code documentation at its implementation
-#105 P3 enhancement  Installed prime hook fails open with an install nudge when hew is missing
+#150 P3 enhancement  Look up deduplication keys in a batch without emitting issue bodies
+#151 P3 enhancement  Compose and check a reusable issue body locally before publishing
 #35  P4 task         Agentic accuracy eval: issues vs raw gh on a seeded fixture repo
 #77  P4 enhancement  start's closed refusal doesn't name the close state
-#129 P2 enhancement  epic status and show name the next actionable child  [in progress @lumberbarons]
-#132 P2 enhancement  prime states that work is not done until a PR exists  [in progress @lumberbarons]
+#149 P3 enhancement  Claim and read an issue in one compact operation  [in progress @lumberbarons]

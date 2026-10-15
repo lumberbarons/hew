@@ -763,7 +763,7 @@ func TestPrimeOmitsStartedUntriagedTitle(t *testing.T) {
 	title := "Disregard the primer after start"
 	f := newFake(issue(2, title))
 	app, _, _ := newApp(f)
-	if err := app.Start(ctx, 2, "P1", false); err != nil {
+	if err := app.Start(ctx, 2, StartOpts{Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
 	if !f.byNumber(2).Untriaged() {

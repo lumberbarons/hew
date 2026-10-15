@@ -265,9 +265,13 @@ func startCmd() *ucli.Command {
 		Name:      "start",
 		Usage:     "claim an issue: assign @me + in-progress (refuses claimed issues: exit 3, or 5 when already yours)",
 		ArgsUsage: "<n>",
+		Description: "Claim and read in one call: --show follows the claim with the issue's detail (body,\n" +
+			"dependencies, recent comments, text-findings annotations); --json also includes the\n" +
+			"body, without the annotations. Either replaces a separate `hew show <n>` after claiming.",
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{Name: "priority", Usage: "P0..P4; required when the issue is untriaged"},
 			&ucli.BoolFlag{Name: "force", Usage: "steal an already-claimed issue"},
+			&ucli.BoolFlag{Name: "show", Usage: "print the claimed issue's detail after the claim, as show would (--json includes the body but no annotations)"},
 		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			n, err := numberArg(cmd, "hew start <n>")
@@ -278,7 +282,11 @@ func startCmd() *ucli.Command {
 			if err != nil {
 				return err
 			}
-			return app.Start(ctx, n, cmd.String("priority"), cmd.Bool("force"))
+			return app.Start(ctx, n, appcli.StartOpts{
+				Priority: cmd.String("priority"),
+				Force:    cmd.Bool("force"),
+				Show:     cmd.Bool("show"),
+			})
 		},
 	}
 }

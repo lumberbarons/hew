@@ -224,12 +224,17 @@ hew create --type bug|enhancement|task [--priority P0..P4] [--area X]
               --title "..." [--where X] [--problem|--goal "..."]
               [--fix|--approach "..."] [--done-when "..."]...
               [--body-file F | --edit]
-hew start <n> [--priority P0..P4] [--force]
+hew start <n> [--priority P0..P4] [--force] [--show]
                                   # guarded claim: refuses if already assigned or
                                   # in-progress (exit 3 — pick the next ready item;
                                   # exit 5 when the claimant is you — resume that
                                   # work); --force steals; untriaged issues
-                                  # require --priority (claim = triage)
+                                  # require --priority (claim = triage); --show
+                                  # follows the claim with the show detail from the
+                                  # post-claim read (no extra fetch); --json also
+                                  # includes the body but, like every mutation, omits
+                                  # text-findings annotations — either replaces a
+                                  # separate show after claiming
 hew triage [--search <terms>] # untriaged issues (missing priority/type), oldest
                                   # first — work through them with `set`. The sole
                                   # emitter of untriaged content, the unit a harness
@@ -440,7 +445,7 @@ File discovered work with --discovered-from. Never work an epic directly.
 
 Everything after the header is one line per issue: `#n priority type (areas) title`.
 No URLs, no timestamps, no prose. Target: whole primer under ~1200 tokens for a
-typical repo — measured 1006–1009 on the two fixtures below, ~840 of it the
+typical repo — measured 1014–1025 on the two fixtures below, ~860 of it the
 static conventions half (see the token-efficiency section).
 
 Agent hooks consume prime differently: Claude Code and Codex inject its stdout
@@ -612,9 +617,9 @@ any product code.
   and command cheatsheet plus live Ready / In progress / Blocked / Epics sections —
   measures ~640 tokens (tiktoken `o200k_base`; Claude's tokenizer typically runs
   slightly higher). The real primer does not: the static conventions half alone
-  costs ~840 tokens, because the cheatsheet documents every command and flag
+  costs ~860 tokens, because the cheatsheet documents every command and flag
   (`TestPrimerMatchesCommandSurface` pins that surface), and live primers
-  measure 1006–1009. The budget was restated to ~1200 on the measurement (#63),
+  measure 1014–1025. The budget was restated to ~1200 on the measurement (#63),
   and the live sections are each capped at five with pointers (#63 again), so
   the bound holds for repos larger than the fixtures too.
 - **Cycle rejection — partial; client-side check confirmed necessary.** Tested live
@@ -631,7 +636,7 @@ any product code.
   blocker, so a cycle silently excludes all its members from `ready` forever.
   `prime` and `ready` warn when they see one.
 
-## Token efficiency (measured 2026-09-17)
+## Token efficiency (measured 2026-10-14)
 
 The token-lean claim, measured rather than asserted. The harness lives in
 [evals/](evals/): `capture` records both sides' raw output from a live repo into
@@ -658,17 +663,17 @@ lumberbarons/solar-controller — 14 open issues:
 | `hew ready` | 324 | 1969 | 6.1x | gh issue list --json † |
 | `hew list` | 353 | 1172 | 3.3x | gh api graphql (open issues) |
 | `hew list --json` | 1607 | 1172 | 0.7x | gh api graphql (open issues) |
-| `hew prime` | 1006 | 1172 | 1.2x | gh api graphql (open issues) |
+| `hew prime` | 1025 | 1172 | 1.1x | gh api graphql (open issues) |
 | `hew show #119` | 430 | 590 | 1.4x | gh issue view --json + gh api graphql |
 
 Findings, including the ones that don't flatter the tool:
 
 - **The claim holds for the reads an agent actually loops on.** `ready` and
-  `list` cost 17–25 tokens per open issue against 77–84 for the equivalent
-  GraphQL and 113–141 for `gh issue list --json` — 3.3x–4.5x and 5.6x–6.6x
+  `list` cost 17–25 tokens per open issue against 75–84 for the equivalent
+  GraphQL and 105–141 for `gh issue list --json` — 3.3x–4.4x and 5.6x–6.2x
   respectively across both fixtures. This is the whole-tracker read that
   happens every iteration, so it is where the saving compounds.
-- **`show` saves less: 1.3x–1.5x.** Bodies dominate `show` and both sides carry
+- **`show` saves less: 1.3x–1.7x.** Bodies dominate `show` and both sides carry
   them verbatim; the value there is the deps line, not the token count. Worth
   saying plainly rather than averaging into a headline.
 - **`list --json` currently costs *more* than the raw GraphQL it replaces
@@ -676,10 +681,10 @@ Findings, including the ones that don't flatter the tool:
   empty arrays, derived booleans, `createdAt` — where the lean query writes seven
   fields. The schema's stability is deliberate (agents parse it), but the token
   cost is a real regression against the tool's own claim, filed as #62.
-- **`prime` measures 1006–1009 tokens against its ~1200 target, restated in
+- **`prime` measures 1014–1025 tokens against its ~1200 target, restated in
   #63.** The ~600 target came from the mock, not from output: the static
-  conventions half alone measures ~840 tokens under o200k_base, and the live
-  sections add ~170 on both fixtures. Every command and flag of the cheatsheet
+  conventions half alone measures ~860 tokens under o200k_base, and the live
+  sections add ~160 on both fixtures. Every command and flag of the cheatsheet
   is documented by design (`TestPrimerMatchesCommandSurface` pins that
   surface), so the original target was unreachable without gutting the tool's
   core teaching — the budget moved to the measured number instead, and the

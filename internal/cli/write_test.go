@@ -264,7 +264,7 @@ func TestCreateJSON(t *testing.T) {
 func TestStartClaims(t *testing.T) {
 	f := newFake(issue(1, "Work", "P2", "bug"))
 	app, out, errOut := newApp(f)
-	if err := app.Start(ctx, 1, "", false); err != nil {
+	if err := app.Start(ctx, 1, StartOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	i := f.byNumber(1)
@@ -279,17 +279,125 @@ func TestStartClaims(t *testing.T) {
 	}
 }
 
+// start --show is the claim-and-read path: the claim confirmation followed by
+// the same detail `show` renders, taken from the post-claim re-read rather
+// than a further fetch.
+func TestStartShowRendersClaimedDetail(t *testing.T) {
+	i := issue(1, "Work", "P2", "bug")
+	i.Body = "### Goal\n\nDo the thing."
+	i.Comments = []model.Comment{{Author: "alice", Body: "context here"}}
+	i.CommentsTotal = 1
+	i.BlockedBy = []model.Ref{{Number: 9, State: "OPEN"}}
+	f := newFake(i)
+	app, out, errOut := newApp(f)
+	if err := app.Start(ctx, 1, StartOpts{Show: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{"started #1", "### Goal", "Do the thing.", "blocked by: #9", "@alice", "context here", "assignee: @me"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("start --show output missing %q:\n%s", want, got)
+		}
+	}
+	if !slices.Contains(f.byNumber(1).Assignees, "me") {
+		t.Errorf("claim not applied: %v", f.byNumber(1).Assignees)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("unexpected warnings: %q", errOut.String())
+	}
+	// The detail comes from the post-claim read already made: one before the
+	// guard, one after the claim, and nothing for the detail view.
+	if n := f.callCounts["GetIssue"]; n != 2 {
+		t.Errorf("GetIssue calls = %d, want 2 (calls: %v)", n, f.calls)
+	}
+}
+
+// The detail view carries the same text-findings annotations as show.
+func TestStartShowAnnotatesTextFindings(t *testing.T) {
+	i := issue(1, "Work", "P2", "bug")
+	i.Body = "Pay p\u0430ypal\u200b now"
+	app, out, _ := newApp(newFake(i))
+	if err := app.Start(ctx, 1, StartOpts{Show: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "text findings:") {
+		t.Errorf("start --show should annotate text findings like show:\n%s", out.String())
+	}
+}
+
+// Without --show, the default text summary is unchanged: no body, no detail.
+func TestStartDefaultOmitsDetail(t *testing.T) {
+	i := issue(1, "Work", "P2", "bug")
+	i.Body = "### Goal\n\nDo the thing."
+	app, out, _ := newApp(newFake(i))
+	if err := app.Start(ctx, 1, StartOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "started #1: Work\n" {
+		t.Errorf("default output = %q", out.String())
+	}
+}
+
+// --json already is the full issue; --show must not change its schema or
+// append text to the stream.
+func TestStartShowWithJSONKeepsSchema(t *testing.T) {
+	i := issue(1, "Work", "P2", "bug")
+	i.Body = "body text"
+	plain, plainOut, _ := newApp(newFake(issue(1, "Work", "P2", "bug")))
+	plain.JSON = true
+	plain.Client.(*fakeClient).byNumber(1).Body = "body text"
+	if err := plain.Start(ctx, 1, StartOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	app, out, _ := newApp(newFake(i))
+	app.JSON = true
+	if err := app.Start(ctx, 1, StartOpts{Show: true}); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != plainOut.String() {
+		t.Errorf("--json --show differs from --json:\n%s\nvs\n%s", out.String(), plainOut.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("not a single JSON object: %v\n%s", err, out.String())
+	}
+	if got["body"] != "body text" {
+		t.Errorf("body = %v", got["body"])
+	}
+}
+
+// A refused claim never looks successful under --show: no detail on stdout,
+// the same exit codes, and no mutation.
+func TestStartShowRefusalsStayRefusals(t *testing.T) {
+	theirs := issue(1, "Taken", "P2", "bug")
+	theirs.Assignees = []string{"other"}
+	theirs.Body = "secret body"
+	mine := issue(2, "Mine", "P2", "bug")
+	mine.Assignees = []string{"me"}
+	mine.Body = "my body"
+	f := newFake(theirs, mine)
+	app, out, _ := newApp(f)
+	exitCode(t, app.Start(ctx, 1, StartOpts{Show: true}), ExitClaimed)
+	exitCode(t, app.Start(ctx, 2, StartOpts{Show: true}), ExitClaimedByYou)
+	if out.Len() != 0 {
+		t.Errorf("refused start --show wrote to stdout: %q", out.String())
+	}
+	if got := f.byNumber(1).Assignees; !reflect.DeepEqual(got, []string{"other"}) {
+		t.Errorf("refused start mutated #1: %v", got)
+	}
+}
+
 func TestStartRefusesClaimed(t *testing.T) {
 	assigned := issue(1, "Taken", "P2", "bug")
 	assigned.Assignees = []string{"other"}
 	f := newFake(assigned, issue(2, "Labeled", "P2", "bug", "in-progress"))
 	app, _, _ := newApp(f)
-	err := app.Start(ctx, 1, "", false)
+	err := app.Start(ctx, 1, StartOpts{})
 	exitCode(t, err, ExitClaimed)
 	if !strings.Contains(err.Error(), "@other") {
 		t.Errorf("message should name the claimant: %v", err)
 	}
-	exitCode(t, app.Start(ctx, 2, "", false), ExitClaimed)
+	exitCode(t, app.Start(ctx, 2, StartOpts{}), ExitClaimed)
 	// The refusal must come before any mutation: the claimant keeps the
 	// issue exactly as it was.
 	one := f.byNumber(1)
@@ -312,7 +420,7 @@ func TestStartRefusesOwnClaim(t *testing.T) {
 	f := newFake(mine, shared)
 	app, _, errOut := newApp(f)
 
-	err := app.Start(ctx, 1, "", false)
+	err := app.Start(ctx, 1, StartOpts{})
 	exitCode(t, err, ExitClaimedByYou)
 	if ExitClaimedByYou == ExitClaimed {
 		t.Fatal("the two claim refusals must use different exit codes")
@@ -322,7 +430,7 @@ func TestStartRefusesOwnClaim(t *testing.T) {
 	}
 	// A co-assignment still counts as mine: I am one of the claimants, so
 	// resuming — not skipping to the next item — is the right move.
-	exitCode(t, app.Start(ctx, 2, "", false), ExitClaimedByYou)
+	exitCode(t, app.Start(ctx, 2, StartOpts{}), ExitClaimedByYou)
 	// Refusing reports; it must not mutate either issue.
 	if got := f.byNumber(2).Assignees; !reflect.DeepEqual(got, []string{"other", "me"}) {
 		t.Errorf("refused start mutated #2: %v", got)
@@ -345,7 +453,7 @@ func TestStartClaimRefusalWithoutViewer(t *testing.T) {
 	f.failOn["Viewer"] = errors.New("network down")
 	app, _, errOut := newApp(f)
 
-	err := app.Start(ctx, 1, "", false)
+	err := app.Start(ctx, 1, StartOpts{})
 	exitCode(t, err, ExitClaimed)
 	if !strings.Contains(errOut.String(), "network down") {
 		t.Errorf("degraded refusal should warn why: %q", errOut.String())
@@ -360,7 +468,7 @@ func TestStartForceSteals(t *testing.T) {
 	assigned.Assignees = []string{"other"}
 	f := newFake(assigned)
 	app, _, _ := newApp(f)
-	if err := app.Start(ctx, 1, "", true); err != nil {
+	if err := app.Start(ctx, 1, StartOpts{Force: true}); err != nil {
 		t.Fatal(err)
 	}
 	i := f.byNumber(1)
@@ -376,20 +484,20 @@ func TestStartGuards(t *testing.T) {
 	epicIssue.SubIssues = []model.Ref{{Number: 1, State: "CLOSED"}}
 	f := newFake(closed, epicIssue, issue(3, "Untriaged"))
 	app, _, _ := newApp(f)
-	if err := app.Start(ctx, 1, "", false); err == nil || !strings.Contains(err.Error(), "closed") {
+	if err := app.Start(ctx, 1, StartOpts{}); err == nil || !strings.Contains(err.Error(), "closed") {
 		t.Errorf("closed err = %v", err)
 	}
-	if err := app.Start(ctx, 2, "", false); err == nil || !strings.Contains(err.Error(), "epic") {
+	if err := app.Start(ctx, 2, StartOpts{}); err == nil || !strings.Contains(err.Error(), "epic") {
 		t.Errorf("epic err = %v", err)
 	}
-	exitCode(t, app.Start(ctx, 3, "", false), ExitUsage)
-	exitCode(t, app.Start(ctx, 3, "P7", false), ExitUsage)
+	exitCode(t, app.Start(ctx, 3, StartOpts{}), ExitUsage)
+	exitCode(t, app.Start(ctx, 3, StartOpts{Priority: "P7"}), ExitUsage)
 }
 
 func TestStartUntriagedWithPriority(t *testing.T) {
 	f := newFake(issue(3, "Untriaged"))
 	app, _, _ := newApp(f)
-	if err := app.Start(ctx, 3, "P1", false); err != nil {
+	if err := app.Start(ctx, 3, StartOpts{Priority: "P1"}); err != nil {
 		t.Fatal(err)
 	}
 	i := f.byNumber(3)
@@ -401,7 +509,7 @@ func TestStartUntriagedWithPriority(t *testing.T) {
 func TestStartSwapsPriority(t *testing.T) {
 	f := newFake(issue(1, "Work", "P3", "bug"))
 	app, _, _ := newApp(f)
-	if err := app.Start(ctx, 1, "P0", false); err != nil {
+	if err := app.Start(ctx, 1, StartOpts{Priority: "P0"}); err != nil {
 		t.Fatal(err)
 	}
 	i := f.byNumber(1)
@@ -414,7 +522,7 @@ func TestStartRaceWarning(t *testing.T) {
 	f := newFake(issue(1, "Work", "P2", "bug"))
 	f.rivalOnAssign = "rival"
 	app, _, errOut := newApp(f)
-	if err := app.Start(ctx, 1, "", false); err != nil {
+	if err := app.Start(ctx, 1, StartOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(errOut.String(), "claim may have raced") {
@@ -427,7 +535,7 @@ func TestStartRaceWarning(t *testing.T) {
 func TestStartNeutralizesHostileTitle(t *testing.T) {
 	f := newFake(issue(1, "Work "+hostile, "P2", "bug"))
 	app, out, errOut := newApp(f)
-	if err := app.Start(ctx, 1, "", false); err != nil {
+	if err := app.Start(ctx, 1, StartOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	assertNeutralized(t, "start success line", out.String())
@@ -443,7 +551,7 @@ func TestClaimRefusalNeutralizesHostileAssignee(t *testing.T) {
 	assigned.Assignees = []string{"other" + hostile}
 	f := newFake(assigned)
 	app, _, errOut := newApp(f)
-	err := app.Start(ctx, 1, "", false)
+	err := app.Start(ctx, 1, StartOpts{})
 	exitCode(t, err, ExitClaimed)
 	assertNeutralized(t, "claim refusal message", err.Error())
 	assertNeutralized(t, "claim refusal warnings", errOut.String())
@@ -454,7 +562,7 @@ func TestOwnClaimRefusalNeutralizesHostileAssignee(t *testing.T) {
 	mine.Assignees = []string{"me", "other" + hostile}
 	f := newFake(mine)
 	app, _, errOut := newApp(f)
-	err := app.Start(ctx, 1, "", false)
+	err := app.Start(ctx, 1, StartOpts{})
 	exitCode(t, err, ExitClaimedByYou)
 	assertNeutralized(t, "own-claim refusal message", err.Error())
 	assertNeutralized(t, "own-claim refusal warnings", errOut.String())
@@ -464,7 +572,7 @@ func TestStartRaceWarningNeutralizesHostileAssignee(t *testing.T) {
 	f := newFake(issue(1, "Work", "P2", "bug"))
 	f.rivalOnAssign = "rival" + hostile
 	app, _, errOut := newApp(f)
-	if err := app.Start(ctx, 1, "", false); err != nil {
+	if err := app.Start(ctx, 1, StartOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	assertNeutralized(t, "race warning", errOut.String())

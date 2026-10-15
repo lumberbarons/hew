@@ -409,3 +409,19 @@ func TestPrimerFactsTrackCode(t *testing.T) {
 		t.Errorf("primer must state the default priority as %q", want)
 	}
 }
+
+// TestStartHelpNamesClaimAndRead pins the discoverability fix: an agent
+// reading `hew start --help` learns that --json already carries the issue
+// body and that --show is the compact-text equivalent, so it does not follow
+// the claim with a separate show.
+func TestStartHelpNamesClaimAndRead(t *testing.T) {
+	start := findCommand(t, root(), "start")
+	for _, want := range []string{"--show", "--json", "body"} {
+		if !strings.Contains(start.Description, want) {
+			t.Errorf("start help should mention %q: %q", want, start.Description)
+		}
+	}
+	if !slices.ContainsFunc(start.Flags, func(f ucli.Flag) bool { return slices.Contains(f.Names(), "show") }) {
+		t.Error("start has no --show flag")
+	}
+}
