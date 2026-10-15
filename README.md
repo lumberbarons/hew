@@ -44,6 +44,7 @@ hew start 42 --show  # claim it and read it: assign @me + in-progress, then the 
                   #   detail (refuses claimed work: exit 3, or exit 5 when already yours)
 # ...branch (feat/|fix/|chore/), commit, push...
 hew pr            # draft PR for the claimed issue, body composed, "Fixes #42" enforced
+hew pr --amend    # revise the open PR's title/body; omitted sections are preserved
 ```
 
 ## Session-start agents
