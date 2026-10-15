@@ -228,6 +228,8 @@ func TestRepoFlagReachesCommand(t *testing.T) {
 		{"write before subcommand", []string{"create"}, []string{"hew", "--repo", want, "create", "--type", "task", "--title", "t"}},
 		{"write after subcommand", []string{"create"}, []string{"hew", "create", "--repo", want, "--type", "task", "--title", "t"}},
 		{"nested subcommand", []string{"epic", "status"}, []string{"hew", "--repo", want, "epic", "status"}},
+		{"apply before subcommand", []string{"apply"}, []string{"hew", "--repo", want, "apply", "plan.jsonl"}},
+		{"apply after subcommand", []string{"apply"}, []string{"hew", "apply", "--repo", want, "plan.jsonl"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -257,6 +259,8 @@ func TestJSONFlagReachesCommand(t *testing.T) {
 	}{
 		{"before subcommand", []string{"ready"}, []string{"hew", "--json", "ready"}},
 		{"after subcommand", []string{"ready"}, []string{"hew", "ready", "--json"}},
+		{"apply before subcommand", []string{"apply"}, []string{"hew", "--json", "apply", "plan.jsonl"}},
+		{"apply after subcommand", []string{"apply"}, []string{"hew", "apply", "--json", "plan.jsonl"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -274,6 +278,36 @@ func TestJSONFlagReachesCommand(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestNoCommandRedeclaresGlobalFlag walks the whole command tree: the flags
+// in globalFlags() (--json, --repo) belong to the root alone, and any other
+// command declaring them shadows the root's parsed value with an empty one
+// (#25, #155). The reach tests only cover the commands they name, so this is what catches the next
+// command added with `append(globalFlags(), ...)`.
+func TestNoCommandRedeclaresGlobalFlag(t *testing.T) {
+	global := map[string]bool{}
+	for _, f := range globalFlags() {
+		for _, name := range f.Names() {
+			global[name] = true
+		}
+	}
+	var walk func(cmd *ucli.Command, path string)
+	walk = func(cmd *ucli.Command, path string) {
+		if path != "" {
+			for _, f := range cmd.Flags {
+				for _, name := range f.Names() {
+					if global[name] {
+						t.Errorf("%s redeclares global flag --%s; declare it on the root only", path, name)
+					}
+				}
+			}
+		}
+		for _, sub := range cmd.Commands {
+			walk(sub, strings.TrimSpace(path+" "+sub.Name))
+		}
+	}
+	walk(root(), "")
 }
 
 // TestClosedOverrideFlagReachesCommand covers #39: the closed-target guard is
