@@ -37,6 +37,26 @@ func ParseRepoSpec(spec string) (gh.Repo, error) {
 	return gh.Repo{Owner: owner, Name: name}, nil
 }
 
+// ValidateArgCount rejects missing or surplus positionals before a command
+// performs any I/O. min and max are inclusive; optional arguments use min 0.
+func ValidateArgCount(args []string, min, max int, usage string) error {
+	if len(args) < min || len(args) > max {
+		return usageErr("usage: %s", usage)
+	}
+	return nil
+}
+
+// ValidateIssueNumbers checks values of an explicitly set issue-number flag.
+// Callers distinguish an omitted optional flag from an explicit zero.
+func ValidateIssueNumbers(flag string, numbers ...int) error {
+	for _, n := range numbers {
+		if n <= 0 {
+			return usageErr("--%s must contain only positive issue numbers", flag)
+		}
+	}
+	return nil
+}
+
 // ParseIssueNumber parses a required positional issue number, tolerating a
 // leading '#'. It returns an ExitUsage error (with the given usage string)
 // when the argument is missing or not a positive integer.

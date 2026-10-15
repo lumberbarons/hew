@@ -67,6 +67,23 @@ func TestCreateValidation(t *testing.T) {
 	}
 }
 
+func TestCreateEpicPointsToEpicCreate(t *testing.T) {
+	for _, title := range []string{"", "Parent"} {
+		t.Run(title, func(t *testing.T) {
+			f := newFake()
+			app, _, _ := newApp(f)
+			err := app.Create(ctx, CreateOpts{Title: title, Type: "epic"})
+			exitCode(t, err, ExitUsage)
+			if !strings.Contains(err.Error(), "hew epic create") {
+				t.Errorf("error = %v, want hew epic create hint", err)
+			}
+			if len(f.calls) != 0 {
+				t.Errorf("refused create called the API: %v", f.calls)
+			}
+		})
+	}
+}
+
 func TestAreaFlagsRejectConventionLabels(t *testing.T) {
 	f := newFake(issue(1, "Work", "P2", "bug"))
 	app, _, _ := newApp(f)
