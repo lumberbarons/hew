@@ -351,7 +351,7 @@ func setCmd() *ucli.Command {
 func prCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:  "pr",
-		Usage: "open a draft PR for the claimed issue, body composed from tracker state",
+		Usage: "open a draft PR for the claimed issue, or revise it with --amend",
 		Description: `Composes the PR the workflow prescribes: the linked issue is inferred
 from what you have claimed (a number in the branch name breaks ties, and
 --for <n> settles it outright), the body is the What/Why/Testing template
@@ -360,10 +360,16 @@ the repo's default branch. What and Why default to the issue's own
 Fix/Approach and Problem/Goal sections. Push the branch first — GitHub can
 only open a PR for a ref it can see.
 
+Use --amend to revise the open PR on this branch. Omitted sections and the
+title keep their existing values; an explicitly empty section flag removes
+that section. --body-file replaces the whole body and appends missing tracker
+trailers, just as on creation. --ready and --base are creation-only flags.
+
 ` + conventions.CodeSpanGuidance,
 		Flags: []ucli.Flag{
+			&ucli.BoolFlag{Name: "amend", Usage: "revise the open PR title/body; preserve omitted sections"},
 			&ucli.IntFlag{Name: "for", Usage: "link issue `N` instead of inferring it"},
-			&ucli.StringFlag{Name: "title", Usage: "PR title (default: the issue title)"},
+			&ucli.StringFlag{Name: "title", Usage: "PR title (default: derived from the issue type/title; preserved with --amend)"},
 			&ucli.StringFlag{Name: "what", Usage: "body section: what the change does (default: the issue's Fix/Approach)"},
 			&ucli.StringFlag{Name: "why", Usage: "body section: why (default: the issue's Problem/Goal)"},
 			&ucli.StringFlag{Name: "testing", Usage: "body section: how it was verified"},
@@ -376,9 +382,17 @@ only open a PR for a ref it can see.
 			if err != nil {
 				return err
 			}
+			var sectionFlags []string
+			for _, name := range []string{"what", "why", "testing"} {
+				if cmd.IsSet(name) {
+					sectionFlags = append(sectionFlags, name)
+				}
+			}
 			return app.PR(ctx, appcli.PROpts{
-				For:   cmd.Int("for"),
-				Title: cmd.String("title"),
+				Amend:        cmd.Bool("amend"),
+				SectionFlags: sectionFlags,
+				For:          cmd.Int("for"),
+				Title:        cmd.String("title"),
 				Sections: conventions.PRSections{
 					What:    cmd.String("what"),
 					Why:     cmd.String("why"),

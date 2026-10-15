@@ -47,11 +47,14 @@ const (
 	CloseDuplicate  CloseReason = "DUPLICATE"
 )
 
-// PullRequest is a pull request, reduced to what the pr command reports.
+// PullRequest carries the metadata and body needed to create or revise a PR.
 type PullRequest struct {
 	Number int
 	URL    string
 	Draft  bool
+	Title  string
+	Body   string
+	Base   string
 }
 
 // NewPullRequest is the pr command's creation payload.
@@ -65,7 +68,7 @@ type NewPullRequest struct {
 	Draft bool
 }
 
-// PRContext is the repo-side state pr needs before creating: the branch to
+// PRContext is the repo-side state pr needs before creating or revising: the branch to
 // target, and the open pull request already on the head branch, if any.
 // Both come from one query — a second PR on a branch is the failure the
 // command must name, not discover from a 422.
@@ -116,6 +119,8 @@ type Client interface {
 	// request whose head is the given branch.
 	PullRequestContext(ctx context.Context, head string) (PRContext, error)
 	CreatePullRequest(ctx context.Context, pr NewPullRequest) (PullRequest, error)
+	// UpdatePullRequest changes only the title and body, preserving draft/base state.
+	UpdatePullRequest(ctx context.Context, number int, title, body string) error
 }
 
 // AuthError marks failures that mean "run gh auth login", mapped to a

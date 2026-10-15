@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/git"
 	"github.com/lumberbarons/hew/internal/model"
 )
@@ -965,7 +967,7 @@ func TestPRWarnsAboutUnmarkedCodeText(t *testing.T) {
 		t.Fatal(err)
 	}
 	warning := errOut.String()
-	for _, want := range []string{"internal/cli/pr.go", "./...", "gh pr edit"} {
+	for _, want := range []string{"internal/cli/pr.go", "./...", "hew pr --amend"} {
 		if !strings.Contains(warning, want) {
 			t.Errorf("warning %q does not name %q", warning, want)
 		}
@@ -990,7 +992,7 @@ func TestPRWarnsAboutUnmarkedCodeTextInABodyFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	warning := errOut.String()
-	for _, want := range []string{"internal/cli/pr.go", "./...", "gh pr edit"} {
+	for _, want := range []string{"internal/cli/pr.go", "./...", "hew pr --amend"} {
 		if !strings.Contains(warning, want) {
 			t.Errorf("warning %q does not name %q", warning, want)
 		}
@@ -1016,5 +1018,217 @@ func TestPRStaysQuietWhenCodeTextIsMarkedUp(t *testing.T) {
 	}
 	if strings.Contains(errOut.String(), "code spans") {
 		t.Errorf("warned about a correctly marked-up body: %q", errOut.String())
+	}
+}
+
+func amendSetup() (*fakeClient, *App) {
+	i := subIssueOf(claimed(30, "issue title", "P2", "enhancement"), 33)
+	i.Body = "### Approach\n\nIssue approach\n\n### Goal\n\nIssue goal"
+	f := newFake(i)
+	f.openPRs["feat/30-work"] = gh.PullRequest{
+		Number: 501, URL: "https://github.com/o/r/pull/501", Draft: true,
+		Title: "feat: original title", Base: "release",
+		Body: "### What\n\nOriginal what\n\n### Why\n\nOriginal why\n\n### Testing\n\nOriginal testing\n\nFixes #30\nPart of #33",
+	}
+	app, _, _ := newApp(f)
+	inWorktree(app, "local-worktree", "feat/30-work")
+	return f, app
+}
+
+func assertPRReadsOnly(t *testing.T, f *fakeClient) {
+	t.Helper()
+	for _, call := range f.calls {
+		method, _, _ := strings.Cut(call, " ")
+		if !slices.Contains([]string{"ListIssues", "Viewer", "PullRequestContext"}, method) {
+			t.Errorf("unexpected mutation: %s", call)
+		}
+	}
+}
+
+func TestPRAmendRecomposesOnlyNamedSections(t *testing.T) {
+	for _, name := range []string{"what", "why", "testing"} {
+		t.Run(name, func(t *testing.T) {
+			f, app := amendSetup()
+			opts := PROpts{Amend: true}
+			switch name {
+			case "what":
+				opts.Sections.What = "Revised what"
+			case "why":
+				opts.Sections.Why = "Revised why"
+			case "testing":
+				opts.Sections.Testing = "Revised testing"
+			}
+			if err := app.PR(context.Background(), opts); err != nil {
+				t.Fatal(err)
+			}
+			got := f.openPRs["feat/30-work"]
+			want := sections("Original what", "Original why", "Original testing")
+			switch name {
+			case "what":
+				want.What = "Revised what"
+			case "why":
+				want.Why = "Revised why"
+			case "testing":
+				want.Testing = "Revised testing"
+			}
+			body := want.Compose(conventions.PRTrailers{Fixes: 30, Epic: 33})
+			if got.Body != body {
+				t.Errorf("body = %q, want %q", got.Body, body)
+			}
+			if got.Title != "feat: original title" || !got.Draft || got.Base != "release" {
+				t.Errorf("amend changed PR metadata: %+v", got)
+			}
+			assertNoPR(t, f)
+		})
+	}
+}
+
+func TestPRAmendPreservesAbsentSectionsAndClearsExplicitEmpty(t *testing.T) {
+	f, app := amendSetup()
+	f.openPRs["feat/30-work"] = gh.PullRequest{Number: 501, Body: "### Testing\n\nOld tests\n\nFixes #30"}
+	if err := app.PR(context.Background(), PROpts{Amend: true, SectionFlags: []string{"testing"}}); err != nil {
+		t.Fatal(err)
+	}
+	want := "Fixes #30\nPart of #33"
+	if got := f.openPRs["feat/30-work"].Body; got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
+func TestPRAmendTitlePreservesFreeformBodyAndReportsExistingPR(t *testing.T) {
+	f, app := amendSetup()
+	app.JSON = true
+	original := f.openPRs["feat/30-work"]
+	original.Body = "Freeform body\n\nCloses #30\nPart of #33"
+	f.openPRs["feat/30-work"] = original
+	if err := app.PR(context.Background(), PROpts{Amend: true, Title: "feat: revised title"}); err != nil {
+		t.Fatal(err)
+	}
+	got := f.openPRs["feat/30-work"]
+	if got.Title != "feat: revised title" || got.Body != original.Body {
+		t.Errorf("amended PR = %+v", got)
+	}
+	var result prJSON
+	if err := json.Unmarshal(app.Out.(*bytes.Buffer).Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Number != 501 || result.Title != got.Title || result.Head != "feat/30-work" || result.Base != "release" || !result.Draft || result.Fixes != 30 {
+		t.Errorf("result = %+v", result)
+	}
+}
+
+func TestPRAmendRejectsInvalidClosingLinksBeforeMutation(t *testing.T) {
+	for _, bodyFile := range []bool{false, true} {
+		for _, body := range []string{"Fixes #99", "Fixes #30\nCloses #99", "Fixes #30\nFixes #30"} {
+			t.Run(fmt.Sprintf("file=%v/%s", bodyFile, body), func(t *testing.T) {
+				f, app := amendSetup()
+				opts := PROpts{Amend: true, Sections: sections(body, "", "")}
+				if bodyFile {
+					opts.Sections = sections("", "", "")
+					opts.BodyFile = writeTemp(t, body)
+				}
+				err := app.PR(context.Background(), opts)
+				requireExit(t, err, ExitUsage, "closes")
+				assertPRReadsOnly(t, f)
+			})
+		}
+	}
+}
+
+func TestPRAmendRejectsInvalidPreservedClosingLink(t *testing.T) {
+	f, app := amendSetup()
+	pr := f.openPRs["feat/30-work"]
+	pr.Body = strings.Replace(pr.Body, "Original why", "Closes #99", 1)
+	f.openPRs["feat/30-work"] = pr
+	err := app.PR(context.Background(), PROpts{Amend: true, Sections: sections("new what", "", "")})
+	requireExit(t, err, ExitUsage, "closes")
+	assertPRReadsOnly(t, f)
+}
+
+func TestPRAmendBodyFileAppendsOnlyMissingTrailers(t *testing.T) {
+	for _, body := range []string{"Freeform", "Freeform\n\nFixes #30", "Freeform\n\nCloses #30\nPart of #33"} {
+		t.Run(body, func(t *testing.T) {
+			f, app := amendSetup()
+			if err := app.PR(context.Background(), PROpts{Amend: true, BodyFile: writeTemp(t, body)}); err != nil {
+				t.Fatal(err)
+			}
+			got := f.openPRs["feat/30-work"].Body
+			if !strings.HasPrefix(got, body) || len(conventions.FixesReferences(got)) != 1 || strings.Count(got, "Part of #33") != 1 {
+				t.Errorf("body = %q", got)
+			}
+		})
+	}
+}
+
+func TestPRAmendRefusesMissingOpenPR(t *testing.T) {
+	f := newFake(claimed(30, "work"))
+	app, _, _ := newApp(f)
+	onBranch(app, "feat/30-work")
+	err := app.PR(context.Background(), PROpts{Amend: true, Title: "new title"})
+	requireExit(t, err, ExitGeneric, "no open PR")
+	assertPRReadsOnly(t, f)
+}
+
+func TestPRAmendRefusesCreationOnlyFlags(t *testing.T) {
+	for _, opts := range []PROpts{{Amend: true, Ready: true}, {Amend: true, Base: "main"}} {
+		f, app := amendSetup()
+		err := app.PR(context.Background(), opts)
+		requireExit(t, err, ExitUsage, "--amend")
+		assertPRReadsOnly(t, f)
+	}
+}
+
+func TestPRAmendPropagatesUpdateFailure(t *testing.T) {
+	f, app := amendSetup()
+	original := f.openPRs["feat/30-work"]
+	f.failOn["UpdatePullRequest"] = errors.New("update refused")
+	err := app.PR(context.Background(), PROpts{Amend: true, Title: "revised"})
+	if err == nil || !strings.Contains(err.Error(), "update refused") {
+		t.Fatalf("error = %v", err)
+	}
+	if got := f.openPRs["feat/30-work"]; got != original {
+		t.Errorf("failed update mutated PR: %+v", got)
+	}
+	if got := app.Out.(*bytes.Buffer).String(); got != "" {
+		t.Errorf("failed update reported success: %q", got)
+	}
+}
+
+func TestPRAmendTextOutputAndCodeWarnings(t *testing.T) {
+	f, app := amendSetup()
+	if err := app.PR(context.Background(), PROpts{Amend: true, Title: "feat: revised\x1b[31m", Sections: sections("Changes internal/cli/pr.go", "", "")}); err != nil {
+		t.Fatal(err)
+	}
+	want := "updated PR #501 for #30: feat: revised?[31m\nhttps://github.com/o/r/pull/501\n"
+	if got := app.Out.(*bytes.Buffer).String(); got != want {
+		t.Errorf("output = %q, want %q", got, want)
+	}
+	warning := app.ErrOut.(*bytes.Buffer).String()
+	if !strings.Contains(warning, "internal/cli/pr.go") || !strings.Contains(warning, "hew pr --amend") {
+		t.Errorf("warning = %q", warning)
+	}
+	if strings.Contains(warning, "no --testing") {
+		t.Errorf("warned about preserved testing: %q", warning)
+	}
+	assertNoPR(t, f)
+}
+
+func TestPRAmendBodyFileRejectsEvenEmptySectionFlags(t *testing.T) {
+	f, app := amendSetup()
+	err := app.PR(context.Background(), PROpts{Amend: true, BodyFile: writeTemp(t, "body"), SectionFlags: []string{"what"}})
+	requireExit(t, err, ExitUsage, "mutually exclusive")
+	assertPRReadsOnly(t, f)
+}
+
+func TestPRCreateSectionFlagsEnforceClosingLinks(t *testing.T) {
+	for _, body := range []string{"Fixes #99", "Closes #30\nFixes #99", "Fixes #30\nFixes #30"} {
+		t.Run(body, func(t *testing.T) {
+			f := newFake(claimed(30, "work"))
+			app, _, _ := newApp(f)
+			onBranch(app, "feat/30-work")
+			err := app.PR(context.Background(), PROpts{Sections: sections(body, "", "")})
+			requireExit(t, err, ExitUsage, "closes")
+			assertPRReadsOnly(t, f)
+		})
 	}
 }

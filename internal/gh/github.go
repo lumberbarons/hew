@@ -522,7 +522,7 @@ func (g *GitHub) PullRequestContext(ctx context.Context, head string) (PRContext
 		repository(owner: $owner, name: $name) {
 			defaultBranchRef { name }
 			pullRequests(headRefName: $head, states: OPEN, first: 1) {
-				nodes { number url isDraft }
+				nodes { number url isDraft title body baseRefName }
 			}
 		}
 	}`
@@ -533,9 +533,12 @@ func (g *GitHub) PullRequestContext(ctx context.Context, head string) (PRContext
 			} `json:"defaultBranchRef"`
 			PullRequests struct {
 				Nodes []struct {
-					Number  int    `json:"number"`
-					URL     string `json:"url"`
-					IsDraft bool   `json:"isDraft"`
+					Number      int    `json:"number"`
+					URL         string `json:"url"`
+					IsDraft     bool   `json:"isDraft"`
+					Title       string `json:"title"`
+					Body        string `json:"body"`
+					BaseRefName string `json:"baseRefName"`
 				} `json:"nodes"`
 			} `json:"pullRequests"`
 		} `json:"repository"`
@@ -549,7 +552,7 @@ func (g *GitHub) PullRequestContext(ctx context.Context, head string) (PRContext
 		out.DefaultBranch = ref.Name
 	}
 	if nodes := resp.Repository.PullRequests.Nodes; len(nodes) > 0 {
-		out.Existing = &PullRequest{Number: nodes[0].Number, URL: nodes[0].URL, Draft: nodes[0].IsDraft}
+		out.Existing = &PullRequest{Number: nodes[0].Number, URL: nodes[0].URL, Draft: nodes[0].IsDraft, Title: nodes[0].Title, Body: nodes[0].Body, Base: nodes[0].BaseRefName}
 	}
 	return out, nil
 }
@@ -569,6 +572,11 @@ func (g *GitHub) CreatePullRequest(ctx context.Context, pr NewPullRequest) (Pull
 		return PullRequest{}, err
 	}
 	return PullRequest{Number: resp.Number, URL: resp.HTMLURL, Draft: resp.Draft}, nil
+}
+
+func (g *GitHub) UpdatePullRequest(ctx context.Context, number int, title, body string) error {
+	path := fmt.Sprintf("repos/%s/%s/pulls/%d", g.repo.Owner, g.repo.Name, number)
+	return g.restDo(ctx, "PATCH", path, map[string]any{"title": title, "body": body}, nil)
 }
 
 func (g *GitHub) issuesPath(suffix string) string {

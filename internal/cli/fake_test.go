@@ -447,6 +447,7 @@ func (f *fakeClient) CreatePullRequest(ctx context.Context, pr gh.NewPullRequest
 		Number: f.nextPR,
 		URL:    fmt.Sprintf("https://github.com/o/r/pull/%d", f.nextPR),
 		Draft:  pr.Draft,
+		Title:  pr.Title, Body: pr.Body, Base: pr.Base,
 	}
 	f.openPRs[pr.Head] = created
 	return created, nil
@@ -465,4 +466,18 @@ func newApp(f *fakeClient) (*App, *bytes.Buffer, *bytes.Buffer) {
 
 func issue(n int, title string, labels ...string) *model.Issue {
 	return &model.Issue{Number: n, Title: title, Labels: labels}
+}
+
+func (f *fakeClient) UpdatePullRequest(ctx context.Context, number int, title, body string) error {
+	if err := f.record(fmt.Sprintf("UpdatePullRequest %d %q body=%q", number, title, body)); err != nil {
+		return err
+	}
+	for head, pr := range f.openPRs {
+		if pr.Number == number {
+			pr.Title, pr.Body = title, body
+			f.openPRs[head] = pr
+			return nil
+		}
+	}
+	return fmt.Errorf("PR #%d not found", number)
 }
