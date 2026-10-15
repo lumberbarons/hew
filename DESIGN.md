@@ -190,149 +190,80 @@ primer so agents know what they're looking at:
   validator or a semantic prompt-injection detector; legitimate scripts and
   notation can contain flagged characters and still require human judgment.
 
-## Command surface (v1)
+## Command surface
 
-```
-hew prime                      # session-start context (see below)
-hew ready                      # open, non-epic, triaged, zero *open* blockers;
-                                  # sorted P0→P4, oldest first within a priority
-hew list [--label X] [--epic N] [--state open|closed|all]
-            [--bodies]           # with --json: body on every line — triaged-tracker
-                                  # dedup in a single call instead of a show per candidate.
-                                  # Untriaged issues are omitted in every state — the
-                                  # untriaged half of dedup lives behind triage --search.
-                                  # --state defaults to open (both states under --epic:
-                                  # progress means seeing what is done too); --state all
-                                  # spans both; --closed is a back-compat alias for
-                                  # --state closed; passing both is a usage error, not a
-                                  # precedence rule
-hew show <n>                   # detail: body, deps, parent, children, recent comments;
-                                  # reads an untriaged issue by number — the deliberate
-                                  # retrieval path, never gated
-hew search <terms>             # repo-scoped text search over open+closed, triaged
-                                  # issues in best-match order — the dedupe step before
-                                  # filing discovered work ("already fixed" answers the
-                                  # question as well as "already filed"); results capped,
-                                  # warns on truncation instead of paging through, and
-                                  # when none of the matches it saw was triaged it says
-                                  # so — scoped to the fetched page, never claiming
-                                  # unseen matches are untriaged — and names
-                                  # hew triage --search
+The commands and their flags are documented where they run: `hew --help` and
+`hew <cmd> --help` are exact, the README is the user-facing tour, and the primer
+is what agents see. This document does not restate them — a listing here only
+drifts. What follows is the reasoning behind the command behaviors that are not
+obvious from a flag name.
 
-hew create --type bug|enhancement|task [--priority P0..P4] [--area X]
-              [--blocked-by N...] [--parent N] [--discovered-from N]
-              --title "..." [--where X] [--problem|--goal "..."]
-              [--fix|--approach "..."] [--done-when "..."]...
-              [--body-file F | --edit]
-hew start <n> [--priority P0..P4] [--force] [--show]
-                                  # guarded claim: refuses if already assigned or
-                                  # in-progress (exit 3 — pick the next ready item;
-                                  # exit 5 when the claimant is you — resume that
-                                  # work); --force steals; untriaged issues
-                                  # require --priority (claim = triage); --show
-                                  # follows the claim with the show detail from the
-                                  # post-claim read (no extra fetch); --json also
-                                  # includes the body but, like every mutation, omits
-                                  # text-findings annotations — either replaces a
-                                  # separate show after claiming
-hew triage [--search <terms>] # untriaged issues (missing priority/type), oldest
-                                  # first — work through them with `set`. The sole
-                                  # emitter of untriaged content, the unit a harness
-                                  # deny list keys on; never run except on the user's
-                                  # explicit request. --search constrains it to search
-                                  # matches over untriaged titles and bodies, both
-                                  # states — the untriaged half of dedup.
-hew set <n> [--priority P0..P4] [--type bug|enhancement|task] [--add-area X]
-           [--remove-area X] [--parent N | --no-parent] [--title "..."]
-           [--body-file F] [--closed]
-                                  # retriage/edit within conventions (swaps the old
-                                  # priority/type label, never stacks a second one);
-                                  # --body-file replaces the whole body — an empty
-                                  # file is refused rather than blanking it;
-                                  # a closed target is refused (naming the close
-                                  # state) unless --closed — see Enshrined
-                                  # conventions
-hew pr [--for N] [--title "..."] [--what|--why|--testing "..."]
-          [--body-file F] [--base BRANCH] [--ready]
-                                  # the PR step of the workflow, composed rather than
-                                  # freeform: draft PR for the issue this branch is
-                                  # for, body from the What/Why/Testing template with
-                                  # exactly one "Fixes #n" (see below)
-hew close <n> --reason "..."   # comment + close (not-planned unless --completed
-                                  # or --duplicate-of M)
-hew reopen <n> --reason "..."  # comment + reopen, close's inverse; releases a
-                                  # stale claim (close leaves it), never retriages,
-                                  # and is a no-op on an already-open issue
-hew block <n> --on <m> [--closed]      # add dependency (cycle-checked)
-hew unblock <n> --from <m> [--closed]
-hew epic create --title "..." [--children N,N,N]
-                   [section flags | --body-file F | --edit]
-hew epic status [<n>]          # progress rollup per epic; with <n>, its children
-                                  # plus the next workable child ("next: #k" — the
-                                  # first open, unblocked, triaged child in creation
-                                  # order, i.e. the sequence head for epics whose
-                                  # children chain by blocked-by). Also `hew epic
-                                  # list`. Children come from parent backlinks over
-                                  # both states, so the view survives a capped
-                                  # sub-issue connection; a capped blocker list on a
-                                  # child warns that next may be wrong, matching
-                                  # ready's honesty. show of an epic names the same
-                                  # next line (and --json field) — its one
-                                  # two-query read, for epics only.
-hew apply <plan.jsonl>         # batch-create from a JSONL plan: one entry per line
-                                  # (title/type/priority/areas, the same section
-                                  # fields as the create flags or a raw body, parent
-                                  # and blocked-by), the migrate machinery generalized.
-                                  # Entries carry a local id so later entries can
-                                  # reference earlier ones before numbers exist, the
-                                  # way migrate resolves bead IDs; "type":"epic" makes
-                                  # a parent issue, so epics with bodies work too.
-                                  # Checkpointed after every create and every edge
-                                  # wired → resumable without duplicates, and re-running
-                                  # an unchanged finished plan is a quiet no-op;
-                                  # --dry-run plans. The checkpoint is bound to the repo
-                                  # and a digest of the plan, and every issue it maps must
-                                  # carry apply's provenance marker — see "Checkpoint
-                                  # binding".
-                                  # Plan-internal
-                                  # dependency cycles are rejected up front — a
-                                  # complete check, since pre-existing issues can't
-                                  # reference entries that don't exist yet.
-hew init                       # bootstrap labels in a repo; print CLAUDE.md snippet
-hew hooks install|remove <claude|codex|cursor|opencode>
-                                  # session-start injection of `hew prime` in the
-                                  # selected agent's project configuration: a
-                                  # SessionStart hook for claude and codex (guarded
-                                  # with `command -v hew`, so a contributor without
-                                  # hew gets an install hint for the agent, not a
-                                  # red hook error; codex adds a commandWindows
-                                  # override of bare `hew prime`, as cmd and
-                                  # PowerShell can't run the guard; install
-                                  # upgrades the old bare
-                                  # form; cursor stays unguarded, having no
-                                  # Windows override), a
-                                  # sessionStart hook for cursor whose command
-                                  # runs `hew prime --hook-format cursor` — the
-                                  # JSON additional_context wrapper Cursor's
-                                  # stdout contract requires — and an
-                                  # auto-discovered opencode plugin that injects
-                                  # the primer as system context, never a chat
-                                  # message. Refuses a symlinked directory or
-                                  # settings file — a checkout is untrusted input,
-                                  # so hew never writes through a link it did not
-                                  # create, and says so rather than silently
-                                  # redirecting. opencode install/remove is
-                                  # idempotent by a marker: hew never clobbers or
-                                  # deletes a plugin file it did not write.
-hew migrate beads              # import a beads (bd) database from .beads/issues.jsonl
-                                  # (parsed raw — no bd dependency): P0-P4 and types map
-                                  # to labels, blocks→blocked-by, parent-child→sub-issues,
-                                  # in_progress→claim, close_reason→closing comment, with
-                                  # a provenance footer. Open beads by default (real dbs
-                                  # are >95% closed); --include-closed for full history.
-                                  # Resumable via a state file bound to the repo and the
-                                  # snapshot digest; --dry-run plans.
-```
+- **Reads.** `ready` is open, non-epic, triaged issues with zero *open*
+  blockers, sorted P0→P4 and oldest first within a priority. `list` hides
+  untriaged issues in every state, and `--state` defaults to open — except
+  under `--epic`, where progress means seeing what is done too. `list --bodies`
+  with `--json` carries every body so dedup over the triaged tracker is one
+  call instead of a `show` per candidate. `show <n>` reads an untriaged issue by
+  number: the deliberate retrieval path, never gated.
+- **`search`** is the dedupe step before filing discovered work, scoped to the
+  repo and spanning open and closed triaged issues in best-match order —
+  "already fixed" answers the question as well as "already filed". Results are
+  capped and truncation is warned about rather than paged through. When none of
+  the matches it saw was triaged it says so, scoped to the fetched page and never
+  claiming unseen matches are untriaged, and names `triage --search`.
+- **`triage`** is the sole emitter of untriaged content, which makes it the unit
+  a harness deny list keys on; it is run only on the user's explicit request.
+  `--search` constrains it to untriaged titles and bodies in both states — the
+  untriaged half of dedup.
+- **`start`** is a guarded claim. It refuses an issue that is assigned or
+  in-progress: exit 3 means pick the next ready item, exit 5 means the claimant
+  is you and the response is to resume that work. `--force` steals. An untriaged
+  issue requires `--priority`, because claiming is triage. `--show` (or
+  `--json`) returns the body from the post-claim read with no extra fetch, so a
+  separate `show` after claiming is unnecessary; like every mutation it omits
+  text-findings annotations.
+- **`set`** retriages within the conventions, swapping the old priority or type
+  label and never stacking a second. `--body-file` replaces the whole body, and an
+  empty file is refused rather than blanking it. A closed target is refused,
+  naming the close state, unless `--closed` — see Enshrined conventions. `block`
+  and `unblock` follow the same closed-target rule, and `block` is cycle-checked.
+- **`reopen`** is `close`'s inverse: comment and reopen. It releases a stale
+  claim, which `close` leaves behind, and never retriages. On an already-open
+  issue it is a no-op rather than an error, so a retry does not look like a
+  failure.
+- **`epic status`** with `<n>` lists the children plus the next workable child
+  (`next: #k`): the first open, unblocked, triaged child in creation order, which
+  is the sequence head for epics whose children chain by blocked-by. Children
+  come from parent backlinks over both states, so the view survives a capped
+  sub-issue connection, and a capped blocker list on a child warns that `next`
+  may be wrong, matching `ready`'s honesty. `show` of an epic names the same
+  line — its one two-query read, for epics only.
+- **`apply`** batch-creates from a JSONL plan: the migrate machinery
+  generalized. Entries carry a local id so later entries can reference earlier
+  ones before issue numbers exist, and `"type":"epic"` makes a parent issue.
+  Progress is checkpointed after every create and every edge wired, so a run is
+  resumable without duplicates and re-running a finished plan is a quiet no-op.
+  Plan-internal dependency cycles are rejected up front, a complete check since
+  pre-existing issues cannot reference entries that do not exist yet. See
+  Checkpoint binding.
+- **`migrate beads`** imports `.beads/issues.jsonl`, parsed raw with no bd
+  dependency: P0–P4 and types map to labels, blocks to blocked-by, parent-child
+  to sub-issues, in_progress to a claim, and close_reason to the closing comment,
+  with a provenance footer. It takes open beads by default (real databases are
+  over 95% closed); `--include-closed` brings the full history.
+- **`hooks install|remove`** injects `hew prime` at session start in the selected
+  agent's project configuration. Claude and codex get a `SessionStart` hook
+  guarded with `command -v hew`, so a contributor without hew gets an install
+  hint rather than a red hook error; codex adds a `commandWindows` override of
+  bare `hew prime`, as cmd and PowerShell cannot run the guard, and cursor stays
+  unguarded for lack of one. Cursor's hook runs `hew prime --hook-format cursor`,
+  the JSON `additional_context` wrapper its stdout contract requires. opencode
+  gets an auto-discovered plugin that injects the primer as system context, never
+  a chat message. A symlinked directory or settings file is refused: a checkout
+  is untrusted input, so hew never writes through a link it did not create, and
+  says so rather than silently redirecting. opencode install and remove are
+  idempotent by a marker, so hew never clobbers or deletes a plugin file it did
+  not write.
 
 Global flags: `--json` (structured output, stable schema), `--repo owner/name`
 (default: detect from git remote via go-gh).
@@ -479,6 +410,16 @@ object is neither the text primer nor the data schema.
   output is NDJSON, one compact object per line: a truncated JSON array is
   unparseable garbage, a truncated NDJSON stream is just shorter (same feedback).
   The primer states both formats so agents reach for the cheap one.
+  Every exit-0 path honours `--json`, including the idempotent ones an agent
+  hits on a retry. A write whose requested state already held (`reopen` on an
+  open issue, `block` on an existing edge, `unblock` on an absent one) emits the
+  same full issue document a changed write does, plus `"unchanged": true`; the
+  field is absent, not false, on a write that changed something. `apply` and
+  `migrate beads` answer an empty plan in their normal result shape, and
+  `--dry-run` emits `{dryRun: true, wouldCreate | wouldMigrate: [...],
+  alreadyCreated | alreadyMigrated: {key: number}}` — an empty plan under
+  `--dry-run` keeps that shape. Plan entries carry every key on every entry,
+  with `null` for an absent parent or type, so one schema parses them all.
 - Errors are one line, actionable, exit codes meaningful (`ready` with no results
   exits 0 with `no ready work`; `start` on an issue claimed by someone else exits 3
   with `already claimed`; `start` on an issue you already claimed exits 5, because

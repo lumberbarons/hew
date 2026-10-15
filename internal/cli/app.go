@@ -158,6 +158,18 @@ func (a *App) emitMutation(issue model.Issue, format string, args ...any) error 
 	return nil
 }
 
+// emitNoOp reports a mutation whose requested state already held, so nothing
+// was written: the issue as JSON marked unchanged, otherwise the text line.
+// Retried writes land here, and an agent parsing --json needs the same
+// document shape on this path as on the one that changed something.
+func (a *App) emitNoOp(issue model.Issue, format string, args ...any) error {
+	if a.JSON {
+		return render.JSONUnchanged(a.Out, issue)
+	}
+	a.printf(format, args...)
+	return nil
+}
+
 // emitPrime renders the session-start primer.
 func (a *App) emitPrime(static string, d render.PrimeData) error {
 	if a.JSON {

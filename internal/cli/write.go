@@ -545,8 +545,7 @@ func (a *App) Reopen(ctx context.Context, number int, reason string) error {
 		// report: erroring would make an idempotent retry look like a
 		// failure. Commenting is skipped with it — the note would document a
 		// reopen that never happened.
-		a.printf("#%d is already open\n", number)
-		return nil
+		return a.emitNoOp(issue, "#%d is already open\n", number)
 	}
 	if err := a.Client.Comment(ctx, number, reason); err != nil {
 		return err
@@ -621,8 +620,7 @@ func (a *App) Block(ctx context.Context, number, blocker int, allowClosed bool) 
 		return genericErr("#%d is not an open issue in %s; closed blockers don't block", blocker, a.Repo)
 	}
 	if slices.Contains(issue.OpenBlockers(), blocker) {
-		a.printf("#%d is already blocked by #%d\n", number, blocker)
-		return nil
+		return a.reportNoOp(ctx, number, "#%d is already blocked by #%d\n", number, blocker)
 	}
 	check := model.CheckBlockedBy(issues, number, blocker)
 	if check.Cycle != nil {
@@ -654,8 +652,7 @@ func (a *App) Unblock(ctx context.Context, number, blocker int, allowClosed bool
 		}
 	}
 	if !found {
-		a.printf("#%d is not blocked by #%d\n", number, blocker)
-		return nil
+		return a.emitNoOp(issue, "#%d is not blocked by #%d\n", number, blocker)
 	}
 	if err := a.Client.RemoveBlockedBy(ctx, number, blocker); err != nil {
 		return err
@@ -755,6 +752,22 @@ func (a *App) swapPriority(ctx context.Context, issue model.Issue, p model.Prior
 		return a.Client.AddLabels(ctx, issue.Number, []string{target})
 	}
 	return nil
+}
+
+// reportNoOp is reportMutation for a write that changed nothing: text, or a
+// re-fetch so --json carries the same full detail a changed write does. Block
+// needs it because its issue comes from the open-issue listing, which is
+// leaner than GetIssue's.
+func (a *App) reportNoOp(ctx context.Context, number int, format string, args ...any) error {
+	if !a.JSON {
+		a.printf(format, args...)
+		return nil
+	}
+	after, err := a.Client.GetIssue(ctx, number)
+	if err != nil {
+		return fmt.Errorf("#%d needed no change, but fetching it for --json failed: %w", number, err)
+	}
+	return a.emitNoOp(after, format, args...)
 }
 
 // reportMutation prints the text confirmation, or re-fetches for the full
