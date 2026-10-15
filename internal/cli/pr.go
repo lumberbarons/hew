@@ -77,7 +77,7 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 		return err
 	}
 	if opts.Amend {
-		return a.amendPR(ctx, opts, issue, head, prCtx.Existing)
+		return a.amendPR(ctx, opts, issue, head, prCtx)
 	}
 	if prCtx.Existing != nil {
 		return genericErr("#%d already has an open PR from %s: #%d — push to the branch or use --amend to revise its title/body",
@@ -249,9 +249,19 @@ func (a *App) composePRBody(opts PROpts, issue model.Issue) (string, error) {
 	return a.finishPRSections(sections, issue)
 }
 
-func (a *App) amendPR(ctx context.Context, opts PROpts, issue model.Issue, head string, existing *gh.PullRequest) error {
+func (a *App) amendPR(ctx context.Context, opts PROpts, issue model.Issue, head string, prCtx gh.PRContext) error {
+	existing := prCtx.Existing
 	if existing == nil {
 		return genericErr("#%d has no open PR from %s; omit --amend to create one", issue.Number, head)
+	}
+	// A head name can match several base branches or a fork. The first
+	// node is sufficient to refuse creation, but mutation needs proof that
+	// this is the only match and its head belongs to our repository.
+	if prCtx.OpenCount != 1 {
+		return genericErr("cannot select an unambiguous PR from %s: found %d open matches; use gh pr edit with an explicit PR number", head, prCtx.OpenCount)
+	}
+	if !strings.EqualFold(existing.HeadRepository, a.Repo.String()) {
+		return genericErr("cannot amend PR #%d: head repository %q does not identify %s; use gh pr edit with an explicit PR number", existing.Number, existing.HeadRepository, a.Repo)
 	}
 	var body string
 	var err error
@@ -275,15 +285,33 @@ func (a *App) amendPR(ctx context.Context, opts PROpts, issue model.Issue, head 
 				content = strings.TrimSuffix(content, "\n\n"+suffix)
 			}
 		}
+		preserved := conventions.PRSections{
+			What:    conventions.Section(content, "What"),
+			Why:     conventions.Section(content, "Why"),
+			Testing: conventions.Section(content, "Testing"),
+		}
+		// Section is a simple template reader, not a Markdown parser. Require
+		// an exact round trip before editing, and refuse fences even when an
+		// example's headings happen to look like the canonical template.
+		safe := preserved.Compose(conventions.PRTrailers{}) == content
+		for _, line := range strings.Split(content, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+				safe = false
+			}
+		}
+		if !safe {
+			return usageErr("cannot safely parse this PR body for section edits; use --amend --body-file to replace the whole body")
+		}
 		sections := opts.Sections
 		if sections.What == "" && !slices.Contains(opts.SectionFlags, "what") {
-			sections.What = conventions.Section(content, "What")
+			sections.What = preserved.What
 		}
 		if sections.Why == "" && !slices.Contains(opts.SectionFlags, "why") {
-			sections.Why = conventions.Section(content, "Why")
+			sections.Why = preserved.Why
 		}
 		if sections.Testing == "" && !slices.Contains(opts.SectionFlags, "testing") {
-			sections.Testing = conventions.Section(content, "Testing")
+			sections.Testing = preserved.Testing
 		}
 		body, err = a.finishPRSections(sections, issue)
 	}

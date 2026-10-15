@@ -1027,7 +1027,7 @@ func amendSetup() (*fakeClient, *App) {
 	f := newFake(i)
 	f.openPRs["feat/30-work"] = gh.PullRequest{
 		Number: 501, URL: "https://github.com/o/r/pull/501", Draft: true,
-		Title: "feat: original title", Base: "release",
+		Title: "feat: original title", Base: "release", HeadRepository: "o/r",
 		Body: "### What\n\nOriginal what\n\n### Why\n\nOriginal why\n\n### Testing\n\nOriginal testing\n\nFixes #30\nPart of #33",
 	}
 	app, _, _ := newApp(f)
@@ -1085,7 +1085,7 @@ func TestPRAmendRecomposesOnlyNamedSections(t *testing.T) {
 
 func TestPRAmendPreservesAbsentSectionsAndClearsExplicitEmpty(t *testing.T) {
 	f, app := amendSetup()
-	f.openPRs["feat/30-work"] = gh.PullRequest{Number: 501, Body: "### Testing\n\nOld tests\n\nFixes #30"}
+	f.openPRs["feat/30-work"] = gh.PullRequest{Number: 501, HeadRepository: "o/r", Body: "### Testing\n\nOld tests\n\nFixes #30"}
 	if err := app.PR(context.Background(), PROpts{Amend: true, SectionFlags: []string{"testing"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -1230,5 +1230,82 @@ func TestPRCreateSectionFlagsEnforceClosingLinks(t *testing.T) {
 			requireExit(t, err, ExitUsage, "closes")
 			assertPRReadsOnly(t, f)
 		})
+	}
+}
+
+// Bodies the simple section reader cannot safely reproduce must never be
+// partially rewritten. The entire body remains available through --body-file.
+func TestPRAmendRefusesLossySectionEdits(t *testing.T) {
+	bodies := map[string]string{
+		"fenced heading":       "### What\n\nExample:\n\n```markdown\n### Example\nKeep this example.\n```\n\n### Why\n\nKeep why.\n\n### Testing\n\nOld tests\n\nFixes #30\nPart of #33",
+		"fenced known heading": "### What\n\n```markdown\n\n### Why\n\nInside the fence.\n```\n\n### Testing\n\nOld tests\n\nFixes #30\nPart of #33",
+		"tilde fence":          "### What\n\n~~~markdown\n### Example\nKeep this example.\n~~~\n\n### Testing\n\nOld tests\n\nFixes #30\nPart of #33",
+		"preamble":             "Keep this introduction.\n\n### What\n\nKeep what.\n\n### Testing\n\nOld tests\n\nFixes #30\nPart of #33",
+		"extra section":        "### What\n\nKeep what.\n\n### Notes\n\nKeep these notes.\n\n### Testing\n\nOld tests\n\nFixes #30\nPart of #33",
+		"freeform":             "Keep this entire freeform description.\n\nFixes #30\nPart of #33",
+		"duplicate section":    "### What\n\nFirst what.\n\n### What\n\nSecond what.\n\nFixes #30\nPart of #33",
+	}
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			f, app := amendSetup()
+			original := f.openPRs["feat/30-work"]
+			original.Body = body
+			f.openPRs["feat/30-work"] = original
+			err := app.PR(context.Background(), PROpts{Amend: true, Title: "also must not change", Sections: sections("", "", "New tests")})
+			requireExit(t, err, ExitUsage, "--body-file")
+			assertPRReadsOnly(t, f)
+			if got := f.openPRs["feat/30-work"]; got != original {
+				t.Errorf("refused edit mutated PR: %+v", got)
+			}
+		})
+	}
+}
+
+func TestPRAmendBodyFileCanReplaceCustomMarkdown(t *testing.T) {
+	f, app := amendSetup()
+	body := "Introduction.\n\n### What\n\n```markdown\n### Example\nKeep this.\n```\n\n### Notes\n\nCustom notes.\n\nFixes #30\nPart of #33"
+	if err := app.PR(context.Background(), PROpts{Amend: true, BodyFile: writeTemp(t, body)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.openPRs["feat/30-work"].Body; got != body {
+		t.Errorf("body = %q, want %q", got, body)
+	}
+}
+
+func TestPRAmendRefusesAmbiguousOrForeignHead(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		count      int
+		repository string
+		want       string
+	}{
+		{"two base branches", 2, "o/r", "unambiguous"},
+		{"truncated matches", 100, "o/r", "unambiguous"},
+		{"fork", 1, "contributor/r", "head repository"},
+		{"unknown repository", 1, "", "head repository"},
+		{"unknown count", 0, "o/r", "unambiguous"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, app := amendSetup()
+			pr := f.openPRs["feat/30-work"]
+			pr.HeadRepository = tc.repository
+			f.prContextOverride = &gh.PRContext{DefaultBranch: "main", Existing: &pr, OpenCount: tc.count}
+			err := app.PR(context.Background(), PROpts{Amend: true, Title: "must not update"})
+			requireExit(t, err, ExitGeneric, tc.want)
+			assertPRReadsOnly(t, f)
+		})
+	}
+}
+
+func TestPRAmendMatchesHeadRepositoryCaseInsensitively(t *testing.T) {
+	f, app := amendSetup()
+	pr := f.openPRs["feat/30-work"]
+	pr.HeadRepository = "O/R"
+	f.openPRs["feat/30-work"] = pr
+	if err := app.PR(context.Background(), PROpts{Amend: true, Title: "new title"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.openPRs["feat/30-work"].Title; got != "new title" {
+		t.Errorf("title = %q", got)
 	}
 }

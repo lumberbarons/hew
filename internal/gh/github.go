@@ -514,15 +514,16 @@ func (g *GitHub) CreateLabel(ctx context.Context, label Label) error {
 }
 
 func (g *GitHub) PullRequestContext(ctx context.Context, head string) (PRContext, error) {
-	// One query: the base branch to target and the open PR already on this
-	// head. headRefName filters server-side, so "first: 1" is the answer,
-	// not a sample.
+	// One query: the base branch and an open PR with this head name. The
+	// count and head repository establish whether the sample can be safely
+	// amended; headRefName alone also matches fork heads and multiple bases.
 	query := `
 	query($owner: String!, $name: String!, $head: String!) {
 		repository(owner: $owner, name: $name) {
 			defaultBranchRef { name }
 			pullRequests(headRefName: $head, states: OPEN, first: 1) {
-				nodes { number url isDraft title body baseRefName }
+				totalCount
+				nodes { number url isDraft title body baseRefName headRepository { nameWithOwner } }
 			}
 		}
 	}`
@@ -532,13 +533,17 @@ func (g *GitHub) PullRequestContext(ctx context.Context, head string) (PRContext
 				Name string `json:"name"`
 			} `json:"defaultBranchRef"`
 			PullRequests struct {
-				Nodes []struct {
-					Number      int    `json:"number"`
-					URL         string `json:"url"`
-					IsDraft     bool   `json:"isDraft"`
-					Title       string `json:"title"`
-					Body        string `json:"body"`
-					BaseRefName string `json:"baseRefName"`
+				TotalCount int `json:"totalCount"`
+				Nodes      []struct {
+					Number         int    `json:"number"`
+					URL            string `json:"url"`
+					IsDraft        bool   `json:"isDraft"`
+					Title          string `json:"title"`
+					Body           string `json:"body"`
+					BaseRefName    string `json:"baseRefName"`
+					HeadRepository *struct {
+						NameWithOwner string `json:"nameWithOwner"`
+					} `json:"headRepository"`
 				} `json:"nodes"`
 			} `json:"pullRequests"`
 		} `json:"repository"`
@@ -551,8 +556,12 @@ func (g *GitHub) PullRequestContext(ctx context.Context, head string) (PRContext
 	if ref := resp.Repository.DefaultBranchRef; ref != nil {
 		out.DefaultBranch = ref.Name
 	}
+	out.OpenCount = resp.Repository.PullRequests.TotalCount
 	if nodes := resp.Repository.PullRequests.Nodes; len(nodes) > 0 {
 		out.Existing = &PullRequest{Number: nodes[0].Number, URL: nodes[0].URL, Draft: nodes[0].IsDraft, Title: nodes[0].Title, Body: nodes[0].Body, Base: nodes[0].BaseRefName}
+		if repo := nodes[0].HeadRepository; repo != nil {
+			out.Existing.HeadRepository = repo.NameWithOwner
+		}
 	}
 	return out, nil
 }

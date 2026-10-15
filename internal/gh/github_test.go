@@ -604,7 +604,7 @@ func TestPullRequestContext(t *testing.T) {
 	f := newFakeServer(t)
 	f.graphql["defaultBranchRef"] = `{"data":{"repository":{
 		"defaultBranchRef":{"name":"main"},
-		"pullRequests":{"nodes":[{"number":12,"url":"https://github.com/o/r/pull/12","isDraft":true,"title":"feat: original","body":"Original body","baseRefName":"release"}]}}}}`
+		"pullRequests":{"totalCount":2,"nodes":[{"number":12,"headRepository":{"nameWithOwner":"o/r"},"url":"https://github.com/o/r/pull/12","isDraft":true,"title":"feat: original","body":"Original body","baseRefName":"release"}]}}}}`
 	got, err := f.client(t).PullRequestContext(context.Background(), "feat/x")
 	if err != nil {
 		t.Fatal(err)
@@ -620,6 +620,14 @@ func TestPullRequestContext(t *testing.T) {
 	}
 	if !strings.Contains(f.requests[0].Body, "body") || !strings.Contains(f.requests[0].Body, "baseRefName") {
 		t.Errorf("query does not request edit context: %s", f.requests[0].Body)
+	}
+	if got.OpenCount != 2 || got.Existing == nil || got.Existing.HeadRepository != "o/r" {
+		t.Errorf("missing PR selection evidence: %+v, PR: %+v", got, got.Existing)
+	}
+	for _, field := range []string{"totalCount", "headRepository", "nameWithOwner"} {
+		if !strings.Contains(f.requests[0].Body, field) {
+			t.Errorf("query omits %s", field)
+		}
 	}
 	vars, _ := decodeBody(t, f.requests[0].Body)["variables"].(map[string]any)
 	if vars["head"] != "feat/x" {
@@ -745,6 +753,26 @@ func TestUpdatePullRequestErrors(t *testing.T) {
 				if !errors.As(err, &auth) {
 					t.Errorf("error = %T, want AuthError", err)
 				}
+			}
+		})
+	}
+}
+
+func TestPullRequestContextHeadRepository(t *testing.T) {
+	for _, tc := range []struct{ name, repoJSON, want string }{
+		{"same repository", `{"nameWithOwner":"o/r"}`, "o/r"},
+		{"fork", `{"nameWithOwner":"fork/r"}`, "fork/r"},
+		{"deleted repository", `null`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeServer(t)
+			f.graphql["defaultBranchRef"] = fmt.Sprintf(`{"data":{"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"totalCount":1,"nodes":[{"number":12,"headRepository":%s}]}}}}`, tc.repoJSON)
+			got, err := f.client(t).PullRequestContext(context.Background(), "feat/x")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.OpenCount != 1 || got.Existing == nil || got.Existing.HeadRepository != tc.want {
+				t.Errorf("context = %+v, PR = %+v; want one PR with head repository %q", got, got.Existing, tc.want)
 			}
 		})
 	}

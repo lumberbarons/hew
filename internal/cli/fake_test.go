@@ -41,9 +41,10 @@ type fakeClient struct {
 	// defaultBranch and openPRs are the pull-request half of the fake:
 	// created PRs land in openPRs keyed by head branch, so a second `pr` on
 	// the same branch sees the first one exactly as the API would.
-	defaultBranch string
-	openPRs       map[string]gh.PullRequest
-	nextPR        int
+	defaultBranch     string
+	openPRs           map[string]gh.PullRequest
+	prContextOverride *gh.PRContext
+	nextPR            int
 }
 
 // failPoint is a failAfter entry: calls successful calls, then err.
@@ -430,9 +431,13 @@ func (f *fakeClient) PullRequestContext(ctx context.Context, head string) (gh.PR
 	if err := f.record("PullRequestContext " + head); err != nil {
 		return gh.PRContext{}, err
 	}
+	if f.prContextOverride != nil {
+		return *f.prContextOverride, nil
+	}
 	out := gh.PRContext{DefaultBranch: f.defaultBranch}
 	if pr, ok := f.openPRs[head]; ok {
 		out.Existing = &pr
+		out.OpenCount = 1
 	}
 	return out, nil
 }
@@ -447,7 +452,7 @@ func (f *fakeClient) CreatePullRequest(ctx context.Context, pr gh.NewPullRequest
 		Number: f.nextPR,
 		URL:    fmt.Sprintf("https://github.com/o/r/pull/%d", f.nextPR),
 		Draft:  pr.Draft,
-		Title:  pr.Title, Body: pr.Body, Base: pr.Base,
+		Title:  pr.Title, Body: pr.Body, Base: pr.Base, HeadRepository: "o/r",
 	}
 	f.openPRs[pr.Head] = created
 	return created, nil

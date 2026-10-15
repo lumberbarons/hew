@@ -363,7 +363,10 @@ only open a PR for a ref it can see.
 Use --amend to revise the open PR on this branch. Omitted sections and the
 title keep their existing values; an explicitly empty section flag removes
 that section. --body-file replaces the whole body and appends missing tracker
-trailers, just as on creation. --ready and --base are creation-only flags.
+trailers, just as on creation. Section edits require a losslessly readable
+What/Why/Testing body without fenced code; use --body-file for other Markdown.
+Amendment requires exactly one matching open PR whose head repository is this
+repository. --ready and --base are creation-only flags.
 
 ` + conventions.CodeSpanGuidance,
 		Flags: []ucli.Flag{

@@ -55,6 +55,8 @@ type PullRequest struct {
 	Title  string
 	Body   string
 	Base   string
+	// HeadRepository is owner/name; empty means the head repository is unknown.
+	HeadRepository string
 }
 
 // NewPullRequest is the pr command's creation payload.
@@ -68,13 +70,14 @@ type NewPullRequest struct {
 	Draft bool
 }
 
-// PRContext is the repo-side state pr needs before creating or revising: the branch to
-// target, and the open pull request already on the head branch, if any.
-// Both come from one query — a second PR on a branch is the failure the
-// command must name, not discover from a 422.
+// PRContext is the repo-side state needed before creating or revising a PR.
+// Existing is only a sample: amendment also requires OpenCount == 1 and a
+// matching head repository. Creation can refuse on any existing match.
 type PRContext struct {
 	DefaultBranch string
 	Existing      *PullRequest
+	// OpenCount includes all open PRs with this head name, including fork heads.
+	OpenCount int
 }
 
 // Client is the API surface the commands use; the tests fake it.
