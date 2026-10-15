@@ -24,6 +24,7 @@ Commands: ready [--limit N (0 for all)] | list [--label X --epic N --state open/
 show <n> | search <terms> | triage [--search <terms>] |
 create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
+draft [same section flags] --out F | --check F (compose/validate a body locally, no GitHub; then create --body-file F) |
 start <n> [--priority Pn --show] (--show or --json includes the body, so skip show <n>) | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |
 pr [--for N --testing "..." --what "..." --why "..." --title "..." --ready] (draft PR for the claimed issue; body
   composed from the issue, exactly one "Fixes #n"; title defaults to feat:|fix:|chore: from the type —
@@ -33,7 +34,7 @@ block <n> --on <m> | unblock <n> --from <m> |
 epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n>] |
 apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew apply --help). All take --json.
 
-## Ready (15 of 17 open)
+## Ready (15 of 16 open)
 #57 P3 enhancement  pr composes bullet lists from repeatable section flags
 #61 P3 task         Tighten test gates: per-package coverage floor and shuffled test order
 #62 P3 enhancement  list --json costs more tokens than the raw GraphQL it replaces
@@ -42,6 +43,4 @@ apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew appl
 … 10 more: hew ready
 
 ## In progress (1)
-#149 P3 enhancement  Claim and read an issue in one compact operation  @lumberbarons
-
-1 untriaged → hew triage
+#151 P3 enhancement  Compose and check a reusable issue body locally before publishing  @lumberbarons

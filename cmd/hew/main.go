@@ -92,7 +92,7 @@ func root() *ucli.Command {
 		Flags:   globalFlags(),
 		Commands: []*ucli.Command{
 			primeCmd(), readyCmd(), listCmd(), showCmd(), searchCmd(),
-			createCmd(), startCmd(), triageCmd(), setCmd(), prCmd(), closeCmd(),
+			createCmd(), draftCmd(), startCmd(), triageCmd(), setCmd(), prCmd(), closeCmd(),
 			reopenCmd(), blockCmd(), unblockCmd(), epicCmd(), applyCmd(), initCmd(),
 			hooksCmd(), migrateCmd(),
 		},
@@ -198,10 +198,9 @@ func searchCmd() *ucli.Command {
 	}
 }
 
-// bodyFlags are the body paths shared by create and epic create: section
-// flags compose the template; --body-file and --edit are the long-form
-// escape hatches.
-func bodyFlags() []ucli.Flag {
+// sectionFlags compose the issue body template. They are shared by create,
+// epic create and draft so the three accept exactly the same section input.
+func sectionFlags() []ucli.Flag {
 	return []ucli.Flag{
 		&ucli.StringFlag{Name: "where", Usage: "body section: where the work lives"},
 		&ucli.StringFlag{Name: "problem", Usage: "body section: the problem (or use --goal)"},
@@ -209,9 +208,17 @@ func bodyFlags() []ucli.Flag {
 		&ucli.StringFlag{Name: "fix", Usage: "body section: the fix (or use --approach)"},
 		&ucli.StringFlag{Name: "approach", Usage: "body section: the approach (or use --fix)"},
 		&proseSliceFlag{Name: "done-when", Usage: "acceptance checklist item (repeatable)"},
+	}
+}
+
+// bodyFlags are the body paths shared by create and epic create: section
+// flags compose the template; --body-file and --edit are the long-form
+// escape hatches.
+func bodyFlags() []ucli.Flag {
+	return append(sectionFlags(),
 		&ucli.StringFlag{Name: "body-file", Usage: "read the whole body from `FILE` (for long-form bodies)"},
 		&ucli.BoolFlag{Name: "edit", Usage: "open $EDITOR seeded with the body template"},
-	}
+	)
 }
 
 func sectionsFromFlags(cmd *ucli.Command) conventions.Sections {
@@ -229,7 +236,7 @@ func createCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:        "create",
 		Usage:       "file a new issue within the conventions",
-		Description: conventions.CodeSpanGuidance,
+		Description: conventions.CodeSpanGuidance + "\n\n" + draftPointer,
 		Flags: append([]ucli.Flag{
 			&ucli.StringFlag{Name: "title", Usage: "issue title (required)"},
 			&ucli.StringFlag{Name: "type", Usage: "bug|enhancement|task (required)"},
@@ -255,6 +262,46 @@ func createCmd() *ucli.Command {
 				Sections:       sectionsFromFlags(cmd),
 				BodyFile:       cmd.String("body-file"),
 				Edit:           cmd.Bool("edit"),
+			})
+		},
+	}
+}
+
+// draftPointer is the create help's route to the local preflight, so a body
+// can be corrected before the issue exists rather than after.
+const draftPointer = "To check a body before publishing, compose it locally with `hew draft --out FILE`,\n" +
+	"revise FILE, validate it with `hew draft --check FILE`, then `hew create --body-file FILE`."
+
+func draftCmd() *ucli.Command {
+	return &ucli.Command{
+		Name:  "draft",
+		Usage: "compose or check an issue body locally, before publishing",
+		Description: `Composes an issue body from the same section flags create takes and writes it
+to --out FILE (stdout without --out), or revalidates an existing draft with
+--check FILE. Neither needs GitHub credentials or network access, and neither
+writes to GitHub. Findings are reported, never auto-fixed: edit FILE, check it
+again, then publish the same bytes with ` + "`hew create --body-file FILE`" + `. --out
+refuses a file that already exists, so a revised draft is never overwritten.
+Epic bodies compose the same way: use ` + "`hew epic create --body-file FILE`" + `.
+
+` + conventions.CodeSpanGuidance,
+		Flags: append(sectionFlags(),
+			&ucli.StringFlag{Name: "out", Usage: "write the composed body to `FILE` instead of stdout"},
+			&ucli.StringFlag{Name: "check", Usage: "revalidate the existing draft `FILE` instead of composing"},
+		),
+		Action: func(ctx context.Context, cmd *ucli.Command) error {
+			// An explicitly empty value (an unset shell variable) must not
+			// fall through to the other mode.
+			for _, name := range []string{"out", "check"} {
+				if cmd.IsSet(name) && cmd.String(name) == "" {
+					return appcli.UsageError("--%s needs a file name", name)
+				}
+			}
+			app := &appcli.App{Out: os.Stdout, ErrOut: os.Stderr, JSON: cmd.Bool("json"), Color: render.ColorEnabled(os.Stdout)}
+			return app.Draft(ctx, appcli.DraftOpts{
+				Sections: sectionsFromFlags(cmd),
+				Out:      cmd.String("out"),
+				Check:    cmd.String("check"),
 			})
 		},
 	}

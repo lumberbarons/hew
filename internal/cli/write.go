@@ -117,6 +117,18 @@ type bodySource struct {
 }
 
 func (a *App) composeBody(src bodySource) (string, error) {
+	body, err := a.renderBody(src)
+	if err != nil {
+		return "", err
+	}
+	a.warnUnmarkedCode(body, "hew set <n> --body-file")
+	return body, nil
+}
+
+// renderBody is composeBody without the markup warning, so the local draft
+// preflight shares the exact composition create publishes and supplies its
+// own remedy.
+func (a *App) renderBody(src bodySource) (string, error) {
 	body := ""
 	switch {
 	case !src.sections.IsZero():
@@ -145,7 +157,6 @@ func (a *App) composeBody(src bodySource) (string, error) {
 			body = strings.TrimRight(body, "\n") + "\n\n" + link
 		}
 	}
-	a.warnUnmarkedCode(body, "hew set <n> --body-file")
 	return body, nil
 }
 

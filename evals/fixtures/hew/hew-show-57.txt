@@ -1,0 +1,24 @@
+#57 P3 enhancement  pr composes bullet lists from repeatable section flags
+state: open  created: 2026-07-27
+
+### Where
+
+cmd/issues/main.go (prFlags), internal/cli/pr.go, internal/conventions/pr.go
+
+### Problem
+
+The pr section flags --what, --why and --testing each take a single string, so anything with more than one item collapses into a run-on paragraph. PR #56's Testing section was five distinct verification steps — build, lint, shellcheck, a validator run, two URL checks — rendered as one wall of prose that nobody will read. create --done-when already uses proseSliceFlag to turn repeated values into a checklist, so the mechanism exists in the tool; it just isn't wired into the flags that compose PR bodies.
+
+### Approach
+
+Make --testing, --what and --why proseSliceFlag like --done-when. Render multiple values as a markdown bullet list and a single value as a plain paragraph, so every existing single-string caller is byte-for-byte unchanged. The same treatment fits create's --problem/--goal/--fix/--approach, which feed the issue sections that pr later copies verbatim.
+
+### Done when
+
+- [ ] --testing
+- [ ] --what and --why are repeatable
+- [ ] Multiple values render as a markdown bullet list under the section header
+- [ ] A single value renders exactly as it does today — no diff in existing golden files
+- [ ] Renderer tests cover both the single-value and multi-value shapes
+
+Discovered while working on #55

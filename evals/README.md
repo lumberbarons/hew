@@ -18,7 +18,7 @@ go run ./cmd/tokens capture \
   --repo lumberbarons/solar-controller --show 119 \
   --hew /tmp/hew --out fixtures/solar-controller
 go run ./cmd/tokens capture \
-  --repo lumberbarons/hew --show 128 \
+  --repo lumberbarons/hew --show 57 \
   --hew /tmp/hew --out fixtures/hew
 
 # report: tokenizes the committed fixture — offline, deterministic

@@ -56,6 +56,14 @@ var omittedFlags = map[string]bool{
 	"epic create --fix":      true,
 	"epic create --approach": true,
 	"epic create --edit":     true, // interactive, not for agents
+	// draft takes create's section flags verbatim; the primer entry says
+	// "same section flags" rather than restating them.
+	"draft --where":     true,
+	"draft --problem":   true,
+	"draft --goal":      true,
+	"draft --fix":       true,
+	"draft --approach":  true,
+	"draft --done-when": true,
 }
 
 type leaf struct {

@@ -7,6 +7,7 @@ The commands themselves, written against the `gh.Client` interface so `cmd/hew` 
 | `app.go` | The `App` struct every command hangs off: client, repo, output writers, and the `emit*` helpers that pick text vs `--json` | Adding a command, or changing how output is emitted |
 | `read.go` | The read commands: `ready`, `list`, `show`, `search`, `triage`, `prime`, `epic status` — one query, filtered client-side | Changing what a read command returns or how it filters |
 | `write.go` | The mutating commands: `create`, `start`, `set`, `close`, `reopen`, `block`, `unblock`, `epic create`, `init`; label swaps never stack, and `start` re-reads after claiming | Changing a mutation or the claim guard |
+| `draft.go` | `draft`: composes an issue body from the section flags, or revalidates a draft file, with no `gh.Client` use — the local counterpart to `create --body-file` | Changing the local body preflight |
 | `pr.go` | `pr`: infers the claimed issue, composes the body from it, enforces exactly one `Fixes #n`, derives the title from the issue type | Changing PR composition or issue inference |
 | `apply.go` | `apply`: walks a parsed `internal/plan` plan, creating issues then wiring dependency edges | Changing `apply` execution (schema and validation live in `internal/plan`) |
 | `migrate.go` | `migrate beads`: maps a parsed beads snapshot onto the conventions — priorities, types, deps, epics, in-progress state | Changing the beads migration |
@@ -24,6 +25,7 @@ Checkpoint state is trusted local scratch, never a portable input. A state file 
 | `read_test.go` | Covers `read.go` except search: filtering, sorting, empty states, and the cycle and truncated-connection warnings | Changing a read command |
 | `search_test.go` | Covers `search` in `read.go`: title and body matching, closed issues, best-match order | Changing search behavior |
 | `write_test.go` | Covers `write.go`: label swaps, the claim guard, cycle rejection, body composition | Changing a mutation |
+| `draft_test.go` | Covers `draft.go`: parity with `create`, file round trips, zero GitHub calls | Changing the local body preflight |
 | `pr_test.go` | Covers `pr.go`: body composition, `Fixes #n` handling, branch and claim inference | Changing the `pr` command |
 | `apply_test.go` | Covers `apply.go` and its half of `batch.go`: plan execution, resume, dependency wiring | Changing `apply` |
 | `migrate_test.go` | Covers `migrate.go` and its half of `batch.go`: beads mapping, resume | Changing the beads migration |

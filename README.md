@@ -115,6 +115,8 @@ hew create --type bug|enhancement|task --title "..."
               [--priority P0..P4] [--area X] [--blocked-by N] [--parent N]
               [--discovered-from N]
               [--body-file F | --edit] # long-form escape hatch / $EDITOR
+hew draft [section flags] [--out F]   # compose a body locally (stdout without --out)
+hew draft --check F                   # revalidate a draft; neither touches GitHub
 hew start <n> [--priority P0..P4] [--force] [--show]
                                    # --show appends the issue's detail (as show would);
                                    # --json includes the body too (without text-findings annotations)
@@ -175,6 +177,24 @@ truncation and grep); every GitHub-touching command also takes `--repo owner/nam
 (`hooks` is local-only). Exit codes are meaningful: `3`
 means "already claimed by someone else, pick the next ready item", `5` means
 "already claimed by you, resume that work", `4` means "run `gh auth login`".
+
+### Drafting a body before publishing
+
+`hew create` warns about code-shaped text outside backticks, but only after the issue is
+written. To fix the body first, compose it locally — no GitHub credentials, network access,
+or writes — revise the file, check it, and publish those same bytes:
+
+```sh
+hew draft --goal "..." --approach "..." --done-when "..." --out draft.md
+$EDITOR draft.md                     # wrap flagged commands and paths in backticks
+hew draft --check draft.md           # names any text still outside code spans
+hew create --type task --title "..." --body-file draft.md
+```
+
+`draft` takes the section flags `create` takes and composes the same body; it reports findings
+but never inserts backticks for you, and `--out` refuses a file that already exists so a
+revised draft is not overwritten. `hew epic create --body-file draft.md` publishes an epic body
+the same way. `create` itself still only warns.
 
 ### Checking for duplicates
 
