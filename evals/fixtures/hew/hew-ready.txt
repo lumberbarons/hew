@@ -9,7 +9,7 @@
 #90  P3 enhancement  list --label reports a label that matches nothing instead of an empty result
 #92  P3 task         Correct the documented CI coverage command
 #93  P3 task         Point exit-code documentation at its implementation
+#134 P3 enhancement  pr can close a declared set of issues with repeated --for
 #150 P3 enhancement  Look up deduplication keys in a batch without emitting issue bodies
-#151 P3 enhancement  Compose and check a reusable issue body locally before publishing
 #35  P4 task         Agentic accuracy eval: issues vs raw gh on a seeded fixture repo
 #77  P4 enhancement  start's closed refusal doesn't name the close state
