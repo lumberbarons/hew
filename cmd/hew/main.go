@@ -624,11 +624,11 @@ plan: edit the plan, move repositories, or bring a state file from elsewhere
 and it is refused rather than trusted.
 
 ` + conventions.CodeSpanGuidance,
-		Flags: append(globalFlags(),
+		Flags: []ucli.Flag{
 			&ucli.StringFlag{Name: "state", Usage: "resume-state `FILE`, bound to this repo and plan (default: <plan>.state.json)"},
 			&ucli.BoolFlag{Name: "dry-run", Usage: "print the plan without creating anything"},
 			&ucli.DurationFlag{Name: "throttle", Usage: "pause between writes", Value: 500 * time.Millisecond},
-		),
+		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
 			if err != nil {
