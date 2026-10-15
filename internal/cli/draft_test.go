@@ -17,9 +17,9 @@ var draftSections = conventions.Sections{
 	DoneWhen: []string{"tests pass", "docs updated"},
 }
 
-// A draft is the body create would have written, byte for byte, so the file
-// can be revised and published with --body-file without the two paths
-// drifting apart.
+// A draft is the body create would have written, plus the trailing newline a
+// text file carries, so the file can be revised and published with
+// --body-file without the two compositions drifting apart.
 func TestDraftComposesTheBodyCreateWould(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "draft.md")
 	f := newFake()
@@ -242,5 +242,30 @@ func TestDraftCheckJSON(t *testing.T) {
 	}
 	if got.File != path || len(got.UnmarkedCode) == 0 {
 		t.Errorf("got %+v", got)
+	}
+}
+
+func TestDraftComposeJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "draft.md")
+	for name, out := range map[string]string{"stdout": "", "file": path} {
+		t.Run(name, func(t *testing.T) {
+			app, stdout, _ := newApp(newFake())
+			app.JSON = true
+			sections := conventions.Sections{Goal: "See internal/cli/write.go"}
+			if err := app.Draft(ctx, DraftOpts{Sections: sections, Out: out}); err != nil {
+				t.Fatal(err)
+			}
+			var got struct {
+				Body         string   `json:"body"`
+				File         string   `json:"file"`
+				UnmarkedCode []string `json:"unmarkedCode"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+				t.Fatalf("stdout %q is not JSON: %v", stdout.String(), err)
+			}
+			if len(got.UnmarkedCode) == 0 || got.File != out || (out == "" && got.Body == "") {
+				t.Errorf("got %+v", got)
+			}
+		})
 	}
 }

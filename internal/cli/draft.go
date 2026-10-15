@@ -45,10 +45,15 @@ func (a *App) draftCompose(opts DraftOpts) error {
 	}
 	body += "\n"
 
+	tokens := conventions.UnmarkedCodeText(body)
+	if tokens == nil {
+		tokens = []string{}
+	}
 	if opts.Out == "" {
-		a.warnUnmarkedCode(body, "fix the flag text and compose again")
-		a.printf("%s", body)
-		return nil
+		return a.emitResult(map[string]any{"body": body, "unmarkedCode": tokens}, func() {
+			a.warnUnmarkedCode(body, "fix the flag text and compose again")
+			a.printf("%s", body)
+		})
 	}
 	// O_EXCL: a draft that already exists may carry the author's revisions,
 	// and recomposing from flags would silently discard them.
@@ -59,16 +64,20 @@ func (a *App) draftCompose(opts DraftOpts) error {
 	if err != nil {
 		return genericErr("cannot write --out: %v", err)
 	}
-	if _, err := f.WriteString(body); err != nil {
-		_ = f.Close()
+	_, err = f.WriteString(body)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		// A partial draft would block the retry (the file now exists) and
+		// could be published truncated, so leave nothing behind.
+		_ = os.Remove(opts.Out)
 		return genericErr("cannot write --out: %v", err)
 	}
-	if err := f.Close(); err != nil {
-		return genericErr("cannot write --out: %v", err)
-	}
-	a.warnUnmarkedCode(body, fmt.Sprintf("edit %s, then `hew draft --check %s`", opts.Out, opts.Out))
-	a.printf("wrote %s — publish with: hew create --body-file %s\n", opts.Out, opts.Out)
-	return nil
+	return a.emitResult(map[string]any{"file": opts.Out, "unmarkedCode": tokens}, func() {
+		a.warnUnmarkedCode(body, fmt.Sprintf("edit %s, then `hew draft --check %s`", opts.Out, opts.Out))
+		a.printf("wrote %s — publish with: hew create --body-file %s\n", opts.Out, opts.Out)
+	})
 }
 
 func (a *App) draftCheck(opts DraftOpts) error {

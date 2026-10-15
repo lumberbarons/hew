@@ -290,6 +290,13 @@ Epic bodies compose the same way: use ` + "`hew epic create --body-file FILE`" +
 			&ucli.StringFlag{Name: "check", Usage: "revalidate the existing draft `FILE` instead of composing"},
 		),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
+			// An explicitly empty value (an unset shell variable) must not
+			// fall through to the other mode.
+			for _, name := range []string{"out", "check"} {
+				if cmd.IsSet(name) && cmd.String(name) == "" {
+					return appcli.UsageError("--%s needs a file name", name)
+				}
+			}
 			app := &appcli.App{Out: os.Stdout, ErrOut: os.Stderr, JSON: cmd.Bool("json"), Color: render.ColorEnabled(os.Stdout)}
 			return app.Draft(ctx, appcli.DraftOpts{
 				Sections: sectionsFromFlags(cmd),
