@@ -1304,6 +1304,36 @@ func TestPRAmendBodyFileWarnsAboutMissingTesting(t *testing.T) {
 	}
 }
 
+// Risk is asked for once a PR is out of draft; amendSetup's draft keeps it
+// optional.
+func TestPRAmendWarnsAboutMissingRiskOnlyWhenReady(t *testing.T) {
+	const noRisk = "### What\n\nOriginal what\n\n### Why\n\nOriginal why\n\n### Testing\n\nOriginal testing\n\nFixes #30\nPart of #33"
+	for _, tc := range []struct {
+		name  string
+		draft bool
+		opts  PROpts
+		want  bool
+	}{
+		{"ready section edit", false, PROpts{Amend: true, Sections: conventions.PRSections{What: "Revised"}}, true},
+		{"draft section edit", true, PROpts{Amend: true, Sections: conventions.PRSections{What: "Revised"}}, false},
+		{"ready title-only amend", false, PROpts{Amend: true, Title: "feat: new title"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, app := amendSetup()
+			pr := f.openPRs["feat/30-work"]
+			pr.Draft, pr.Body = tc.draft, noRisk
+			f.openPRs["feat/30-work"] = pr
+			if err := app.PR(context.Background(), tc.opts); err != nil {
+				t.Fatal(err)
+			}
+			got := strings.Contains(app.ErrOut.(*bytes.Buffer).String(), "no Risk section")
+			if got != tc.want {
+				t.Errorf("warned about Risk = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestPRAmendRefusesMissingOpenPR(t *testing.T) {
 	f := newFake(claimed(30, "work"))
 	app, _, _ := newApp(f)

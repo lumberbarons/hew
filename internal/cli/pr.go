@@ -264,7 +264,7 @@ func (a *App) amendPR(ctx context.Context, opts PROpts, issue model.Issue, head 
 	if !strings.EqualFold(existing.HeadRepository, a.Repo.String()) {
 		return genericErr("cannot amend PR #%d: head repository %q does not identify %s; use gh pr edit with an explicit PR number", existing.Number, existing.HeadRepository, a.Repo)
 	}
-	edited := opts.BodyFile != "" || !opts.Sections.IsZero() || len(opts.SectionFlags) > 0
+	edited := true
 	var body string
 	var err error
 	switch {
@@ -272,6 +272,7 @@ func (a *App) amendPR(ctx context.Context, opts PROpts, issue model.Issue, head 
 		body, err = a.prBodyFile(opts.BodyFile, issue)
 	case opts.Sections.IsZero() && len(opts.SectionFlags) == 0:
 		// A title-only edit preserves even a freeform body.
+		edited = false
 		body, err = a.finishPRBody(existing.Body, issue, "PR body")
 	default:
 		content := existing.Body
