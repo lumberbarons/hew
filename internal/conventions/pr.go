@@ -93,7 +93,7 @@ value stays a paragraph. Empty sections are omitted.
 
 Testing: ` + PRTestingGuidance + `.
 Risk: ` + PRRiskGuidance + `.
-Pass one flag value per line.
+Repeat the flag once per line.
 
 For a diff sketch, file tree or diagram, compose the body in a file and pass
 --body-file; the section flags are for short text.`

@@ -206,7 +206,7 @@ the same way. `create` itself still only warns.
 
 `hew pr` composes `### What` / `### Why` / `### Testing`, plus `### Risk` when you pass
 `--risk`. What and Why default to the issue's `Fix`/`Approach` and `Problem`/`Goal`.
-Lay each section out one claim per line, with one flag value per line, so it reads as
+Lay each section out one claim per line, repeating the flag once per line, so it reads as
 a list on GitHub rather than a dense paragraph:
 
 - Testing: give Before: and After: each its own line — the test or output that failed, then the same thing passing — then a short list of the checks run; "tests pass" is a claim, not evidence
