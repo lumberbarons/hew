@@ -72,25 +72,31 @@ type PRSections struct {
 	Risk    string
 }
 
-// PRBodyGuidance is the body contract stated on the pr help surface. It sits
-// next to Compose so the template and its explanation cannot drift; the primer
-// carries only the short form.
-const PRBodyGuidance = `Body: ### What / ### Why / ### Testing, plus ### Risk when a reviewer must
-weigh the merge. What and Why default to the issue's Fix/Approach and Problem/Goal.
-Testing is evidence: show a before and an after — the failing test or output,
-then the same thing passing. Risk names whether merging is a one-way or two-way
-door and its blast radius. What, Why, Testing and Risk repeat: several values
-become a bullet list, one value stays a paragraph. Empty sections are omitted. For a diff sketch, file
-tree or diagram, compose the body in a file and pass --body-file; the section
-flags are for short text.`
-
 // PRTestingGuidance is the short form carried by the missing-Testing warning.
 // Help is read by someone who goes looking; the agent composing a body
 // generally does not, so the rule is also stated at the moment it applies.
-const PRTestingGuidance = `show a before and after — the test or output that failed, then the same thing passing; "tests pass" is a claim, not evidence`
+// It says how to lay the evidence out as well as what to prove, because a
+// section written as one run-on paragraph renders as a dense block on GitHub.
+const PRTestingGuidance = `give Before: and After: each its own line — the test or output that failed, then the same thing passing — then a short list of the checks run; "tests pass" is a claim, not evidence`
 
 // PRRiskGuidance is the short form carried by the missing-Risk warning.
-const PRRiskGuidance = `say whether merging is a one-way or two-way door and its blast radius — what breaks if this is wrong`
+const PRRiskGuidance = `give a Reversibility: line (one-way or two-way door) and a Blast radius: line (what breaks if this is wrong), with anything else on its own line`
+
+// PRBodyGuidance is the body contract stated on the pr help surface. It sits
+// next to Compose so the template and its explanation cannot drift, and it
+// embeds the warning constants so the layout advice has one source; the primer
+// carries only the short form.
+const PRBodyGuidance = `Body: ### What / ### Why / ### Testing, plus ### Risk when a reviewer must
+weigh the merge. What and Why default to the issue's Fix/Approach and Problem/Goal.
+What, Why, Testing and Risk repeat: several values become a bullet list, one
+value stays a paragraph. Empty sections are omitted.
+
+Testing: ` + PRTestingGuidance + `.
+Risk: ` + PRRiskGuidance + `.
+Pass one flag value per line.
+
+For a diff sketch, file tree or diagram, compose the body in a file and pass
+--body-file; the section flags are for short text.`
 
 // PRList renders the values of a repeatable section flag. One value is
 // returned verbatim, so a caller that passes a single string gets the same
