@@ -1,8 +1,10 @@
+#167 P2 task         CLI surface snapshot: fail on flag and command removals
+#171 P2 task         Write the 1.0 compatibility policy
+#172 P2 task         Decide how conventions evolve after 1.0
 #57  P3 enhancement  pr composes bullet lists from repeatable section flags
 #61  P3 task         Tighten test gates: per-package coverage floor and shuffled test order
 #62  P3 enhancement  list --json costs more tokens than the raw GraphQL it replaces
 #70  P3 enhancement  pr warns when a bug's derived title names the defect rather than the fix
-#73  P3 enhancement  pr can edit an existing PR body, not only compose it at creation
 #74  P3 enhancement  Test backend: run hew against ephemeral local state instead of GitHub
 #75  P3 enhancement  Code-span check treats a bare filename differently from a path
 #88  P3 enhancement  list and ready filter by priority, including ranges
@@ -11,5 +13,11 @@
 #93  P3 task         Point exit-code documentation at its implementation
 #134 P3 enhancement  pr can close a declared set of issues with repeated --for
 #150 P3 enhancement  Look up deduplication keys in a batch without emitting issue bodies
+#156 P3 enhancement  Align flag names and shapes that collide or diverge across commands
+#159 P3 enhancement  ready and list share filters: area, priority, type, epic
+#160 P3 enhancement  Output-scope flags (--limit, --state, --bodies) on every read command
+#161 P3 enhancement  Body authoring parity: set sections and --edit, pr --edit, stdin for --body-file
+#162 P3 enhancement  epic create accepts priority, area and discovered-from
+#163 P3 enhancement  --dry-run on the mutating commands that compose content
 #35  P4 task         Agentic accuracy eval: issues vs raw gh on a seeded fixture repo
 #77  P4 enhancement  start's closed refusal doesn't name the close state

@@ -182,6 +182,103 @@ func TestPRComposesBodyFromTheIssue(t *testing.T) {
 	}
 }
 
+// Risk is the merge claim a reviewer weighs after reading the change; it sits
+// after Testing and is optional on a draft.
+func TestPRComposesTheRiskSection(t *testing.T) {
+	f := newFake(claimed(30, "PR creation command", "P2", "enhancement"))
+	app, _, errOut := newApp(f)
+	onBranch(app, "feat/pr-command")
+
+	err := app.PR(context.Background(), PROpts{
+		Ready: true,
+		Sections: conventions.PRSections{
+			Testing: "Before: `TestX` failed. After: it passes.",
+			Risk:    "Two-way door; blast radius: the pr command.",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := prBody(t, createdPR(t, f))
+	if !strings.Contains(body, "### Risk\n\nTwo-way door; blast radius: the pr command.") {
+		t.Errorf("body has no Risk section:\n%s", body)
+	}
+	if strings.Index(body, "### Testing") > strings.Index(body, "### Risk") {
+		t.Errorf("Risk did not follow Testing:\n%s", body)
+	}
+	if strings.Contains(errOut.String(), "no Risk section") {
+		t.Errorf("warned about a supplied Risk section: %q", errOut.String())
+	}
+}
+
+// A draft may be incomplete; opening it for review is the moment to ask for
+// the merge claim.
+func TestPRReadyWarnsAboutMissingRisk(t *testing.T) {
+	f := newFake(claimed(30, "work", "P2", "enhancement"))
+	app, _, errOut := newApp(f)
+	onBranch(app, "feat/30-work")
+
+	err := app.PR(context.Background(), PROpts{
+		Ready:    true,
+		Sections: sections("what", "why", "Before: failed. After: passes."),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	warning := errOut.String()
+	for _, want := range []string{"no Risk section", "one-way or two-way", "blast radius"} {
+		if !strings.Contains(warning, want) {
+			t.Errorf("warning %q does not name %q", warning, want)
+		}
+	}
+}
+
+func TestPRDraftDoesNotWarnAboutMissingRisk(t *testing.T) {
+	f := newFake(claimed(30, "work", "P2", "enhancement"))
+	app, _, errOut := newApp(f)
+	onBranch(app, "feat/30-work")
+
+	if err := app.PR(context.Background(), PROpts{
+		Sections: sections("what", "why", "Before: failed. After: passes."),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(errOut.String(), "no Risk section") {
+		t.Errorf("draft warned about missing risk: %q", errOut.String())
+	}
+}
+
+// --body-file is the escape hatch, not an exemption from the body contract.
+func TestPRBodyFileWarnsAboutMissingTesting(t *testing.T) {
+	f := newFake(claimed(30, "work", "P2", "enhancement"))
+	app, _, errOut := newApp(f)
+	onBranch(app, "feat/30-work")
+
+	if err := app.PR(context.Background(), PROpts{BodyFile: writeTemp(t, "narrative")}); err != nil {
+		t.Fatal(err)
+	}
+	warning := errOut.String()
+	for _, want := range []string{"no Testing section", "before and after", "claim, not evidence"} {
+		if !strings.Contains(warning, want) {
+			t.Errorf("warning %q does not name %q", warning, want)
+		}
+	}
+}
+
+func TestPRBodyFileWithTestingDoesNotWarn(t *testing.T) {
+	f := newFake(claimed(30, "work", "P2", "enhancement"))
+	app, _, errOut := newApp(f)
+	onBranch(app, "feat/30-work")
+
+	body := "### Testing\n\nBefore: failed. After: passes.\n\nFixes #30"
+	if err := app.PR(context.Background(), PROpts{BodyFile: writeTemp(t, body)}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(errOut.String(), "no Testing section") {
+		t.Errorf("warned about supplied Testing: %q", errOut.String())
+	}
+}
+
 func TestPRFlagsOverrideTheIssueSections(t *testing.T) {
 	i := claimed(30, "PR creation command")
 	i.Body = "### Goal\n\nfrom the issue\n\n### Approach\n\nalso from the issue"
@@ -665,8 +762,11 @@ func TestPRWarnsWhenTestingIsOmitted(t *testing.T) {
 	if err := app.PR(context.Background(), PROpts{}); err != nil {
 		t.Fatal(err)
 	}
-	if got := errOut.String(); !strings.Contains(got, "--testing") {
-		t.Errorf("no missing-testing warning: %q", got)
+	got := errOut.String()
+	for _, want := range []string{"no Testing section", "before and after"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("warning %q does not name %q", got, want)
+		}
 	}
 }
 
@@ -1028,7 +1128,7 @@ func amendSetup() (*fakeClient, *App) {
 	f.openPRs["feat/30-work"] = gh.PullRequest{
 		Number: 501, URL: "https://github.com/o/r/pull/501", Draft: true,
 		Title: "feat: original title", Base: "release", HeadRepository: "o/r",
-		Body: "### What\n\nOriginal what\n\n### Why\n\nOriginal why\n\n### Testing\n\nOriginal testing\n\nFixes #30\nPart of #33",
+		Body: "### What\n\nOriginal what\n\n### Why\n\nOriginal why\n\n### Testing\n\nOriginal testing\n\n### Risk\n\nOriginal risk\n\nFixes #30\nPart of #33",
 	}
 	app, _, _ := newApp(f)
 	inWorktree(app, "local-worktree", "feat/30-work")
@@ -1046,7 +1146,7 @@ func assertPRReadsOnly(t *testing.T, f *fakeClient) {
 }
 
 func TestPRAmendRecomposesOnlyNamedSections(t *testing.T) {
-	for _, name := range []string{"what", "why", "testing"} {
+	for _, name := range []string{"what", "why", "testing", "risk"} {
 		t.Run(name, func(t *testing.T) {
 			f, app := amendSetup()
 			opts := PROpts{Amend: true}
@@ -1057,12 +1157,17 @@ func TestPRAmendRecomposesOnlyNamedSections(t *testing.T) {
 				opts.Sections.Why = "Revised why"
 			case "testing":
 				opts.Sections.Testing = "Revised testing"
+			case "risk":
+				opts.Sections.Risk = "Revised risk"
 			}
 			if err := app.PR(context.Background(), opts); err != nil {
 				t.Fatal(err)
 			}
 			got := f.openPRs["feat/30-work"]
-			want := sections("Original what", "Original why", "Original testing")
+			want := conventions.PRSections{
+				What: "Original what", Why: "Original why",
+				Testing: "Original testing", Risk: "Original risk",
+			}
 			switch name {
 			case "what":
 				want.What = "Revised what"
@@ -1070,6 +1175,8 @@ func TestPRAmendRecomposesOnlyNamedSections(t *testing.T) {
 				want.Why = "Revised why"
 			case "testing":
 				want.Testing = "Revised testing"
+			case "risk":
+				want.Risk = "Revised risk"
 			}
 			body := want.Compose(conventions.PRTrailers{Fixes: 30, Epic: 33})
 			if got.Body != body {
@@ -1092,6 +1199,32 @@ func TestPRAmendPreservesAbsentSectionsAndClearsExplicitEmpty(t *testing.T) {
 	want := "Fixes #30\nPart of #33"
 	if got := f.openPRs["feat/30-work"].Body; got != want {
 		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
+// Risk behaves like the other sections: an omitted --risk keeps the existing
+// value, and an explicitly empty one removes the section.
+func TestPRAmendPreservesAndClearsRisk(t *testing.T) {
+	f, app := amendSetup()
+	if err := app.PR(context.Background(), PROpts{
+		Amend:    true,
+		Sections: conventions.PRSections{Testing: "Revised testing"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if body := f.openPRs["feat/30-work"].Body; !strings.Contains(body, "### Risk\n\nOriginal risk") {
+		t.Errorf("amend lost the preserved Risk section:\n%s", body)
+	}
+
+	if err := app.PR(context.Background(), PROpts{Amend: true, SectionFlags: []string{"risk"}}); err != nil {
+		t.Fatal(err)
+	}
+	body := f.openPRs["feat/30-work"].Body
+	if strings.Contains(body, "### Risk") {
+		t.Errorf("an explicitly empty --risk did not remove the section:\n%s", body)
+	}
+	if !strings.Contains(body, "### Testing\n\nRevised testing") {
+		t.Errorf("clearing Risk changed Testing:\n%s", body)
 	}
 }
 
@@ -1160,6 +1293,47 @@ func TestPRAmendBodyFileAppendsOnlyMissingTrailers(t *testing.T) {
 	}
 }
 
+// The amend body-file path is not exempt from the section contract either.
+func TestPRAmendBodyFileWarnsAboutMissingTesting(t *testing.T) {
+	_, app := amendSetup()
+	if err := app.PR(context.Background(), PROpts{Amend: true, BodyFile: writeTemp(t, "narrative")}); err != nil {
+		t.Fatal(err)
+	}
+	if warning := app.ErrOut.(*bytes.Buffer).String(); !strings.Contains(warning, "no Testing section") {
+		t.Errorf("amend --body-file did not warn: %q", warning)
+	}
+}
+
+// Risk is asked for once a PR is out of draft; amendSetup's draft keeps it
+// optional.
+func TestPRAmendWarnsAboutMissingRiskOnlyWhenReady(t *testing.T) {
+	const noRisk = "### What\n\nOriginal what\n\n### Why\n\nOriginal why\n\n### Testing\n\nOriginal testing\n\nFixes #30\nPart of #33"
+	for _, tc := range []struct {
+		name  string
+		draft bool
+		opts  PROpts
+		want  bool
+	}{
+		{"ready section edit", false, PROpts{Amend: true, Sections: conventions.PRSections{What: "Revised"}}, true},
+		{"draft section edit", true, PROpts{Amend: true, Sections: conventions.PRSections{What: "Revised"}}, false},
+		{"ready title-only amend", false, PROpts{Amend: true, Title: "feat: new title"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, app := amendSetup()
+			pr := f.openPRs["feat/30-work"]
+			pr.Draft, pr.Body = tc.draft, noRisk
+			f.openPRs["feat/30-work"] = pr
+			if err := app.PR(context.Background(), tc.opts); err != nil {
+				t.Fatal(err)
+			}
+			got := strings.Contains(app.ErrOut.(*bytes.Buffer).String(), "no Risk section")
+			if got != tc.want {
+				t.Errorf("warned about Risk = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestPRAmendRefusesMissingOpenPR(t *testing.T) {
 	f := newFake(claimed(30, "work"))
 	app, _, _ := newApp(f)
@@ -1207,7 +1381,7 @@ func TestPRAmendTextOutputAndCodeWarnings(t *testing.T) {
 	if !strings.Contains(warning, "internal/cli/pr.go") || !strings.Contains(warning, "hew pr --amend") {
 		t.Errorf("warning = %q", warning)
 	}
-	if strings.Contains(warning, "no --testing") {
+	if strings.Contains(warning, "no Testing section") {
 		t.Errorf("warned about preserved testing: %q", warning)
 	}
 	assertNoPR(t, f)

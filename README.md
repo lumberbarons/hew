@@ -131,13 +131,16 @@ hew set <n> [--priority ..] [--type ..] [--add-area X] [--remove-area X]
                                   # edit landing on one is almost always stale
                                   # state; this is the override
 hew pr [--for N] [--title "..."]
-          [--what "..."] [--why "..."] [--testing "..."]
+          [--what "..."] [--why "..."] [--testing "..."] [--risk "..."]
                                   # draft PR for the claimed issue: body composed from
                                   # the issue (What/Why default to its Fix/Approach and
                                   # Problem/Goal), exactly one "Fixes #n", base is the
-                                  # repo default. The title defaults to the issue title
-                                  # under the type's commit prefix (bug → "fix: ...");
-                                  # --title is passed through. Push the branch first.
+                                  # repo default. Testing is evidence: show a before
+                                  # and an after. Risk states a one-way/two-way door
+                                  # and its blast radius. The title defaults to the
+                                  # issue title under the type's commit prefix
+                                  # (bug → "fix: ..."); --title is passed through.
+                                  # Push the branch first.
           [--body-file F]         # long-form escape hatch (missing Fixes/Part of
                                   # trailers are appended, never duplicated)
           [--base BRANCH] [--ready]
@@ -196,6 +199,20 @@ hew create --type task --title "..." --body-file draft.md
 but never inserts backticks for you, and `--out` refuses a file that already exists so a
 revised draft is not overwritten. `hew epic create --body-file draft.md` publishes an epic body
 the same way. `create` itself still only warns.
+
+### Writing a PR body
+
+`hew pr` composes `### What` / `### Why` / `### Testing`, plus `### Risk` when you pass
+`--risk`. What and Why default to the issue's `Fix`/`Approach` and `Problem`/`Goal`.
+Testing is evidence, not a claim: show the failing test or output and the same thing
+passing. Risk names whether merging is a one-way or two-way door and its blast radius.
+For a diff sketch, file tree or diagram, compose the body in a file and use
+`--body-file`; the section flags are for short text.
+
+`--body-file` gets the same section warnings as the flags path, on create and on
+`--amend`. `--amend` preserves `Risk` like the other sections; an explicitly empty
+`--risk` removes it. A draft may omit `Risk`; `--ready` (or amending a PR already open
+for review) prompts for it, because that is when a reviewer starts weighing the merge.
 
 ### Checking for duplicates
 

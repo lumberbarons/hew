@@ -437,17 +437,17 @@ func prCmd() *ucli.Command {
 		Usage: "open a draft PR for the claimed issue, or revise it with --amend",
 		Description: `Composes the PR the workflow prescribes: the linked issue is inferred
 from what you have claimed (a number in the branch name breaks ties, and
---for <n> settles it outright), the body is the What/Why/Testing template
-with exactly one "Fixes #n" so the merge closes the issue, and the base is
-the repo's default branch. What and Why default to the issue's own
-Fix/Approach and Problem/Goal sections. Push the branch first — GitHub can
-only open a PR for a ref it can see.
+--for <n> settles it outright), exactly one "Fixes #n" so the merge closes
+the issue, and the base is the repo's default branch. Push the branch first —
+GitHub can only open a PR for a ref it can see.
+
+` + conventions.PRBodyGuidance + `
 
 Use --amend to revise the open PR on this branch. Omitted sections and the
 title keep their existing values; an explicitly empty section flag removes
 that section. --body-file replaces the whole body and appends missing tracker
 trailers, just as on creation. Section edits require a losslessly readable
-What/Why/Testing body without fenced code; use --body-file for other Markdown.
+What/Why/Testing/Risk body without fenced code; use --body-file for other Markdown.
 Amendment requires exactly one matching open PR whose head repository is this
 repository. --ready and --base are creation-only flags.
 
@@ -458,7 +458,8 @@ repository. --ready and --base are creation-only flags.
 			&ucli.StringFlag{Name: "title", Usage: "PR title (default: derived from the issue type/title; preserved with --amend)"},
 			&ucli.StringFlag{Name: "what", Usage: "body section: what the change does (default: the issue's Fix/Approach)"},
 			&ucli.StringFlag{Name: "why", Usage: "body section: why (default: the issue's Problem/Goal)"},
-			&ucli.StringFlag{Name: "testing", Usage: "body section: how it was verified"},
+			&ucli.StringFlag{Name: "testing", Usage: "body section: evidence — a before and after, not \"tests pass\""},
+			&ucli.StringFlag{Name: "risk", Usage: "body section: one-way/two-way door + blast radius"},
 			&ucli.StringFlag{Name: "body-file", Usage: "read the whole body from `FILE` (Fixes #n is appended if absent)"},
 			&ucli.StringFlag{Name: "base", Usage: "target `BRANCH` (default: the repo's default branch)"},
 			&ucli.BoolFlag{Name: "ready", Usage: "open for review instead of as a draft"},
@@ -470,7 +471,7 @@ repository. --ready and --base are creation-only flags.
 				return err
 			}
 			var sectionFlags []string
-			for _, name := range []string{"what", "why", "testing"} {
+			for _, name := range []string{"what", "why", "testing", "risk"} {
 				if cmd.IsSet(name) {
 					sectionFlags = append(sectionFlags, name)
 				}
@@ -484,6 +485,7 @@ repository. --ready and --base are creation-only flags.
 					What:    cmd.String("what"),
 					Why:     cmd.String("why"),
 					Testing: cmd.String("testing"),
+					Risk:    cmd.String("risk"),
 				},
 				BodyFile: cmd.String("body-file"),
 				Base:     cmd.String("base"),

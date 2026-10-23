@@ -26,21 +26,25 @@ create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --do
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
 draft [same section flags] --out F | --check F (compose/validate a body locally, no GitHub; then create --body-file F) |
 start <n> [--priority Pn --show] (--show or --json includes the body, so skip show <n>) | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |
-pr [--for N --testing "..." --what "..." --why "..." --title "..." --ready] (draft PR for the claimed issue; body
-  composed from the issue, exactly one "Fixes #n"; title defaults to feat:|fix:|chore: from the type —
-  push the branch first) |
+pr [--for N --testing "..." --what "..." --why "..." --risk "..." --title "..." --ready] (draft PR for the claimed issue;
+  body: What/Why from the issue, Testing = before→after, Risk = door + blast radius; exactly one "Fixes #n";
+  title defaults to feat:|fix:|chore: from the type — push the branch first) |
 close <n> --reason "..." [--completed | --duplicate-of M] | reopen <n> --reason "..." |
 block <n> --on <m> | unblock <n> --from <m> |
 epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n>] |
 apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew apply --help). All take --json.
 
-## Ready (15 of 16 open)
-#57 P3 enhancement  pr composes bullet lists from repeatable section flags
-#61 P3 task         Tighten test gates: per-package coverage floor and shuffled test order
-#62 P3 enhancement  list --json costs more tokens than the raw GraphQL it replaces
-#70 P3 enhancement  pr warns when a bug's derived title names the defect rather than the fix
-#73 P3 enhancement  pr can edit an existing PR body, not only compose it at creation
-… 10 more: hew ready
+## Ready (23 of 27 open)
+#167 P2 task         CLI surface snapshot: fail on flag and command removals
+#171 P2 task         Write the 1.0 compatibility policy
+#172 P2 task         Decide how conventions evolve after 1.0
+#57  P3 enhancement  pr composes bullet lists from repeatable section flags
+#61  P3 task         Tighten test gates: per-package coverage floor and shuffled test order
+… 18 more: hew ready
 
 ## In progress (1)
-#151 P3 enhancement  Compose and check a reusable issue body locally before publishing  @lumberbarons
+#177 P2 enhancement  pr body guidance: evidence before/after and merge risk  @lumberbarons
+
+## Epics
+#154 P2  Epic: CLI flag consistency  3/10
+#170 P2  Epic: 1.0 readiness  0/5

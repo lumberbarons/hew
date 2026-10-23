@@ -104,6 +104,7 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 	if err != nil {
 		return err
 	}
+	a.warnPRSections(body, opts.Ready)
 	// An explicit --title is the author's, prefix or not; only the derived
 	// default carries the type's conventional-commit prefix.
 	title := opts.Title
@@ -263,6 +264,7 @@ func (a *App) amendPR(ctx context.Context, opts PROpts, issue model.Issue, head 
 	if !strings.EqualFold(existing.HeadRepository, a.Repo.String()) {
 		return genericErr("cannot amend PR #%d: head repository %q does not identify %s; use gh pr edit with an explicit PR number", existing.Number, existing.HeadRepository, a.Repo)
 	}
+	edited := true
 	var body string
 	var err error
 	switch {
@@ -270,6 +272,7 @@ func (a *App) amendPR(ctx context.Context, opts PROpts, issue model.Issue, head 
 		body, err = a.prBodyFile(opts.BodyFile, issue)
 	case opts.Sections.IsZero() && len(opts.SectionFlags) == 0:
 		// A title-only edit preserves even a freeform body.
+		edited = false
 		body, err = a.finishPRBody(existing.Body, issue, "PR body")
 	default:
 		content := existing.Body
@@ -289,6 +292,7 @@ func (a *App) amendPR(ctx context.Context, opts PROpts, issue model.Issue, head 
 			What:    conventions.Section(content, "What"),
 			Why:     conventions.Section(content, "Why"),
 			Testing: conventions.Section(content, "Testing"),
+			Risk:    conventions.Section(content, "Risk"),
 		}
 		// Section is a simple template reader, not a Markdown parser. Require
 		// an exact round trip before editing, and refuse fences even when an
@@ -313,10 +317,18 @@ func (a *App) amendPR(ctx context.Context, opts PROpts, issue model.Issue, head 
 		if sections.Testing == "" && !slices.Contains(opts.SectionFlags, "testing") {
 			sections.Testing = preserved.Testing
 		}
+		if sections.Risk == "" && !slices.Contains(opts.SectionFlags, "risk") {
+			sections.Risk = preserved.Risk
+		}
 		body, err = a.finishPRSections(sections, issue)
 	}
 	if err != nil {
 		return err
+	}
+	if edited {
+		// A PR already open for review is the moment to ask for the merge
+		// claim; a draft may legitimately be incomplete.
+		a.warnPRSections(body, !existing.Draft)
 	}
 	title := opts.Title
 	if title == "" {
@@ -343,10 +355,21 @@ func prTrailers(issue model.Issue) conventions.PRTrailers {
 }
 
 func (a *App) finishPRSections(sections conventions.PRSections, issue model.Issue) (string, error) {
-	if strings.TrimSpace(sections.Testing) == "" {
-		a.warnf("no --testing section: say how this was verified")
-	}
 	return a.finishPRBody(sections.Compose(conventions.PRTrailers{}), issue, "PR body")
+}
+
+// warnPRSections reports the body contract at composition time. Help is read
+// by someone who goes looking; the agent composing a PR generally does not, so
+// the sections a reviewer needs are checked on every path that writes a body —
+// flags, --body-file, and --amend. Risk is required only once the PR is ready
+// for review: a draft may legitimately be incomplete.
+func (a *App) warnPRSections(body string, requireRisk bool) {
+	if strings.TrimSpace(conventions.Section(body, "Testing")) == "" {
+		a.warnf("no Testing section: %s", conventions.PRTestingGuidance)
+	}
+	if requireRisk && strings.TrimSpace(conventions.Section(body, "Risk")) == "" {
+		a.warnf("no Risk section: %s", conventions.PRRiskGuidance)
+	}
 }
 
 func (a *App) prBodyFile(path string, issue model.Issue) (string, error) {
