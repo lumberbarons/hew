@@ -1,7 +1,6 @@
 #167 P2 task         CLI surface snapshot: fail on flag and command removals
 #171 P2 task         Write the 1.0 compatibility policy
 #172 P2 task         Decide how conventions evolve after 1.0
-#57  P3 enhancement  pr composes bullet lists from repeatable section flags
 #61  P3 task         Tighten test gates: per-package coverage floor and shuffled test order
 #62  P3 enhancement  list --json costs more tokens than the raw GraphQL it replaces
 #70  P3 enhancement  pr warns when a bug's derived title names the defect rather than the fix
@@ -19,9 +18,10 @@
 #161 P3 enhancement  Body authoring parity: set sections and --edit, pr --edit, stdin for --body-file
 #162 P3 enhancement  epic create accepts priority, area and discovered-from
 #163 P3 enhancement  --dry-run on the mutating commands that compose content
+#179 P3 bug          PR section warnings misjudge --body-file content
 #35  P4 task         Agentic accuracy eval: issues vs raw gh on a seeded fixture repo
 #77  P4 enhancement  start's closed refusal doesn't name the close state
-#177 P2 enhancement  pr body guidance: evidence before/after and merge risk  [in progress @lumberbarons]
+#180 P3 enhancement  PR body guidance asks for a scannable layout  [in progress @lumberbarons]
 #173 P2 task         Cut v1.0.0  [blocked by #62 #154 #172 #171]
 #154 P2              Epic: CLI flag consistency  [epic 3/10]
 #170 P2              Epic: 1.0 readiness  [epic 0/5]

@@ -226,7 +226,7 @@ func TestPRReadyWarnsAboutMissingRisk(t *testing.T) {
 		t.Fatal(err)
 	}
 	warning := errOut.String()
-	for _, want := range []string{"no Risk section", "one-way or two-way", "blast radius"} {
+	for _, want := range []string{"no Risk section", "Reversibility:", "one-way or two-way", "Blast radius:"} {
 		if !strings.Contains(warning, want) {
 			t.Errorf("warning %q does not name %q", warning, want)
 		}
@@ -258,7 +258,7 @@ func TestPRBodyFileWarnsAboutMissingTesting(t *testing.T) {
 		t.Fatal(err)
 	}
 	warning := errOut.String()
-	for _, want := range []string{"no Testing section", "before and after", "claim, not evidence"} {
+	for _, want := range []string{"no Testing section", "Before:", "After:", "own line", "claim, not evidence"} {
 		if !strings.Contains(warning, want) {
 			t.Errorf("warning %q does not name %q", warning, want)
 		}
@@ -763,7 +763,7 @@ func TestPRWarnsWhenTestingIsOmitted(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := errOut.String()
-	for _, want := range []string{"no Testing section", "before and after"} {
+	for _, want := range []string{"no Testing section", "Before:", "After:"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("warning %q does not name %q", got, want)
 		}

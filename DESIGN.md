@@ -303,9 +303,11 @@ merges, checks and PR listing stay where they are.
   issue already says this — so in the common case only `--testing` and `--risk`
   are worth typing. `--what`, `--why`, `--testing` and `--risk` repeat — several values
   compose a bullet list, one value stays a plain paragraph so existing callers'
-  bodies are unchanged. Testing is evidence: a before and after (the failing test or
-  output, then the same thing passing), not "tests pass". Risk states whether the
-  merge is a one-way or two-way door and its blast radius; it is prompted on
+  bodies are unchanged. Testing is evidence on `Before:` and `After:` lines (the failing
+  test or output, then the same thing passing) plus a short list of checks run, not
+  "tests pass". Risk is a `Reversibility:` line (one-way or two-way door) and a
+  `Blast radius:` line; each claim gets its own line so GitHub renders a list, not a
+  paragraph (#180). Risk is prompted on
   `--ready` and when amending a PR already open for review, not on a draft. Empty
   sections are omitted, never left as bare headers. The contract is stated in
   `pr --help` and in one clause of the primer's `pr` entry, which is the token
@@ -613,17 +615,17 @@ lumberbarons/solar-controller — 14 open issues:
 | `hew ready` | 324 | 1969 | 6.1x | gh issue list --json † |
 | `hew list` | 353 | 1172 | 3.3x | gh api graphql (open issues) |
 | `hew list --json` | 1607 | 1172 | 0.7x | gh api graphql (open issues) |
-| `hew prime` | 1077 | 1172 | 1.1x | gh api graphql (open issues) |
+| `hew prime` | 1092 | 1172 | 1.1x | gh api graphql (open issues) |
 | `hew show #119` | 430 | 590 | 1.4x | gh issue view --json + gh api graphql |
 
 Findings, including the ones that don't flatter the tool:
 
 - **The claim holds for the reads an agent actually loops on.** `ready` and
   `list` cost 16–25 tokens per open issue against 75–84 for the equivalent
-  GraphQL and 104–141 for `gh issue list --json` — 3.3x–4.5x and 5.2x–6.3x
+  GraphQL and 104–141 for `gh issue list --json` — 3.3x–4.6x and 5.3x–6.4x
   respectively across both fixtures. This is the whole-tracker read that
   happens every iteration, so it is where the saving compounds.
-- **`show` saves less: 1.3x–1.5x.** Bodies dominate `show` and both sides carry
+- **`show` saves less: 1.3x–1.7x.** Bodies dominate `show` and both sides carry
   them verbatim; the value there is the deps line, not the token count. Worth
   saying plainly rather than averaging into a headline.
 - **`list --json` currently costs *more* than the raw GraphQL it replaces
@@ -631,7 +633,7 @@ Findings, including the ones that don't flatter the tool:
   empty arrays, derived booleans, `createdAt` — where the lean query writes seven
   fields. The schema's stability is deliberate (agents parse it), but the token
   cost is a real regression against the tool's own claim, filed as #62.
-- **`prime` measures 1077–1084 tokens against its ~1200 target, restated in
+- **`prime` measures 1092–1101 tokens against its ~1200 target, restated in
   #63.** The ~600 target came from the mock, not from output: the static
   conventions half alone measures ~890 tokens under o200k_base, and the live
   sections add ~150–165 on the fixtures. Every command and flag of the cheatsheet

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -466,6 +467,29 @@ func TestStartHelpNamesClaimAndRead(t *testing.T) {
 	}
 	if !slices.ContainsFunc(start.Flags, func(f ucli.Flag) bool { return slices.Contains(f.Names(), "show") }) {
 		t.Error("start has no --show flag")
+	}
+}
+
+// TestPRLayoutGuidanceIsOneText pins #180: the line-per-claim layout for
+// Testing and Risk is stated once, in the constants the missing-section
+// warnings carry, and `pr --help` and the README repeat it verbatim, so the
+// three surfaces cannot drift into giving an agent different advice.
+func TestPRLayoutGuidanceIsOneText(t *testing.T) {
+	readme, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := findCommand(t, root(), "pr").Description
+	for name, guidance := range map[string]string{
+		"testing": conventions.PRTestingGuidance,
+		"risk":    conventions.PRRiskGuidance,
+	} {
+		if !strings.Contains(help, guidance) {
+			t.Errorf("pr --help does not carry the %s guidance verbatim: %q", name, guidance)
+		}
+		if !strings.Contains(string(readme), guidance) {
+			t.Errorf("README does not carry the %s guidance verbatim: %q", name, guidance)
+		}
 	}
 }
 

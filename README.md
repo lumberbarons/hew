@@ -135,9 +135,9 @@ hew pr [--for N] [--title "..."]
                                   # draft PR for the claimed issue: body composed from
                                   # the issue (What/Why default to its Fix/Approach and
                                   # Problem/Goal), exactly one "Fixes #n", base is the
-                                  # repo default. Testing is evidence: show a before
-                                  # and an after. Risk states a one-way/two-way door
-                                  # and its blast radius. The title defaults to the
+                                  # repo default. Testing is evidence on Before:/After:
+                                  # lines; Risk is a Reversibility: line and a Blast
+                                  # radius: line. The title defaults to the
                                   # issue title under the type's commit prefix
                                   # (bug → "fix: ..."); --title is passed through.
                                   # Every section flag repeats: several values
@@ -206,8 +206,12 @@ the same way. `create` itself still only warns.
 
 `hew pr` composes `### What` / `### Why` / `### Testing`, plus `### Risk` when you pass
 `--risk`. What and Why default to the issue's `Fix`/`Approach` and `Problem`/`Goal`.
-Testing is evidence, not a claim: show the failing test or output and the same thing
-passing. Risk names whether merging is a one-way or two-way door and its blast radius.
+Lay each section out one claim per line, repeating the flag once per line, so it reads as
+a list on GitHub rather than a dense paragraph:
+
+- Testing: give Before: and After: each its own line — the test or output that failed, then the same thing passing — then a short list of the checks run; "tests pass" is a claim, not evidence
+- Risk: give a Reversibility: line (one-way or two-way door) and a Blast radius: line (what breaks if this is wrong), with anything else on its own line
+
 For a diff sketch, file tree or diagram, compose the body in a file and use
 `--body-file`; the section flags are for short text.
 

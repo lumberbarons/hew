@@ -1,5 +1,5 @@
 #57 P3 enhancement  pr composes bullet lists from repeatable section flags
-state: open  created: 2026-07-27
+state: closed (completed)  created: 2026-07-27  assignee: @lumberbarons
 
 ### Where
 
