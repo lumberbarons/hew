@@ -11,6 +11,7 @@ func TestPRComposeRendersSectionsThenTrailers(t *testing.T) {
 		What:    "Adds the pr command.",
 		Why:     "The PR step was freeform.",
 		Testing: "go test -race ./...",
+		Risk:    "Two-way door; blast radius: the pr command.",
 	}.Compose(PRTrailers{Fixes: 30, Epic: 33})
 	want := `### What
 
@@ -23,6 +24,10 @@ The PR step was freeform.
 ### Testing
 
 go test -race ./...
+
+### Risk
+
+Two-way door; blast radius: the pr command.
 
 Fixes #30
 Part of #33`
@@ -114,7 +119,7 @@ func TestPRSectionsIsZero(t *testing.T) {
 	if !(PRSections{}).IsZero() {
 		t.Error("empty PRSections reported non-zero")
 	}
-	for _, s := range []PRSections{{What: "a"}, {Why: "a"}, {Testing: "a"}} {
+	for _, s := range []PRSections{{What: "a"}, {Why: "a"}, {Testing: "a"}, {Risk: "a"}} {
 		if s.IsZero() {
 			t.Errorf("%+v reported zero", s)
 		}

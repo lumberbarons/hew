@@ -63,16 +63,37 @@ func PRTitle(issueType, title string) string {
 
 // PRSections are the pull-request body fields, mirroring the issue body
 // template: What replaces the issue's Fix/Approach, Why its Problem/Goal,
-// and Testing is the half an issue never carries.
+// Testing is the half an issue never carries, and Risk is the merge claim a
+// reviewer weighs after reading the change.
 type PRSections struct {
 	What    string
 	Why     string
 	Testing string
+	Risk    string
 }
+
+// PRBodyGuidance is the body contract stated on the pr help surface. It sits
+// next to Compose so the template and its explanation cannot drift; the primer
+// carries only the short form.
+const PRBodyGuidance = `Body: ### What / ### Why / ### Testing, plus ### Risk when a reviewer must
+weigh the merge. What and Why default to the issue's Fix/Approach and Problem/Goal.
+Testing is evidence: show a before and an after — the failing test or output,
+then the same thing passing. Risk names whether merging is a one-way or two-way
+door and its blast radius. Empty sections are omitted. For a diff sketch, file
+tree or diagram, compose the body in a file and pass --body-file; the section
+flags are for short text.`
+
+// PRTestingGuidance is the short form carried by the missing-Testing warning.
+// Help is read by someone who goes looking; the agent composing a body
+// generally does not, so the rule is also stated at the moment it applies.
+const PRTestingGuidance = `show a before and after — the test or output that failed, then the same thing passing; "tests pass" is a claim, not evidence`
+
+// PRRiskGuidance is the short form carried by the missing-Risk warning.
+const PRRiskGuidance = `say whether merging is a one-way or two-way door and its blast radius — what breaks if this is wrong`
 
 // IsZero reports whether no section was provided.
 func (s PRSections) IsZero() bool {
-	return s.What == "" && s.Why == "" && s.Testing == ""
+	return s.What == "" && s.Why == "" && s.Testing == "" && s.Risk == ""
 }
 
 // PRTrailers are the tracker links that close the claim lifecycle: exactly
@@ -120,6 +141,7 @@ func (s PRSections) Compose(t PRTrailers) string {
 	section("What", s.What)
 	section("Why", s.Why)
 	section("Testing", s.Testing)
+	section("Risk", s.Risk)
 	b.WriteString(t.Render())
 	return strings.TrimSpace(b.String())
 }

@@ -297,11 +297,18 @@ merges, checks and PR listing stay where they are.
   quietly lose one — and never a second copy. A body already carrying a
   closing keyword (`fixes`/`closes`/`resolves`, any case — GitHub acts on all
   of them) is refused if it names a different issue, or several.
-- **Body template.** `### What / ### Why / ### Testing`, mirroring the issue
-  template and lives beside it in `internal/conventions`. What and Why default
-  to the issue's own `Fix`/`Approach` and `Problem`/`Goal` sections — the issue
-  already says this — so in the common case only `--testing` is worth typing.
-  Empty sections are omitted, never left as bare headers.
+- **Body template.** `### What / ### Why / ### Testing / ### Risk`, mapping
+  onto the issue template and living beside it in `internal/conventions`. What and Why
+  default to the issue's own `Fix`/`Approach` and `Problem`/`Goal` sections — the
+  issue already says this — so in the common case only `--testing` and `--risk`
+  are worth typing. Testing is evidence: a before and after (the failing test or
+  output, then the same thing passing), not "tests pass". Risk states whether the
+  merge is a one-way or two-way door and its blast radius; it is prompted on
+  `--ready` and when amending a PR already open for review, not on a draft. Empty
+  sections are omitted, never left as bare headers. The contract is stated in
+  `pr --help` and in one clause of the primer's `pr` entry, which is the token
+  budget's short form; the tutorial stays in help and in the composition warnings,
+  which also cover `--body-file`.
 - **Title convention.** A squash merge makes the PR title the commit subject,
   and the release changelog is grouped by conventional-commit prefix, so the
   default title is `<prefix>: <issue title>` with the prefix derived from the
