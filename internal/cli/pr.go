@@ -362,12 +362,14 @@ func (a *App) finishPRSections(sections conventions.PRSections, issue model.Issu
 // by someone who goes looking; the agent composing a PR generally does not, so
 // the sections a reviewer needs are checked on every path that writes a body —
 // flags, --body-file, and --amend. Risk is required only once the PR is ready
-// for review: a draft may legitimately be incomplete.
+// for review: a draft may legitimately be incomplete. The body may be
+// free-form and already carries its trailers, so sections are read with
+// ReviewSection, which treats the trailers as the end of the author's text.
 func (a *App) warnPRSections(body string, requireRisk bool) {
-	if strings.TrimSpace(conventions.Section(body, "Testing")) == "" {
+	if conventions.ReviewSection(body, "Testing") == "" {
 		a.warnf("no Testing section: %s", conventions.PRTestingGuidance)
 	}
-	if requireRisk && strings.TrimSpace(conventions.Section(body, "Risk")) == "" {
+	if requireRisk && conventions.ReviewSection(body, "Risk") == "" {
 		a.warnf("no Risk section: %s", conventions.PRRiskGuidance)
 	}
 }

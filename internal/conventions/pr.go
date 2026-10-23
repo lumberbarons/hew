@@ -278,6 +278,120 @@ func Section(body, name string) string {
 	return ""
 }
 
+// templateSections are the PR body sections a bold label can stand in for.
+var templateSections = []string{"What", "Why", "Testing", "Risk"}
+
+// ReviewSection extracts the content under a section from a body nobody
+// templated, such as --body-file. Section trusts a "### Name" line; this reads
+// structure instead: a heading of any level or a bold label opens the
+// section, any heading or a bold label naming another template section ends
+// it, and fenced or indented code is never a heading. Closing/epic trailer
+// lines are skipped rather than read as content. Every occurrence counts, so
+// an empty first heading does not hide a real later one.
+func ReviewSection(body, name string) string {
+	var content []string
+	var fence string
+	inSection := false
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if fence == "" && (strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t")) {
+			// Four spaces make an indented code block, whatever it looks like.
+			if inSection {
+				content = append(content, line)
+			}
+			continue
+		}
+		if fence != "" {
+			if strings.HasPrefix(trimmed, fence) && strings.Trim(trimmed, fence[:1]) == "" {
+				fence = ""
+			}
+			if inSection {
+				content = append(content, line)
+			}
+			continue
+		}
+		if marker := openingFence(trimmed); marker != "" {
+			fence = marker
+			if inSection {
+				content = append(content, line)
+			}
+			continue
+		}
+		if title, ok := headingTitle(trimmed); ok {
+			inSection = strings.EqualFold(title, name)
+			continue
+		}
+		// A bold line opens a section only when it names one; other bold
+		// lines ("**Before:**") are the author's content.
+		if label, ok := boldLabel(trimmed); ok && slices.ContainsFunc(templateSections, func(s string) bool { return strings.EqualFold(s, label) }) {
+			inSection = strings.EqualFold(label, name)
+			continue
+		}
+		if isTrailerLine(trimmed) {
+			continue
+		}
+		if inSection {
+			content = append(content, line)
+		}
+	}
+	return strings.TrimSpace(strings.Join(content, "\n"))
+}
+
+// openingFence returns the run of backticks or tildes that opens a fenced code
+// block on this line, empty when it does not open one.
+func openingFence(line string) string {
+	for _, c := range []string{"`", "~"} {
+		run := len(line) - len(strings.TrimLeft(line, c))
+		if run < 3 {
+			continue
+		}
+		// A backtick fence's info string cannot hold a backtick; that line is
+		// an inline code span.
+		if c == "`" && strings.Contains(line[run:], "`") {
+			return ""
+		}
+		return strings.Repeat(c, run)
+	}
+	return ""
+}
+
+// headingTitle returns the text of an ATX heading ("#" to "######").
+func headingTitle(line string) (string, bool) {
+	rest := strings.TrimLeft(line, "#")
+	if hashes := len(line) - len(rest); hashes == 0 || hashes > 6 || (rest != "" && rest[0] != ' ') {
+		return "", false
+	}
+	title := strings.TrimSpace(strings.TrimRight(rest, "# "))
+	return strings.TrimSpace(strings.TrimSuffix(title, ":")), true
+}
+
+// boldLabel returns the text of a line that is nothing but a bold label,
+// with or without a trailing colon: "**Testing**" or "**Testing:**".
+func boldLabel(line string) (string, bool) {
+	for _, mark := range []string{"**", "__"} {
+		if len(line) > 2*len(mark) && strings.HasPrefix(line, mark) && strings.HasSuffix(strings.TrimSuffix(line, ":"), mark) {
+			inner := strings.TrimSuffix(strings.TrimSuffix(line, ":"), mark)[len(mark):]
+			return strings.TrimSpace(strings.TrimSuffix(inner, ":")), true
+		}
+	}
+	return "", false
+}
+
+// isTrailerLine reports whether the line is a closing reference or an epic
+// link on its own, the lines finishPRBody appends after the author's text.
+func isTrailerLine(line string) bool {
+	fields := strings.Fields(line)
+	if len(fields) != 2 && len(fields) != 3 {
+		return false
+	}
+	if len(fields) == 3 {
+		_, ok := issueRef(fields[2])
+		return ok && strings.EqualFold(fields[0], "part") && strings.EqualFold(fields[1], "of")
+	}
+	_, ok := issueRef(fields[1])
+	return ok && isClosingKeyword(fields[0])
+}
+
 // FirstSection returns the first non-empty of the named sections, so a
 // caller can ask for a wording pair (Fix or Approach) in one go.
 func FirstSection(body string, names ...string) string {

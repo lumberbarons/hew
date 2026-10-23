@@ -357,3 +357,48 @@ func TestPRListKeepsBlankContinuationLinesEmpty(t *testing.T) {
 		t.Errorf("PRList() = %q, want %q", got, want)
 	}
 }
+
+// ReviewSection reads bodies nobody templated, so it has to judge structure
+// rather than a literal "### Name" line.
+func TestReviewSection(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{"canonical header", "### Testing\n\nran the suite", "ran the suite"},
+		{"other heading level", "## Testing\n\nran the suite", "ran the suite"},
+		{"bold line", "**Testing**\n\nran the suite", "ran the suite"},
+		{"bold line with colon", "**Testing:**\n\nran the suite", "ran the suite"},
+		{"stops at the next heading of any level", "## Testing\n\nran it\n\n# Notes\n\nunrelated", "ran it"},
+		{"absent", "### What\n\nthings", ""},
+		{"similar name", "### Test plan\n\nran the suite", ""},
+		{"header inside a backtick fence", "### What\n\n```md\n### Testing\n\nran the suite\n```", ""},
+		{"header inside a tilde fence", "~~~\n### Testing\n\nran the suite\n~~~", ""},
+		{"fence that is not closed", "```\n### Testing\n\nran the suite", ""},
+		{"fence of a different kind does not close", "```\n~~~\n### Testing\n\nran it\n```", ""},
+		{"heading after a closed fence", "```\ncode\n```\n\n### Testing\n\nran it", "ran it"},
+		{"fenced code inside the section is content", "### Testing\n\n```\ngo test ./...\n```", "```\ngo test ./...\n```"},
+		{"heading in a fence inside the section does not end it", "### Testing\n\n```\n# comment\n```\n\nafter", "```\n# comment\n```\n\nafter"},
+		{"closing trailer bounds an empty section", "### Testing\n\nFixes #30", ""},
+		{"epic trailer bounds an empty section", "### Testing\n\nPart of #33", ""},
+		{"trailers after content", "### Testing\n\nran it\n\nFixes #30\nPart of #33", "ran it"},
+		{"prose starting with a keyword is content", "### Testing\n\nFixes the flaky case, verified by hand", "Fixes the flaky case, verified by hand"},
+		{"heading-only first occurrence, real later one", "### Testing\n\n### What\n\nthings\n\n### Testing\n\nran it", "ran it"},
+		{"empty trailing section", "### What\n\nthings\n\n### Testing\n", ""},
+		{"case insensitive", "### TESTING\n\nran it", "ran it"},
+		{"bold label of another section ends an empty one", "**Testing**\n\n**Risk**\n\nTwo-way.", ""},
+		{"bold line that is not a section stays content", "**Testing**\n\n**Before:**\nfailed\n**After:**\npassed", "**Before:**\nfailed\n**After:**\npassed"},
+		{"heading with a trailing colon", "## Testing:\n\nran it", "ran it"},
+		{"indented line is code, not a heading", "### Testing\n\n    # make test", "# make test"},
+		{"indented heading does not open a section", "    ### Testing\n\nran it", ""},
+		{"inline triple backticks do not open a fence", "```x``` text\n\n### Testing\n\nran it", "ran it"},
+		{"trailer inside a section does not drop what follows", "### Testing\n\nFixes #30\n\nran the suite", "ran the suite"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ReviewSection(tc.body, "Testing"); got != tc.want {
+				t.Errorf("ReviewSection(Testing) = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

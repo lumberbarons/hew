@@ -1508,3 +1508,56 @@ func TestPRAmendMatchesHeadRepositoryCaseInsensitively(t *testing.T) {
 		t.Errorf("title = %q", got)
 	}
 }
+
+// --body-file content has no template guarantee, so the section warnings judge
+// structure: what a reader would call a Testing or Risk section, not a literal
+// "### Testing" line.
+func TestPRBodyFileSectionWarnings(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		body        string
+		wantTesting bool
+		wantRisk    bool
+	}{
+		{"fenced heading is not a section", "### What\n\n```md\n### Testing\n\nran it\n```", true, true},
+		{"empty trailing Testing before the trailer", "### Risk\n\nTwo-way.\n\n### Testing", true, false},
+		{"empty trailing Risk before the trailer", "### Testing\n\nran it\n\n### Risk", false, true},
+		{"heading-only first occurrence, real later one", "### Testing\n\n### Risk\n\nTwo-way.\n\n### Testing\n\nran it", false, false},
+		{"other heading level counts", "## Testing\n\nran it\n\n## Risk\n\nTwo-way.", false, false},
+		{"bold label counts", "**Testing**\n\nran it\n\n**Risk**\n\nTwo-way.", false, false},
+		{"empty bold Testing before a bold Risk", "**Testing**\n\n**Risk**\n\nTwo-way.", true, false},
+		{"headings with a trailing colon", "## Testing:\n\nran it\n\n## Risk:\n\nTwo-way.", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake(claimed(30, "work", "P2", "enhancement"))
+			app, _, errOut := newApp(f)
+			onBranch(app, "feat/30-work")
+
+			if err := app.PR(context.Background(), PROpts{Ready: true, BodyFile: writeTemp(t, tc.body)}); err != nil {
+				t.Fatal(err)
+			}
+			warning := errOut.String()
+			if got := strings.Contains(warning, "no Testing section"); got != tc.wantTesting {
+				t.Errorf("create: warned about Testing = %v, want %v\n%s", got, tc.wantTesting, warning)
+			}
+			if got := strings.Contains(warning, "no Risk section"); got != tc.wantRisk {
+				t.Errorf("create: warned about Risk = %v, want %v\n%s", got, tc.wantRisk, warning)
+			}
+
+			f, app = amendSetup()
+			pr := f.openPRs["feat/30-work"]
+			pr.Draft = false
+			f.openPRs["feat/30-work"] = pr
+			if err := app.PR(context.Background(), PROpts{Amend: true, BodyFile: writeTemp(t, tc.body)}); err != nil {
+				t.Fatal(err)
+			}
+			warning = app.ErrOut.(*bytes.Buffer).String()
+			if got := strings.Contains(warning, "no Testing section"); got != tc.wantTesting {
+				t.Errorf("amend: warned about Testing = %v, want %v\n%s", got, tc.wantTesting, warning)
+			}
+			if got := strings.Contains(warning, "no Risk section"); got != tc.wantRisk {
+				t.Errorf("amend: warned about Risk = %v, want %v\n%s", got, tc.wantRisk, warning)
+			}
+		})
+	}
+}
