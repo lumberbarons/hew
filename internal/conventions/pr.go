@@ -91,6 +91,34 @@ const PRTestingGuidance = `show a before and after — the test or output that f
 // PRRiskGuidance is the short form carried by the missing-Risk warning.
 const PRRiskGuidance = `say whether merging is a one-way or two-way door and its blast radius — what breaks if this is wrong`
 
+// PRList renders the values of a repeatable section flag. One value is
+// returned verbatim, so a caller that passes a single string gets the same
+// body it always did; several become a markdown bullet list, one item per
+// value. Blank values are dropped, and a continuation line is indented under
+// its bullet so it stays part of that item.
+func PRList(values []string) string {
+	if len(values) == 1 {
+		return values[0]
+	}
+	var items []string
+	for _, v := range values {
+		if v = strings.TrimSpace(v); v != "" {
+			items = append(items, v)
+		}
+	}
+	switch len(items) {
+	case 0:
+		return ""
+	case 1:
+		return items[0]
+	}
+	var b strings.Builder
+	for _, item := range items {
+		fmt.Fprintf(&b, "- %s\n", strings.ReplaceAll(item, "\n", "\n  "))
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
 // IsZero reports whether no section was provided.
 func (s PRSections) IsZero() bool {
 	return s.What == "" && s.Why == "" && s.Testing == "" && s.Risk == ""
