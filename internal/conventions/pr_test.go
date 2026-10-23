@@ -342,3 +342,18 @@ func TestPRComposeRendersListUnderSectionHeader(t *testing.T) {
 		t.Errorf("Section(Testing) = %q, want the bullet list intact", sec)
 	}
 }
+
+// An author who writes their own bullets for each value must not get "- - item".
+func TestPRListStripsBullets(t *testing.T) {
+	got := PRList([]string{"- build passes", "* lint clean", "plain"})
+	if want := "- build passes\n- lint clean\n- plain"; got != want {
+		t.Errorf("PRList() =\n%s\n\nwant\n%s", got, want)
+	}
+}
+
+func TestPRListKeepsBlankContinuationLinesEmpty(t *testing.T) {
+	got := PRList([]string{"before:\n\nafter:", "x"})
+	if want := "- before:\n\n  after:\n- x"; got != want {
+		t.Errorf("PRList() = %q, want %q", got, want)
+	}
+}

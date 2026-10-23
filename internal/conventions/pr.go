@@ -79,7 +79,8 @@ const PRBodyGuidance = `Body: ### What / ### Why / ### Testing, plus ### Risk wh
 weigh the merge. What and Why default to the issue's Fix/Approach and Problem/Goal.
 Testing is evidence: show a before and an after — the failing test or output,
 then the same thing passing. Risk names whether merging is a one-way or two-way
-door and its blast radius. Empty sections are omitted. For a diff sketch, file
+door and its blast radius. What, Why and Testing repeat: several values
+become a bullet list, one value stays a paragraph. Empty sections are omitted. For a diff sketch, file
 tree or diagram, compose the body in a file and pass --body-file; the section
 flags are for short text.`
 
@@ -94,15 +95,20 @@ const PRRiskGuidance = `say whether merging is a one-way or two-way door and its
 // PRList renders the values of a repeatable section flag. One value is
 // returned verbatim, so a caller that passes a single string gets the same
 // body it always did; several become a markdown bullet list, one item per
-// value. Blank values are dropped, and a continuation line is indented under
-// its bullet so it stays part of that item.
+// value. Blank values are dropped; a leading "- " or "* " the author already
+// wrote is stripped so it does not nest as "- - item"; and a continuation line
+// is indented under its bullet so it stays part of that item.
 func PRList(values []string) string {
 	if len(values) == 1 {
 		return values[0]
 	}
 	var items []string
 	for _, v := range values {
-		if v = strings.TrimSpace(v); v != "" {
+		v = strings.TrimSpace(v)
+		if rest, ok := cutBullet(v); ok {
+			v = rest
+		}
+		if v != "" {
 			items = append(items, v)
 		}
 	}
@@ -114,9 +120,29 @@ func PRList(values []string) string {
 	}
 	var b strings.Builder
 	for _, item := range items {
-		fmt.Fprintf(&b, "- %s\n", strings.ReplaceAll(item, "\n", "\n  "))
+		lines := strings.Split(item, "\n")
+		fmt.Fprintf(&b, "- %s\n", lines[0])
+		for _, line := range lines[1:] {
+			// A blank line stays empty rather than becoming trailing whitespace.
+			if strings.TrimSpace(line) != "" {
+				line = "  " + line
+			} else {
+				line = ""
+			}
+			b.WriteString(line + "\n")
+		}
 	}
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// cutBullet removes one leading markdown bullet marker from an item.
+func cutBullet(s string) (string, bool) {
+	for _, marker := range []string{"- ", "* "} {
+		if rest, ok := strings.CutPrefix(s, marker); ok {
+			return strings.TrimSpace(rest), true
+		}
+	}
+	return s, false
 }
 
 // IsZero reports whether no section was provided.
