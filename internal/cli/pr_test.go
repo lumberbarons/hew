@@ -189,10 +189,13 @@ func TestPRComposesTheRiskSection(t *testing.T) {
 	app, _, errOut := newApp(f)
 	onBranch(app, "feat/pr-command")
 
-	err := app.PR(context.Background(), PROpts{Sections: conventions.PRSections{
-		Testing: "Before: `TestX` failed. After: it passes.",
-		Risk:    "Two-way door; blast radius: the pr command.",
-	}})
+	err := app.PR(context.Background(), PROpts{
+		Ready: true,
+		Sections: conventions.PRSections{
+			Testing: "Before: `TestX` failed. After: it passes.",
+			Risk:    "Two-way door; blast radius: the pr command.",
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
