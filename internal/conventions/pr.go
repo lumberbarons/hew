@@ -79,7 +79,7 @@ const PRBodyGuidance = `Body: ### What / ### Why / ### Testing, plus ### Risk wh
 weigh the merge. What and Why default to the issue's Fix/Approach and Problem/Goal.
 Testing is evidence: show a before and an after — the failing test or output,
 then the same thing passing. Risk names whether merging is a one-way or two-way
-door and its blast radius. What, Why and Testing repeat: several values
+door and its blast radius. What, Why, Testing and Risk repeat: several values
 become a bullet list, one value stays a paragraph. Empty sections are omitted. For a diff sketch, file
 tree or diagram, compose the body in a file and pass --body-file; the section
 flags are for short text.`

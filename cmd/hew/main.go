@@ -459,7 +459,7 @@ repository. --ready and --base are creation-only flags.
 			&proseSliceFlag{Name: "what", Usage: "body section: what the change does (default: the issue's Fix/Approach); repeat for a bullet list"},
 			&proseSliceFlag{Name: "why", Usage: "body section: why (default: the issue's Problem/Goal); repeat for a bullet list"},
 			&proseSliceFlag{Name: "testing", Usage: "body section: evidence — a before and after, not \"tests pass\"; repeat for a bullet list"},
-			&ucli.StringFlag{Name: "risk", Usage: "body section: one-way/two-way door + blast radius"},
+			&proseSliceFlag{Name: "risk", Usage: "body section: one-way/two-way door + blast radius; repeat for a bullet list"},
 			&ucli.StringFlag{Name: "body-file", Usage: "read the whole body from `FILE` (Fixes #n is appended if absent)"},
 			&ucli.StringFlag{Name: "base", Usage: "target `BRANCH` (default: the repo's default branch)"},
 			&ucli.BoolFlag{Name: "ready", Usage: "open for review instead of as a draft"},
@@ -484,7 +484,7 @@ repository. --ready and --base are creation-only flags.
 	}
 }
 
-// prSectionsFromFlags reads the pr body sections. what, why and testing are
+// prSectionsFromFlags reads the pr body sections. Every section flag is
 // repeatable and compose a bullet list from several values; one value stays a
 // plain paragraph.
 func prSectionsFromFlags(cmd *ucli.Command) conventions.PRSections {
@@ -492,7 +492,7 @@ func prSectionsFromFlags(cmd *ucli.Command) conventions.PRSections {
 		What:    conventions.PRList(cmd.StringSlice("what")),
 		Why:     conventions.PRList(cmd.StringSlice("why")),
 		Testing: conventions.PRList(cmd.StringSlice("testing")),
-		Risk:    cmd.String("risk"),
+		Risk:    conventions.PRList(cmd.StringSlice("risk")),
 	}
 }
 

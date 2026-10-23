@@ -31,7 +31,7 @@ create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --do
 draft [same section flags] --out F | --check F (compose/validate a body locally, no GitHub; then create --body-file F) |
 start <n> [--priority Pn --show] (--show or --json includes the body, so skip show <n>) | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |
 pr [--for N --testing "..." --what "..." --why "..." --risk "..." --title "..." --ready] (draft PR for the claimed issue;
-  body: What/Why from the issue, Testing = before→after (--testing/--what/--why repeat → bullets), Risk = door + blast radius; exactly one "Fixes #n";
+  body: What/Why from the issue, Testing = before→after (section flags repeat → bullets), Risk = door + blast radius; exactly one "Fixes #n";
   title defaults to feat:|fix:|chore: from the type — push the branch first) |
 close <n> --reason "..." [--completed | --duplicate-of M] | reopen <n> --reason "..." |
 block <n> --on <m> | unblock <n> --from <m> |

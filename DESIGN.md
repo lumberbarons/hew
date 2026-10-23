@@ -301,7 +301,7 @@ merges, checks and PR listing stay where they are.
   onto the issue template and living beside it in `internal/conventions`. What and Why
   default to the issue's own `Fix`/`Approach` and `Problem`/`Goal` sections — the
   issue already says this — so in the common case only `--testing` and `--risk`
-  are worth typing. `--what`, `--why` and `--testing` repeat — several values
+  are worth typing. `--what`, `--why`, `--testing` and `--risk` repeat — several values
   compose a bullet list, one value stays a plain paragraph so existing callers'
   bodies are unchanged. Testing is evidence: a before and after (the failing test or
   output, then the same thing passing), not "tests pass". Risk states whether the
