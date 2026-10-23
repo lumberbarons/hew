@@ -584,7 +584,7 @@ any product code.
   blocker, so a cycle silently excludes all its members from `ready` forever.
   `prime` and `ready` warn when they see one.
 
-## Token efficiency (measured 2026-10-15)
+## Token efficiency (measured 2026-10-23)
 
 The token-lean claim, measured rather than asserted. The harness lives in
 [evals/](evals/): `capture` records both sides' raw output from a live repo into
@@ -611,14 +611,14 @@ lumberbarons/solar-controller — 14 open issues:
 | `hew ready` | 324 | 1969 | 6.1x | gh issue list --json † |
 | `hew list` | 353 | 1172 | 3.3x | gh api graphql (open issues) |
 | `hew list --json` | 1607 | 1172 | 0.7x | gh api graphql (open issues) |
-| `hew prime` | 1058 | 1172 | 1.1x | gh api graphql (open issues) |
+| `hew prime` | 1077 | 1172 | 1.1x | gh api graphql (open issues) |
 | `hew show #119` | 430 | 590 | 1.4x | gh issue view --json + gh api graphql |
 
 Findings, including the ones that don't flatter the tool:
 
 - **The claim holds for the reads an agent actually loops on.** `ready` and
-  `list` cost 18–25 tokens per open issue against 76–84 for the equivalent
-  GraphQL and 110–141 for `gh issue list --json` — 3.3x–4.2x and 5.5x–6.1x
+  `list` cost 16–25 tokens per open issue against 75–84 for the equivalent
+  GraphQL and 104–141 for `gh issue list --json` — 3.3x–4.5x and 5.2x–6.3x
   respectively across both fixtures. This is the whole-tracker read that
   happens every iteration, so it is where the saving compounds.
 - **`show` saves less: 1.3x–1.5x.** Bodies dominate `show` and both sides carry
@@ -629,7 +629,7 @@ Findings, including the ones that don't flatter the tool:
   empty arrays, derived booleans, `createdAt` — where the lean query writes seven
   fields. The schema's stability is deliberate (agents parse it), but the token
   cost is a real regression against the tool's own claim, filed as #62.
-- **`prime` measures 1038–1058 tokens against its ~1200 target, restated in
+- **`prime` measures 1077–1084 tokens against its ~1200 target, restated in
   #63.** The ~600 target came from the mock, not from output: the static
   conventions half alone measures ~890 tokens under o200k_base, and the live
   sections add ~150–165 on the fixtures. Every command and flag of the cheatsheet
