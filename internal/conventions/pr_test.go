@@ -387,6 +387,13 @@ func TestReviewSection(t *testing.T) {
 		{"heading-only first occurrence, real later one", "### Testing\n\n### What\n\nthings\n\n### Testing\n\nran it", "ran it"},
 		{"empty trailing section", "### What\n\nthings\n\n### Testing\n", ""},
 		{"case insensitive", "### TESTING\n\nran it", "ran it"},
+		{"bold label of another section ends an empty one", "**Testing**\n\n**Risk**\n\nTwo-way.", ""},
+		{"bold line that is not a section stays content", "**Testing**\n\n**Before:**\nfailed\n**After:**\npassed", "**Before:**\nfailed\n**After:**\npassed"},
+		{"heading with a trailing colon", "## Testing:\n\nran it", "ran it"},
+		{"indented line is code, not a heading", "### Testing\n\n    # make test", "# make test"},
+		{"indented heading does not open a section", "    ### Testing\n\nran it", ""},
+		{"inline triple backticks do not open a fence", "```x``` text\n\n### Testing\n\nran it", "ran it"},
+		{"trailer inside a section does not drop what follows", "### Testing\n\nFixes #30\n\nran the suite", "ran the suite"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := ReviewSection(tc.body, "Testing"); got != tc.want {

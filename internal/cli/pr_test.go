@@ -1525,6 +1525,8 @@ func TestPRBodyFileSectionWarnings(t *testing.T) {
 		{"heading-only first occurrence, real later one", "### Testing\n\n### Risk\n\nTwo-way.\n\n### Testing\n\nran it", false, false},
 		{"other heading level counts", "## Testing\n\nran it\n\n## Risk\n\nTwo-way.", false, false},
 		{"bold label counts", "**Testing**\n\nran it\n\n**Risk**\n\nTwo-way.", false, false},
+		{"empty bold Testing before a bold Risk", "**Testing**\n\n**Risk**\n\nTwo-way.", true, false},
+		{"headings with a trailing colon", "## Testing:\n\nran it\n\n## Risk:\n\nTwo-way.", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFake(claimed(30, "work", "P2", "enhancement"))

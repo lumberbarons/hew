@@ -278,18 +278,29 @@ func Section(body, name string) string {
 	return ""
 }
 
+// templateSections are the PR body sections a bold label can stand in for.
+var templateSections = []string{"What", "Why", "Testing", "Risk"}
+
 // ReviewSection extracts the content under a section from a body nobody
 // templated, such as --body-file. Section trusts a "### Name" line; this reads
 // structure instead: a heading of any level or a bold label opens the
-// section, any heading or a closing/epic trailer ends it, and fenced code is
-// never a heading. Every occurrence counts, so an empty first heading does not
-// hide a real later one.
+// section, any heading or a bold label naming another template section ends
+// it, and fenced or indented code is never a heading. Closing/epic trailer
+// lines are skipped rather than read as content. Every occurrence counts, so
+// an empty first heading does not hide a real later one.
 func ReviewSection(body, name string) string {
 	var content []string
 	var fence string
 	inSection := false
 	for _, line := range strings.Split(body, "\n") {
 		trimmed := strings.TrimSpace(line)
+		if fence == "" && (strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t")) {
+			// Four spaces make an indented code block, whatever it looks like.
+			if inSection {
+				content = append(content, line)
+			}
+			continue
+		}
 		if fence != "" {
 			if strings.HasPrefix(trimmed, fence) && strings.Trim(trimmed, fence[:1]) == "" {
 				fence = ""
@@ -310,12 +321,13 @@ func ReviewSection(body, name string) string {
 			inSection = strings.EqualFold(title, name)
 			continue
 		}
-		if label, ok := boldLabel(trimmed); ok && strings.EqualFold(label, name) {
-			inSection = true
+		// A bold line opens a section only when it names one; other bold
+		// lines ("**Before:**") are the author's content.
+		if label, ok := boldLabel(trimmed); ok && slices.ContainsFunc(templateSections, func(s string) bool { return strings.EqualFold(s, label) }) {
+			inSection = strings.EqualFold(label, name)
 			continue
 		}
 		if isTrailerLine(trimmed) {
-			inSection = false
 			continue
 		}
 		if inSection {
@@ -329,9 +341,16 @@ func ReviewSection(body, name string) string {
 // block on this line, empty when it does not open one.
 func openingFence(line string) string {
 	for _, c := range []string{"`", "~"} {
-		if run := len(line) - len(strings.TrimLeft(line, c)); run >= 3 {
-			return strings.Repeat(c, run)
+		run := len(line) - len(strings.TrimLeft(line, c))
+		if run < 3 {
+			continue
 		}
+		// A backtick fence's info string cannot hold a backtick; that line is
+		// an inline code span.
+		if c == "`" && strings.Contains(line[run:], "`") {
+			return ""
+		}
+		return strings.Repeat(c, run)
 	}
 	return ""
 }
@@ -342,7 +361,8 @@ func headingTitle(line string) (string, bool) {
 	if hashes := len(line) - len(rest); hashes == 0 || hashes > 6 || (rest != "" && rest[0] != ' ') {
 		return "", false
 	}
-	return strings.TrimSpace(strings.TrimRight(rest, "# ")), true
+	title := strings.TrimSpace(strings.TrimRight(rest, "# "))
+	return strings.TrimSpace(strings.TrimSuffix(title, ":")), true
 }
 
 // boldLabel returns the text of a line that is nothing but a bold label,
