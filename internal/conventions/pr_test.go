@@ -284,3 +284,76 @@ func TestPRTitleLeavesEveryKnownPrefixAlone(t *testing.T) {
 		}
 	}
 }
+
+// A single value is the shape every existing caller passes, so it must come
+// back untouched — no bullet, no trimming — or their composed bodies change.
+func TestPRListSingleValueIsVerbatim(t *testing.T) {
+	for _, in := range []string{"one paragraph", "  padded  ", "line one\nline two", "- already a bullet", ""} {
+		if got := PRList([]string{in}); got != in {
+			t.Errorf("PRList([%q]) = %q, want it unchanged", in, got)
+		}
+	}
+	if got := PRList(nil); got != "" {
+		t.Errorf("PRList(nil) = %q, want empty", got)
+	}
+}
+
+func TestPRListRendersSeveralValuesAsBullets(t *testing.T) {
+	got := PRList([]string{"`go build ./...` passes", "`golangci-lint run` is clean"})
+	want := "- `go build ./...` passes\n- `golangci-lint run` is clean"
+	if got != want {
+		t.Errorf("PRList() =\n%s\n\nwant\n%s", got, want)
+	}
+}
+
+// A continuation line indented under its bullet stays part of that item; at
+// column zero it would end the list and read as a stray paragraph.
+func TestPRListIndentsContinuationLines(t *testing.T) {
+	got := PRList([]string{"first\nsecond line", "third"})
+	want := "- first\n  second line\n- third"
+	if got != want {
+		t.Errorf("PRList() =\n%s\n\nwant\n%s", got, want)
+	}
+}
+
+// An empty occurrence (an unset shell variable) must not leave a bare "- ",
+// and once the blanks are gone one survivor is the single-value shape.
+func TestPRListDropsBlankValues(t *testing.T) {
+	if got, want := PRList([]string{"a", " ", "", "b"}), "- a\n- b"; got != want {
+		t.Errorf("PRList() = %q, want %q", got, want)
+	}
+	if got, want := PRList([]string{"", "only"}), "only"; got != want {
+		t.Errorf("PRList() = %q, want %q", got, want)
+	}
+	if got := PRList([]string{"", " "}); got != "" {
+		t.Errorf("PRList() = %q, want empty", got)
+	}
+}
+
+func TestPRComposeRendersListUnderSectionHeader(t *testing.T) {
+	got := PRSections{Testing: PRList([]string{"build passes", "lint is clean"})}.Compose(PRTrailers{Fixes: 57})
+	want := "### Testing\n\n- build passes\n- lint is clean\n\nFixes #57"
+	if got != want {
+		t.Errorf("Compose() =\n%s\n\nwant\n%s", got, want)
+	}
+	// The composed list must survive the amend path's read-back of the section
+	// (which reads to the next heading, trailer included).
+	if sec := Section(got, "Testing"); sec != "- build passes\n- lint is clean\n\nFixes #57" {
+		t.Errorf("Section(Testing) = %q, want the bullet list intact", sec)
+	}
+}
+
+// An author who writes their own bullets for each value must not get "- - item".
+func TestPRListStripsBullets(t *testing.T) {
+	got := PRList([]string{"- build passes", "* lint clean", "plain"})
+	if want := "- build passes\n- lint clean\n- plain"; got != want {
+		t.Errorf("PRList() =\n%s\n\nwant\n%s", got, want)
+	}
+}
+
+func TestPRListKeepsBlankContinuationLinesEmpty(t *testing.T) {
+	got := PRList([]string{"before:\n\nafter:", "x"})
+	if want := "- before:\n\n  after:\n- x"; got != want {
+		t.Errorf("PRList() = %q, want %q", got, want)
+	}
+}

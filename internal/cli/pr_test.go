@@ -1228,6 +1228,31 @@ func TestPRAmendPreservesAndClearsRisk(t *testing.T) {
 	}
 }
 
+// A Testing section composed from repeated --testing values (bullets, with an
+// indented continuation line) must survive the amend path's lossless-read check,
+// or the tool would refuse to edit a PR it wrote itself.
+func TestPRAmendPreservesBulletListSections(t *testing.T) {
+	f, app := amendSetup()
+	testing := conventions.PRList([]string{"build passes\nsecond line", "lint clean"})
+	pr := f.openPRs["feat/30-work"]
+	pr.Body = conventions.PRSections{What: "w", Testing: testing, Risk: "r"}.Compose(conventions.PRTrailers{Fixes: 30, Epic: 33})
+	f.openPRs["feat/30-work"] = pr
+
+	if err := app.PR(context.Background(), PROpts{
+		Amend:        true,
+		SectionFlags: []string{"what"},
+		Sections:     conventions.PRSections{What: conventions.PRList([]string{"a", "b"})},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := f.openPRs["feat/30-work"].Body
+	for _, want := range []string{"### What\n\n- a\n- b", "### Testing\n\n" + testing, "### Risk\n\nr"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("amended body lost %q:\n%s", want, body)
+		}
+	}
+}
+
 func TestPRAmendTitlePreservesFreeformBodyAndReportsExistingPR(t *testing.T) {
 	f, app := amendSetup()
 	app.JSON = true

@@ -468,3 +468,54 @@ func TestStartHelpNamesClaimAndRead(t *testing.T) {
 		t.Error("start has no --show flag")
 	}
 }
+
+// TestPRSectionFlagsAreRepeatable pins #57: --what, --why, --testing and --risk take
+// each occurrence verbatim (a comma is punctuation, as with --done-when) and
+// several of them compose a bullet list, while one value stays a plain
+// paragraph so existing callers' bodies do not change.
+func TestPRSectionFlagsAreRepeatable(t *testing.T) {
+	app := root()
+	var got conventions.PRSections
+	var set []string
+	findCommand(t, app, "pr").Action = func(_ context.Context, cmd *ucli.Command) error {
+		got = prSectionsFromFlags(cmd)
+		set = prSectionFlagsSet(cmd)
+		return nil
+	}
+
+	args := []string{"hew", "pr",
+		"--what", "wired, then tested", "--what", "docs",
+		"--why", "one paragraph, commas intact",
+		"--testing", "build passes", "--testing", "lint, vet clean", "--testing", "tests pass",
+		"--risk", "two-way door", "--risk", "small blast radius"}
+	if err := app.Run(context.Background(), args); err != nil {
+		t.Fatalf("run %v: %v", args, err)
+	}
+	want := conventions.PRSections{
+		What:    "- wired, then tested\n- docs",
+		Why:     "one paragraph, commas intact",
+		Testing: "- build passes\n- lint, vet clean\n- tests pass",
+		Risk:    "- two-way door\n- small blast radius",
+	}
+	if got != want {
+		t.Errorf("sections = %+v, want %+v", got, want)
+	}
+	if want := []string{"what", "why", "testing", "risk"}; !slices.Equal(set, want) {
+		t.Errorf("flags set = %v, want %v", set, want)
+	}
+
+	// An explicitly empty value still counts as set, so --amend can remove a section.
+	app = root()
+	findCommand(t, app, "pr").Action = func(_ context.Context, cmd *ucli.Command) error {
+		got = prSectionsFromFlags(cmd)
+		set = prSectionFlagsSet(cmd)
+		return nil
+	}
+	args = []string{"hew", "pr", "--testing", ""}
+	if err := app.Run(context.Background(), args); err != nil {
+		t.Fatalf("run %v: %v", args, err)
+	}
+	if got.Testing != "" || !slices.Equal(set, []string{"testing"}) {
+		t.Errorf("empty --testing: sections = %+v, set = %v", got, set)
+	}
+}

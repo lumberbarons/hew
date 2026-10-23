@@ -456,10 +456,10 @@ repository. --ready and --base are creation-only flags.
 			&ucli.BoolFlag{Name: "amend", Usage: "revise the open PR title/body; preserve omitted sections"},
 			&ucli.IntFlag{Name: "for", Usage: "link issue `N` instead of inferring it"},
 			&ucli.StringFlag{Name: "title", Usage: "PR title (default: derived from the issue type/title; preserved with --amend)"},
-			&ucli.StringFlag{Name: "what", Usage: "body section: what the change does (default: the issue's Fix/Approach)"},
-			&ucli.StringFlag{Name: "why", Usage: "body section: why (default: the issue's Problem/Goal)"},
-			&ucli.StringFlag{Name: "testing", Usage: "body section: evidence — a before and after, not \"tests pass\""},
-			&ucli.StringFlag{Name: "risk", Usage: "body section: one-way/two-way door + blast radius"},
+			&proseSliceFlag{Name: "what", Usage: "body section: what the change does (default: the issue's Fix/Approach); repeat for a bullet list"},
+			&proseSliceFlag{Name: "why", Usage: "body section: why (default: the issue's Problem/Goal); repeat for a bullet list"},
+			&proseSliceFlag{Name: "testing", Usage: "body section: evidence — a before and after, not \"tests pass\"; repeat for a bullet list"},
+			&proseSliceFlag{Name: "risk", Usage: "body section: one-way/two-way door + blast radius; repeat for a bullet list"},
 			&ucli.StringFlag{Name: "body-file", Usage: "read the whole body from `FILE` (Fixes #n is appended if absent)"},
 			&ucli.StringFlag{Name: "base", Usage: "target `BRANCH` (default: the repo's default branch)"},
 			&ucli.BoolFlag{Name: "ready", Usage: "open for review instead of as a draft"},
@@ -470,29 +470,42 @@ repository. --ready and --base are creation-only flags.
 			if err != nil {
 				return err
 			}
-			var sectionFlags []string
-			for _, name := range []string{"what", "why", "testing", "risk"} {
-				if cmd.IsSet(name) {
-					sectionFlags = append(sectionFlags, name)
-				}
-			}
 			return app.PR(ctx, appcli.PROpts{
 				Amend:        cmd.Bool("amend"),
-				SectionFlags: sectionFlags,
+				SectionFlags: prSectionFlagsSet(cmd),
 				For:          cmd.Int("for"),
 				Title:        cmd.String("title"),
-				Sections: conventions.PRSections{
-					What:    cmd.String("what"),
-					Why:     cmd.String("why"),
-					Testing: cmd.String("testing"),
-					Risk:    cmd.String("risk"),
-				},
-				BodyFile: cmd.String("body-file"),
-				Base:     cmd.String("base"),
-				Ready:    cmd.Bool("ready"),
+				Sections:     prSectionsFromFlags(cmd),
+				BodyFile:     cmd.String("body-file"),
+				Base:         cmd.String("base"),
+				Ready:        cmd.Bool("ready"),
 			})
 		},
 	}
+}
+
+// prSectionsFromFlags reads the pr body sections. Every section flag is
+// repeatable and compose a bullet list from several values; one value stays a
+// plain paragraph.
+func prSectionsFromFlags(cmd *ucli.Command) conventions.PRSections {
+	return conventions.PRSections{
+		What:    conventions.PRList(cmd.StringSlice("what")),
+		Why:     conventions.PRList(cmd.StringSlice("why")),
+		Testing: conventions.PRList(cmd.StringSlice("testing")),
+		Risk:    conventions.PRList(cmd.StringSlice("risk")),
+	}
+}
+
+// prSectionFlagsSet names the section flags given explicitly, empty values
+// included, so --amend can tell "remove this section" from "leave it alone".
+func prSectionFlagsSet(cmd *ucli.Command) []string {
+	var set []string
+	for _, name := range []string{"what", "why", "testing", "risk"} {
+		if cmd.IsSet(name) {
+			set = append(set, name)
+		}
+	}
+	return set
 }
 
 func closeCmd() *ucli.Command {

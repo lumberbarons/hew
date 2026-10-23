@@ -140,6 +140,8 @@ hew pr [--for N] [--title "..."]
                                   # and its blast radius. The title defaults to the
                                   # issue title under the type's commit prefix
                                   # (bug → "fix: ..."); --title is passed through.
+                                  # Every section flag repeats: several values
+                                  # become a bullet list, one value stays a paragraph.
                                   # Push the branch first.
           [--body-file F]         # long-form escape hatch (missing Fixes/Part of
                                   # trailers are appended, never duplicated)
