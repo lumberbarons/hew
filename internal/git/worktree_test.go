@@ -54,7 +54,7 @@ func TestMainCheckoutReportsGitFailureAndOddOutput(t *testing.T) {
 	}
 }
 
-func TestWorktreeNameIsEmptyInTheMainCheckoutAndNamedInALinkedOne(t *testing.T) {
+func TestLinkedWorktreeIsEmptyInTheMainCheckoutAndItsPathInALinkedOne(t *testing.T) {
 	r := func(_ string, args ...string) (string, error) {
 		switch {
 		case slices.Contains(args, "--show-toplevel"):
@@ -67,21 +67,21 @@ func TestWorktreeNameIsEmptyInTheMainCheckoutAndNamedInALinkedOne(t *testing.T) 
 		}
 		return "", errors.New("unexpected command")
 	}
-	if name, err := worktreeName(r, ""); err != nil || name != "" {
+	if name, err := linkedWorktree(r, ""); err != nil || name != "" {
 		t.Errorf("main checkout = %q, %v; want no name", name, err)
 	}
-	if name, err := worktreeName(r, "/work/wt"); err != nil || name != "wt" {
-		t.Errorf("linked worktree = %q, %v; want wt", name, err)
+	if name, err := linkedWorktree(r, "/work/wt"); err != nil || name != "/work/wt" {
+		t.Errorf("linked worktree = %q, %v; want /work/wt", name, err)
 	}
 }
 
-func TestWorktreeNameReportsGitFailure(t *testing.T) {
+func TestLinkedWorktreeReportsGitFailure(t *testing.T) {
 	failing := func(string, ...string) (string, error) { return "", errors.New("not a git repository") }
-	if _, err := worktreeName(failing, ""); err == nil || !strings.Contains(err.Error(), "not a git repository") {
+	if _, err := linkedWorktree(failing, ""); err == nil || !strings.Contains(err.Error(), "not a git repository") {
 		t.Errorf("err = %v, want the git failure wrapped", err)
 	}
 	empty := func(string, ...string) (string, error) { return "", nil }
-	if _, err := worktreeName(empty, ""); err == nil {
+	if _, err := linkedWorktree(empty, ""); err == nil {
 		t.Error("expected an error when git returns no path")
 	}
 }
@@ -110,6 +110,9 @@ func TestMainCheckoutFromALinkedWorktreeFindsTheMainCheckout(t *testing.T) {
 	git(main, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "--allow-empty", "-m", "seed")
 	wt := filepath.Join(t.TempDir(), "wt")
 	git(main, "worktree", "add", "-b", "feat/x", wt)
+	if wt, err = filepath.EvalSymlinks(wt); err != nil {
+		t.Fatal(err)
+	}
 
 	for name, dir := range map[string]string{"main": main, "linked": wt} {
 		got, err := MainCheckout(dir)
@@ -121,10 +124,10 @@ func TestMainCheckoutFromALinkedWorktreeFindsTheMainCheckout(t *testing.T) {
 		}
 		wantName := ""
 		if name == "linked" {
-			wantName = filepath.Base(wt)
+			wantName = wt
 		}
-		if got, err := WorktreeName(dir); err != nil || got != wantName {
-			t.Errorf("%s: WorktreeName = %q, %v; want %q", name, got, err, wantName)
+		if got, err := LinkedWorktree(dir); err != nil || got != wantName {
+			t.Errorf("%s: LinkedWorktree = %q, %v; want %q", name, got, err, wantName)
 		}
 	}
 }

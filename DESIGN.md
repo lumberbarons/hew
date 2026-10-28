@@ -707,17 +707,23 @@ Findings, including the ones that don't flatter the tool:
 - **Branch coverage.** The Go toolchain only does statement coverage; `gobco` adds
   branch/condition coverage via source instrumentation but is niche and awkward in
   CI. Revisit if statement coverage starts hiding untested branches in practice.
-- **Same-user claim races — resolved for the local backend.** Every GitHub agent
+- **Same-user claim races — narrowed for the local backend.** Every GitHub agent
   authenticates as `@me`, so two parallel sessions that race `start` inside the
   guard window are indistinguishable by assignee or label — both think they won.
   Exit 5 does not address this: it tells a caller the claim is `@me`'s, which is
   exactly the point at which one of *my* own sessions cannot tell whether the
-  claimant is itself or a sibling. The local backend closes both halves. Its
+  claimant is itself or a sibling. The local backend narrows both halves. Its
   default identity is `HEW_USER` when set, else the OS login qualified with the
-  linked worktree's name (the main checkout keeps the bare login), so agents under
-  one account are different claimants and exit 3/5 stay meaningful; `HEW_USER` must
-  be unique per agent where the worktree name is not. Its store also implements an
-  atomic claim under the lock it already holds, so two starts that both passed the
-  pre-read still have exactly one winner and the loser gets the conflict. GitHub
+  linked worktree's name and a short digest of its path (the main checkout keeps
+  the bare login), so agents under one account in different worktrees are
+  different claimants and exit 3/5 stay meaningful. It errors rather than guess
+  when git cannot say which checkout this is, since a silently different identity
+  would turn your own claim into someone else's. The identity is per worktree, not
+  per session: two sessions sharing a worktree, or both in the main checkout,
+  remain one claimant, and the later `start` gets exit 5 ("resume") instead of 3.
+  `HEW_USER` must be unique per agent wherever sessions share a checkout. Its
+  store also implements an atomic claim under the lock it already holds, so two
+  starts that both passed the pre-read still have exactly one winner and the
+  loser gets the conflict. GitHub
   keeps check-then-act plus the post-claim warning; if that becomes a real problem,
   the claim-comment nonce remains the fallback.

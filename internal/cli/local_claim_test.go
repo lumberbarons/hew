@@ -3,13 +3,16 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/local"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 // newLocalApp wires an App to a local store, the backend a local-only repo
@@ -84,8 +87,12 @@ func TestStartTellsWorktreesApartThroughTheLocalStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Assignees) != 1 || got.Assignees[0] != "jim-agent-two" || !got.InProgress() {
-		t.Errorf("after force: assignees %v labels %v, want only the stealer's claim", got.Assignees, got.Labels)
+	stealer, err := agentTwo.Viewer(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Assignees) != 1 || got.Assignees[0] != stealer || !got.InProgress() {
+		t.Errorf("after force: assignees %v labels %v, want only the stealer's claim %q", got.Assignees, got.Labels, stealer)
 	}
 }
 
@@ -142,6 +149,103 @@ func TestStartMapsALostClaimRaceToTheClaimCodes(t *testing.T) {
 				t.Errorf("assignees = %v, want only the race winner %q", got.Assignees, tc.rival)
 			}
 		})
+	}
+}
+
+// swapFailingStore fails the priority label write that follows a successful
+// claim, so a test can see what start leaves behind.
+type swapFailingStore struct {
+	*local.Store
+	failRemove bool
+}
+
+func (s *swapFailingStore) AddLabels(ctx context.Context, number int, labels []string) error {
+	for _, l := range labels {
+		if _, ok := model.ParsePriority(l); ok {
+			return errors.New("disk full")
+		}
+	}
+	return s.Store.AddLabels(ctx, number, labels)
+}
+
+func (s *swapFailingStore) RemoveAssignees(ctx context.Context, number int, logins []string) error {
+	if s.failRemove {
+		return errors.New("lock timeout")
+	}
+	return s.Store.RemoveAssignees(ctx, number, logins)
+}
+
+// Claiming is triage — an untriaged issue gets its priority from start — so a failed priority swap must not leave the issue
+// claimed: the retry would be told the claim is already its own (exit 5)
+// instead of finishing the triage.
+func TestStartReleasesTheClaimWhenThePrioritySwapFails(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		prior     []string // earlier claimants, only reachable with --force
+		force     bool
+		wantAfter []string
+	}{
+		{"fresh claim", nil, false, nil},
+		{"forced claim restores the displaced claimant", []string{"agent-a"}, true, []string{"agent-a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), local.DirName)
+			if err := local.Init(dir); err != nil {
+				t.Fatal(err)
+			}
+			store, err := local.Open(dir, "agent-b")
+			if err != nil {
+				t.Fatal(err)
+			}
+			created, err := store.CreateIssue(ctx, "Triage on claim", "", []string{"task"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, who := range tc.prior {
+				if err := store.ClaimIssue(ctx, created.Number, who, false); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			app, _, _ := newLocalApp(&swapFailingStore{Store: store})
+			err = app.Start(ctx, created.Number, StartOpts{Priority: "P1", Force: tc.force})
+			if err == nil || !strings.Contains(err.Error(), "disk full") {
+				t.Fatalf("err = %v, want the swap failure", err)
+			}
+			got, err := store.GetIssue(ctx, created.Number)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got.Assignees, tc.wantAfter) {
+				t.Errorf("assignees = %v, want %v", got.Assignees, tc.wantAfter)
+			}
+			if got.InProgress() != (len(tc.prior) > 0) {
+				t.Errorf("in-progress = %v with prior claimants %v", got.InProgress(), tc.prior)
+			}
+			if p, _ := got.Priority(); p != model.PriorityUnknown {
+				t.Errorf("priority = %v, want the issue still untriaged", p)
+			}
+		})
+	}
+}
+
+func TestStartReportsAFailedRollbackAlongsideTheSwapFailure(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), local.DirName)
+	if err := local.Init(dir); err != nil {
+		t.Fatal(err)
+	}
+	store, err := local.Open(dir, "agent-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.CreateIssue(ctx, "Triage on claim", "", []string{"task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, _, _ := newLocalApp(&swapFailingStore{Store: store, failRemove: true})
+	err = app.Start(ctx, created.Number, StartOpts{Priority: "P1"})
+	if err == nil || !strings.Contains(err.Error(), "disk full") || !strings.Contains(err.Error(), "could not release the claim") {
+		t.Errorf("err = %v, want both the swap failure and the failed release", err)
 	}
 }
 

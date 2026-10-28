@@ -296,7 +296,10 @@ func (a *App) Start(ctx context.Context, number int, opts StartOpts) error {
 			return err
 		}
 		if err := a.swapPriority(ctx, issue, priority); err != nil {
-			return err
+			// Claiming is triage: a claim without the priority would leave the
+			// issue half-started, and a retry would then be told it is already
+			// the caller's (exit 5) instead of finishing the job.
+			return errors.Join(err, a.undoClaim(ctx, issue, viewer, force))
 		}
 	} else {
 		if err := a.swapPriority(ctx, issue, priority); err != nil {
@@ -762,6 +765,31 @@ func (a *App) Init(ctx context.Context) error {
 
 // swapPriority enforces the one-priority-label invariant: remove the
 // others, add the target if absent.
+// undoClaim undoes an atomic claim back to the state before: issue is the
+// snapshot start read before claiming. It reports its own failure so the
+// caller can show both, since a failed rollback leaves the claim in place.
+func (a *App) undoClaim(ctx context.Context, issue model.Issue, viewer string, force bool) error {
+	var errs []error
+	if !slices.Contains(issue.Assignees, viewer) {
+		errs = append(errs, a.Client.RemoveAssignees(ctx, issue.Number, []string{viewer}))
+	}
+	if force {
+		// The forced claim displaced the earlier claimants; put them back.
+		for _, who := range issue.Assignees {
+			if who != viewer {
+				errs = append(errs, a.Client.AddAssignee(ctx, issue.Number, who))
+			}
+		}
+	}
+	if !issue.InProgress() {
+		errs = append(errs, a.Client.RemoveLabel(ctx, issue.Number, model.InProgressLabel))
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("could not release the claim on #%d: %w", issue.Number, err)
+	}
+	return nil
+}
+
 func (a *App) swapPriority(ctx context.Context, issue model.Issue, p model.Priority) error {
 	target := p.String()
 	for _, l := range issue.Labels {

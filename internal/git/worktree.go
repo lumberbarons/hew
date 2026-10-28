@@ -34,14 +34,15 @@ func mainCheckout(r runner, dir string) (string, error) {
 	return path, nil
 }
 
-// WorktreeName names the checkout containing dir when it is a linked
-// worktree: the directory name, which is what tells concurrent agents in one
-// repository apart. It is empty for the main checkout, so a lone user in the
-// primary checkout keeps the bare login, and an error when dir is not in a
-// git checkout at all.
-func WorktreeName(dir string) (string, error) { return worktreeName(run, dir) }
+// LinkedWorktree returns the root path of the checkout containing dir when it
+// is a linked worktree, which is what tells concurrent agents in one
+// repository apart. The full path rather than the directory name, because two
+// worktrees can share a name under different parents. It is empty for the main
+// checkout, so a lone user in the primary checkout keeps the bare login, and an
+// error when dir is not in a git checkout at all.
+func LinkedWorktree(dir string) (string, error) { return linkedWorktree(run, dir) }
 
-func worktreeName(r runner, dir string) (string, error) {
+func linkedWorktree(r runner, dir string) (string, error) {
 	args := []string{"rev-parse", "--show-toplevel"}
 	if dir != "" {
 		args = append([]string{"-C", dir}, args...)
@@ -60,5 +61,5 @@ func worktreeName(r runner, dir string) (string, error) {
 	if filepath.Clean(root) == filepath.Clean(main) {
 		return "", nil
 	}
-	return filepath.Base(root), nil
+	return filepath.Clean(root), nil
 }

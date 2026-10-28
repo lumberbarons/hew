@@ -10,6 +10,8 @@
 package local
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -111,30 +113,53 @@ func Init(dir string) error {
 // when set: it is the escape hatch for a harness, and it must be unique per
 // concurrent agent, because a shared identity cannot tell "this claim is
 // mine" from "a sibling session holds it". Otherwise the OS login is
-// qualified with the current linked worktree's name, so two agents under one
-// OS account in different worktrees are distinct claimants and start's exit
-// codes stay meaningful; the main checkout keeps the bare login. It is
-// login-shaped on purpose — it lands in assignee lists and "@user" output,
-// where a git display name with spaces would read badly.
-func DefaultViewer() string {
-	worktree, _ := git.WorktreeName("")
-	return viewerFor(os.Getenv, worktree)
+// qualified with the current linked worktree, so two agents under one OS
+// account in different worktrees are distinct claimants and start's exit codes
+// stay meaningful; the main checkout keeps the bare login. It is login-shaped
+// on purpose — it lands in assignee lists and "@user" output, where a git
+// display name with spaces would read badly.
+//
+// It fails when the checkout cannot be determined rather than falling back to
+// the bare login: the identity would then change between invocations, and a
+// claim of your own would read as someone else's.
+func DefaultViewer() (string, error) {
+	return viewerFor(os.Getenv, func() (string, error) { return git.LinkedWorktree("") })
 }
 
 // viewerFor is the identity rule with the environment and checkout injected,
-// so its fallbacks and qualification are testable without either.
-func viewerFor(getenv func(string) string, worktree string) string {
+// so its fallbacks and qualification are testable without either. worktree
+// returns the linked worktree's root path, empty for the main checkout; it is
+// only consulted when HEW_USER does not decide the answer.
+func viewerFor(getenv func(string) string, worktree func() (string, error)) (string, error) {
 	if v := getenv("HEW_USER"); v != "" {
-		return v
+		return v, nil
 	}
 	login := getenv("USER")
 	if login == "" {
 		login = "local"
 	}
-	if name := identityPart(worktree); name != "" {
-		return login + "-" + name
+	root, err := worktree()
+	if err != nil {
+		return "", fmt.Errorf("cannot tell which agent this is (set HEW_USER to name it): %w", err)
 	}
-	return login
+	if root == "" {
+		return login, nil
+	}
+	return login + "-" + worktreeTag(root), nil
+}
+
+// worktreeTag names a linked worktree for an assignee handle: its directory
+// name, for readability, plus a short digest of the full path, because names
+// repeat across parents (/a/work, /b/work) and collapse once sanitised
+// (feature/one, feature-one). The digest keeps those distinct and the result
+// stable for as long as the worktree stays where it is.
+func worktreeTag(root string) string {
+	sum := sha256.Sum256([]byte(root))
+	tag := hex.EncodeToString(sum[:3])
+	if name := identityPart(filepath.Base(root)); name != "" {
+		return name + "-" + tag
+	}
+	return tag
 }
 
 // identityPart reduces a worktree directory name to the characters an
@@ -180,7 +205,9 @@ func Open(dir, viewer string) (*Store, error) {
 		return nil, err
 	}
 	if viewer == "" {
-		viewer = DefaultViewer()
+		if viewer, err = DefaultViewer(); err != nil {
+			return nil, err
+		}
 	}
 	return &Store{dir: dir, viewer: viewer, now: func() time.Time { return time.Now().UTC() }}, nil
 }
