@@ -19,6 +19,7 @@ import (
 	"github.com/lumberbarons/hew/internal/editor"
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/git"
+	"github.com/lumberbarons/hew/internal/local"
 	"github.com/lumberbarons/hew/internal/render"
 
 	"github.com/cli/go-gh/v2/pkg/repository"
@@ -46,6 +47,10 @@ func globalFlags() []ucli.Flag {
 	}
 }
 
+// buildApp picks the backend. --repo always means GitHub. Otherwise a
+// `.hew/config.json` at the main checkout that says local selects the local
+// store, and anything else — including no `.hew` at all — is GitHub exactly as
+// before.
 func buildApp(cmd *ucli.Command) (*appcli.App, error) {
 	var repo gh.Repo
 	if spec := cmd.String("repo"); spec != "" {
@@ -55,6 +60,13 @@ func buildApp(cmd *ucli.Command) (*appcli.App, error) {
 		}
 		repo = parsed
 	} else {
+		tracker, isLocal, err := local.Locate("")
+		if err != nil {
+			return nil, err
+		}
+		if isLocal {
+			return buildLocalApp(cmd, tracker)
+		}
 		current, err := repository.Current()
 		if err != nil {
 			return nil, fmt.Errorf("cannot detect repository (use --repo owner/name): %w", err)
@@ -65,10 +77,32 @@ func buildApp(cmd *ucli.Command) (*appcli.App, error) {
 	if err != nil {
 		return nil, err
 	}
+	app := newApp(cmd)
+	app.Client = client
+	app.PRs = client
+	app.Repo = repo
+	return app, nil
+}
+
+// buildLocalApp opens the local store at tracker. There are no pull requests
+// to open, so PRs stays nil and `pr` refuses. The displayed repo is the main
+// checkout's directory name, so every worktree of one repository reads alike.
+func buildLocalApp(cmd *ucli.Command, tracker string) (*appcli.App, error) {
+	store, err := local.Open(tracker, "")
+	if err != nil {
+		return nil, err
+	}
+	app := newApp(cmd)
+	app.Client = store
+	app.Repo = gh.Repo{Owner: "local", Name: filepath.Base(filepath.Dir(tracker))}
+	app.Local = true
+	return app, nil
+}
+
+// newApp carries what every backend shares: streams, output mode, and the
+// injected editor and git state. The caller supplies the backend.
+func newApp(cmd *ucli.Command) *appcli.App {
 	return &appcli.App{
-		Client: client,
-		PRs:    client,
-		Repo:   repo,
 		Out:    os.Stdout,
 		ErrOut: os.Stderr,
 		JSON:   cmd.Bool("json"),
@@ -77,7 +111,7 @@ func buildApp(cmd *ucli.Command) (*appcli.App, error) {
 		Color: render.ColorEnabled(os.Stdout),
 		Edit:  editor.Edit,
 		Git:   git.Current,
-	}, nil
+	}
 }
 
 // numberArg parses the required positional issue number after fixedArgs has
@@ -820,10 +854,19 @@ func migrateCmd() *ucli.Command {
 
 func initCmd() *ucli.Command {
 	return &ucli.Command{
-		Name:   "init",
-		Usage:  "bootstrap convention labels; print the CLAUDE.md snippet",
+		Name:  "init",
+		Usage: "bootstrap convention labels; print the CLAUDE.md snippet",
+		Flags: []ucli.Flag{
+			&ucli.BoolFlag{Name: "local", Usage: "create a local-only tracker in .hew at the main checkout instead of using GitHub Issues"},
+		},
 		Before: fixedArgs(0, 0),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
+			if cmd.Bool("local") {
+				if cmd.String("repo") != "" {
+					return appcli.UsageError("--local and --repo are alternatives: --repo always targets GitHub")
+				}
+				return newApp(cmd).InitLocal("")
+			}
 			app, err := buildApp(cmd)
 			if err != nil {
 				return err

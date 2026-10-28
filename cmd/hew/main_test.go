@@ -95,9 +95,9 @@ func leaves(cmd *ucli.Command, top string) []leaf {
 // whole-primer substring search would pass on incidental prose matches
 // ("untriaged" contains "triage") or on the same flag documented for a
 // different command.
-func primerCommandEntries(t *testing.T) map[string]string {
+func primerCommandEntries(t *testing.T, primer string) map[string]string {
 	t.Helper()
-	_, section, found := strings.Cut(conventions.PrimerStatic, "Commands:")
+	_, section, found := strings.Cut(primer, "Commands:")
 	if !found {
 		t.Fatal("primer has no Commands section")
 	}
@@ -129,35 +129,56 @@ func primerCommandEntries(t *testing.T) map[string]string {
 	return out
 }
 
-// TestPrimerMatchesCommandSurface is the cross-check that keeps PrimerStatic
+// TestPrimerMatchesCommandSurface is the cross-check that keeps the primers
 // honest: every agent-facing command must have its own entry in the primer's
 // Commands section, and every agent-facing flag must appear in that
 // command's entry (or be an explicit deliberate omission), so the
-// hand-written cheatsheet can't silently drift from the real surface.
+// hand-written cheatsheet can't silently drift from the real surface. The
+// local primer is held to the same surface minus the commands that need
+// GitHub.
 func TestPrimerMatchesCommandSurface(t *testing.T) {
-	entries := primerCommandEntries(t)
-	for _, lf := range leaves(root(), "") {
-		if setupCommands[lf.topName] {
-			continue
-		}
-		qualified := lf.name
-		if lf.topName != lf.name {
-			qualified = lf.topName + " " + lf.name
-		}
-		entry, ok := entries[qualified]
-		if !ok {
-			t.Errorf("primer's Commands section omits %q", qualified)
-			continue
-		}
-		for _, fl := range lf.flags {
-			name := fl.Names()[0]
-			if primerGlobalFlags[name] || omittedFlags[qualified+" --"+name] {
-				continue
+	for _, tc := range []struct {
+		name   string
+		primer string
+		// absent are the commands this backend has no use for; the primer must
+		// not send an agent to them.
+		absent map[string]bool
+	}{
+		{"github", conventions.PrimerStatic, nil},
+		{"local", conventions.PrimerLocal, map[string]bool{"pr": true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entries := primerCommandEntries(t, tc.primer)
+			for _, lf := range leaves(root(), "") {
+				if setupCommands[lf.topName] {
+					continue
+				}
+				qualified := lf.name
+				if lf.topName != lf.name {
+					qualified = lf.topName + " " + lf.name
+				}
+				entry, ok := entries[qualified]
+				if tc.absent[qualified] {
+					if ok {
+						t.Errorf("primer documents %q, which this backend cannot run: %q", qualified, entry)
+					}
+					continue
+				}
+				if !ok {
+					t.Errorf("primer's Commands section omits %q", qualified)
+					continue
+				}
+				for _, fl := range lf.flags {
+					name := fl.Names()[0]
+					if primerGlobalFlags[name] || omittedFlags[qualified+" --"+name] {
+						continue
+					}
+					if !regexp.MustCompile(`--` + regexp.QuoteMeta(name) + `\b`).MatchString(entry) {
+						t.Errorf("primer entry for %q omits flag --%s: %q", qualified, name, entry)
+					}
+				}
 			}
-			if !regexp.MustCompile(`--` + regexp.QuoteMeta(name) + `\b`).MatchString(entry) {
-				t.Errorf("primer entry for %q omits flag --%s: %q", qualified, name, entry)
-			}
-		}
+		})
 	}
 }
 

@@ -528,6 +528,15 @@ agent silently duplicating half a plan.
     locally: one `issues.jsonl` in a self-ignoring `.hew/` at the main checkout.
     The directory is untracked and ignored, so `git clean -fdx` at the main
     checkout deletes the only copy of the tracker.
+  - **Backend selection** (`buildApp`): `--repo` always means GitHub. Otherwise
+    `local.Locate` asks the main checkout — so every linked worktree agrees — for
+    `.hew/config.json`; a config saying `local` opens the local store, and the
+    primer, `init` snippet and `pr` refusal follow it. No `.hew`, a `.hew` that is
+    not a directory, a config naming another backend (a migrated repo keeps its
+    issues as an archive) or a directory outside any git checkout all mean GitHub,
+    as before. Anything else — git failing for another reason, or a config that
+    exists but cannot be read — is an error, never a silent fall back to GitHub,
+    since that would send writes to the wrong tracker.
 - **Testing**: unit tests against a fake API layer; golden files for renderer output.
   An integration smoke test against a real scratch repo (behind a build tag, run
   manually — it needs a token and mutates state, so it stays out of CI) is deferred

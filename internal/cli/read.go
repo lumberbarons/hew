@@ -292,12 +292,16 @@ func (a *App) Prime(ctx context.Context, opts PrimeOpts) error {
 	if len(d.Epics) > primeEpicsCap {
 		d.Epics = d.Epics[:primeEpicsCap]
 	}
+	primer := conventions.PrimerStatic
+	if a.Local {
+		primer = conventions.PrimerLocal
+	}
 	if opts.HookFormat == "cursor" {
 		var buf bytes.Buffer
-		render.Prime(&buf, conventions.PrimerStatic, d, render.Style{})
+		render.Prime(&buf, primer, d, render.Style{})
 		return render.CursorHookJSON(a.Out, buf.String())
 	}
-	return a.emitPrime(conventions.PrimerStatic, d)
+	return a.emitPrime(primer, d)
 }
 
 // EpicStatus with number <= 0 lists all open epics with progress rollups;

@@ -33,10 +33,16 @@ Authentication comes from the [`gh` CLI](https://cli.github.com/) — run
 `gh auth login` once and `hew` reuses its stored credentials. The target
 repository is detected from the git remote (`--repo owner/name` overrides).
 
+A repo with a `.hew/config.json` that says `local` tracks issues in `.hew` at its
+main checkout instead — shared by every linked worktree, no GitHub involved, and
+no `hew pr`: the primer finishes work with `hew close <n> --completed`. `--repo`
+always targets GitHub. `hew init --local` creates the tracker.
+
 ## Quickstart
 
 ```sh
 hew init          # bootstrap the label set in a repo; prints a CLAUDE.md snippet
+hew init --local  # or track issues in a local .hew directory instead of GitHub
 hew hooks install <claude|codex|cursor|opencode> # agent session-start hook running `hew prime`
 hew prime         # session-start context: conventions + ready work + live state
 hew ready         # what should I work on? (priority-sorted, zero open blockers)
@@ -163,7 +169,7 @@ hew apply <plan.jsonl> [--dry-run] [--state F] [--throttle D]
                                  # plan — labels, bodies, parents, dependencies —
                                  # checkpointed and resumable (see "Plan files")
                                  # defaults: --state <plan>.state.json, --throttle 500ms
-hew init
+hew init [--local]            # --local: create a local-only tracker in .hew
 hew hooks install|remove <claude|codex|cursor|opencode>
                               # add/remove a session-start hook running `hew prime`
                               # in the selected agent's project configuration;

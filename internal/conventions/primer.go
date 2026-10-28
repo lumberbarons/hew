@@ -1,18 +1,27 @@
 package conventions
 
-// PrimerStatic is the conventions-and-cheatsheet half of `hew prime`,
-// kept deliberately terse: the whole primer targets ~1200 tokens (measured,
-// see DESIGN.md's token-efficiency section).
-const PrimerStatic = `Workflow: hew ready → hew start <n> --show → branch (feat/|fix/|chore/) → push → hew pr.
+// The primer is assembled from shared and backend-specific pieces so the two
+// variants cannot drift apart on the conventions and command surface they have
+// in common. PrimerStatic and PrimerLocal are what ship; the pieces are not
+// used on their own.
+const (
+	primerGitHubWorkflow = `Workflow: hew ready → hew start <n> --show → branch (feat/|fix/|chore/) → push → hew pr.
 An issue is not done until its PR exists: when the work is complete, create the PR with hew pr before reporting done — a local commit is not a deliverable.
-Close via PR; hew close is for wontfix/duplicate only. Never work an epic directly.
-Dedup before filing: hew search <terms> (triaged, open+closed) first; hew triage --search <terms> for the
+Close via PR; hew close is for wontfix/duplicate only. Never work an epic directly.`
+
+	primerLocalWorkflow = `Workflow: hew ready → hew start <n> --show → do the work → hew close <n> --completed --reason "...".
+Issues live in .hew at the main checkout, shared by every worktree; there are no pull requests, so close with --completed when the work is done.
+Use hew close without --completed only for wontfix/duplicate. Never work an epic directly.`
+
+	primerDedup = `Dedup before filing: hew search <terms> (triaged, open+closed) first; hew triage --search <terms> for the
 untriaged rest — only when the user asked; show <n> only to read a specific candidate. Then
-hew create ... --discovered-from <n>.
+hew create ... --discovered-from <n>.`
 
-Sandboxed sessions may not access keychain-backed GitHub credentials. If writes report auth failure but gh works elsewhere, retry outside the sandbox.
+	primerSandbox = `Sandboxed sessions may not access keychain-backed GitHub credentials. If writes report auth failure but gh works elsewhere, retry outside the sandbox.`
 
-Conventions (enforced by the tool's write path):
+	// primerConventions runs from the conventions heading through the command
+	// list up to the pr entry, which only exists on the GitHub backend.
+	primerConventions = `Conventions (enforced by the tool's write path):
 - One priority label P0(critical)..P4(backlog), default P2; one type label bug|enhancement|task.
 - Area labels sparingly — only once several issues would share one. No title prefixes; labels carry the metadata.
 - Dependencies are native (--blocked-by), never body text. Epics are sub-issue trees.
@@ -29,19 +38,42 @@ show <n> | search <terms> | triage [--search <terms>] |
 create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
 draft [same section flags] --out F | --check F (compose/validate a body locally, no GitHub; then create --body-file F) |
-start <n> [--priority Pn --show] (--show or --json includes the body, so skip show <n>) | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |
-pr [--for N --testing "..." --what "..." --why "..." --risk "..." --title "..." --ready] (draft PR for the claimed issue;
+start <n> [--priority Pn --show] (--show or --json includes the body, so skip show <n>) | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |`
+
+	primerPR = `pr [--for N --testing "..." --what "..." --why "..." --risk "..." --title "..." --ready] (draft PR for the claimed issue;
   body: What/Why from the issue, Testing = Before:/After: lines + checks run (section flags repeat → bullets), Risk = Reversibility:/Blast radius: lines; exactly one "Fixes #n";
-  title defaults to feat:|fix:|chore: from the type — push the branch first) |
-close <n> --reason "..." [--completed | --duplicate-of M] | reopen <n> --reason "..." |
+  title defaults to feat:|fix:|chore: from the type — push the branch first) |`
+
+	primerTail = `close <n> --reason "..." [--completed | --duplicate-of M] | reopen <n> --reason "..." |
 block <n> --on <m> | unblock <n> --from <m> |
 epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n>] |
 apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew apply --help). All take --json.`
+)
+
+// PrimerStatic is the conventions-and-cheatsheet half of `hew prime`,
+// kept deliberately terse: the whole primer targets ~1200 tokens (measured,
+// see DESIGN.md's token-efficiency section).
+const PrimerStatic = primerGitHubWorkflow + "\n" + primerDedup + "\n\n" + primerSandbox + "\n\n" +
+	primerConventions + "\n" + primerPR + "\n" + primerTail
+
+// PrimerLocal is the primer for a repo that tracks issues in a local `.hew`
+// directory. It drops the pull-request step and the GitHub-only sandbox note,
+// and completes work with `hew close --completed`.
+const PrimerLocal = primerLocalWorkflow + "\n" + primerDedup + "\n\n" +
+	primerConventions + "\n" + primerTail
 
 // ClaudeSnippet is what `hew init` prints for the repo's CLAUDE.md: the
 // point of prime is that the snippet stays this short.
 const ClaudeSnippet = `## Issue tracking
 
 Work is tracked in GitHub Issues via the ` + "`hew`" + ` CLI.
+Run ` + "`hew prime`" + ` at session start — it prints the conventions,
+the ready work, and current state. When in doubt: ` + "`hew ready`" + `.`
+
+// ClaudeSnippetLocal is the same for a repo that tracks issues locally: the
+// issues live in `.hew`, not GitHub, and the primer is still the entry point.
+const ClaudeSnippetLocal = `## Issue tracking
+
+Work is tracked locally in ` + "`.hew`" + ` via the ` + "`hew`" + ` CLI; there is no GitHub tracker.
 Run ` + "`hew prime`" + ` at session start — it prints the conventions,
 the ready work, and current state. When in doubt: ` + "`hew ready`" + `.`

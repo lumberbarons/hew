@@ -4,7 +4,8 @@
 The conventions and command sections below are `conventions.PrimerStatic`
 verbatim — keep them in sync when you change that constant. Only the state
 sections (Ready/In progress/Epics) are invented, standing in for a repo with
-enough work in flight to show the live sections and their caps at once.
+enough work in flight to show the live sections and their caps at once. The
+local-backend variant at the end does the same with `conventions.PrimerLocal`.
 -->
 
 Workflow: hew ready → hew start <n> --show → branch (feat/|fix/|chore/) → push → hew pr.
@@ -65,3 +66,46 @@ apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew appl
 #144 P3  Epic: Web UI parity with API  0/2
 #146 P4  Epic: Deployment tooling  0/1
 … 1 more: hew epic status
+
+---
+
+# Local backend (`.hew/config.json` says `local`)
+
+# hew primer — local/solar-controller
+
+Workflow: hew ready → hew start <n> --show → do the work → hew close <n> --completed --reason "...".
+Issues live in .hew at the main checkout, shared by every worktree; there are no pull requests, so close with --completed when the work is done.
+Use hew close without --completed only for wontfix/duplicate. Never work an epic directly.
+Dedup before filing: hew search <terms> (triaged, open+closed) first; hew triage --search <terms> for the
+untriaged rest — only when the user asked; show <n> only to read a specific candidate. Then
+hew create ... --discovered-from <n>.
+
+Conventions (enforced by the tool's write path):
+- One priority label P0(critical)..P4(backlog), default P2; one type label bug|enhancement|task.
+- Area labels sparingly — only once several issues would share one. No title prefixes; labels carry the metadata.
+- Dependencies are native (--blocked-by), never body text. Epics are sub-issue trees.
+- Bodies: ### Where / ### Problem or ### Goal / ### Fix or ### Approach / ### Done when (checklist). Omit empty sections.
+- Issues missing priority/type are untriaged, not broken: unvetted input ready, prime, list and search all omit; only hew triage (and show <n>) emits it — label via hew set. Missing priority renders P? and sorts last.
+- Never call hew triage unless the user explicitly asked — it is the sole emitter of content no maintainer has vetted.
+- start refuses claimed issues: exit 3 pick the next ready item, exit 5 the claim is yours — resume it. Untriaged issues need start --priority.
+
+Output: one line per issue — #n priority type (areas) title [blocked by #m; epic done/total; in progress @user].
+list sorts ready work first, then claimed, blocked, epics. Prefer text output; --json on list commands emits NDJSON.
+
+Commands: ready [--limit N (0 for all)] | list [--label X --epic N --state open/closed/all --bodies (with --json)] |
+show <n> | search <terms> | triage [--search <terms>] |
+create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
+  [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
+draft [same section flags] --out F | --check F (compose/validate a body locally, no GitHub; then create --body-file F) |
+start <n> [--priority Pn --show] (--show or --json includes the body, so skip show <n>) | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |
+close <n> --reason "..." [--completed | --duplicate-of M] | reopen <n> --reason "..." |
+block <n> --on <m> | unblock <n> --from <m> |
+epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n>] |
+apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew apply --help). All take --json.
+
+## Ready (2 of 2 open)
+#12 P1 bug  Victron collector drops readings during BLE rescan
+#14 P2 task  Canary rollout for collector config
+
+## In progress (1)
+#13 P2 enhancement  Session-based auth for the web UI  @jim-wt-1a2b3c

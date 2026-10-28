@@ -702,3 +702,81 @@ func TestWritesReportAnUnwritableDirectory(t *testing.T) {
 		t.Error("WriteConfig wrote into a directory that does not exist")
 	}
 }
+
+func TestLocateFindsOnlyAConfiguredLocalTracker(t *testing.T) {
+	main := func(dir string) (string, error) { return dir, nil }
+	notGit := func(string) (string, error) {
+		return "", fmt.Errorf("cannot find the main checkout: %w",
+			&exec.ExitError{Stderr: []byte("fatal: not a git repository (or any of the parent directories): .git")})
+	}
+	gitBroken := func(string) (string, error) {
+		return "", fmt.Errorf("cannot find the main checkout: %w",
+			&exec.ExitError{Stderr: []byte("fatal: detected dubious ownership in repository")})
+	}
+
+	t.Run("no .hew directory is not local", func(t *testing.T) {
+		got, ok, err := locate(main, t.TempDir())
+		if err != nil || ok || got != "" {
+			t.Errorf("locate = %q, %v, %v; want not local", got, ok, err)
+		}
+	})
+	t.Run("a .hew directory without a config is not local", func(t *testing.T) {
+		root := t.TempDir()
+		must(t, os.Mkdir(filepath.Join(root, DirName), 0o755))
+		if _, ok, err := locate(main, root); err != nil || ok {
+			t.Errorf("locate ok = %v, err = %v; want not local", ok, err)
+		}
+	})
+	t.Run("a local config selects the tracker", func(t *testing.T) {
+		root := t.TempDir()
+		must(t, Init(filepath.Join(root, DirName)))
+		got, ok, err := locate(main, root)
+		if err != nil || !ok || got != filepath.Join(root, DirName) {
+			t.Errorf("locate = %q, %v, %v; want the tracker", got, ok, err)
+		}
+	})
+	t.Run("a migrated config is not local", func(t *testing.T) {
+		root := t.TempDir()
+		dir := filepath.Join(root, DirName)
+		must(t, Init(dir))
+		must(t, WriteConfig(dir, Config{Backend: BackendGitHub}))
+		if got, ok, err := locate(main, root); err != nil || ok || got != "" {
+			t.Errorf("locate = %q, %v, %v; want not local", got, ok, err)
+		}
+	})
+	t.Run("an unreadable config is an error, not a silent GitHub fallback", func(t *testing.T) {
+		root := t.TempDir()
+		dir := filepath.Join(root, DirName)
+		must(t, Init(dir))
+		must(t, os.WriteFile(filepath.Join(dir, configFile), []byte("{not json"), 0o644))
+		if _, ok, err := locate(main, root); err == nil || ok {
+			t.Errorf("locate ok = %v, err = %v; want an error", ok, err)
+		}
+	})
+	t.Run("outside a checkout is not local", func(t *testing.T) {
+		if _, ok, err := locate(notGit, t.TempDir()); err != nil || ok {
+			t.Errorf("locate ok = %v, err = %v; want not local", ok, err)
+		}
+	})
+	t.Run("git failing for another reason is an error, not a GitHub fallback", func(t *testing.T) {
+		_, ok, err := locate(gitBroken, t.TempDir())
+		var exit *exec.ExitError
+		if ok || !errors.As(err, &exit) || !strings.Contains(string(exit.Stderr), "dubious ownership") {
+			t.Errorf("locate ok = %v, err = %v; want the git failure surfaced", ok, err)
+		}
+	})
+	t.Run("a .hew that is a file belongs to something else", func(t *testing.T) {
+		root := t.TempDir()
+		must(t, os.WriteFile(filepath.Join(root, DirName), []byte("not a tracker"), 0o644))
+		if got, ok, err := locate(main, root); err != nil || ok || got != "" {
+			t.Errorf("locate = %q, %v, %v; want not local", got, ok, err)
+		}
+	})
+}
+
+func TestMainDirSurfacesGitFailure(t *testing.T) {
+	_, err := mainDir(func(string) (string, error) { return "", errors.New("boom") }, "")
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("err = %v, want the git failure", err)
+	}
+}

@@ -1,6 +1,7 @@
 package conventions
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -278,6 +279,68 @@ func TestClaudeSnippet(t *testing.T) {
 	for _, want := range []string{"GitHub Issues", "`hew` CLI", "hew prime", "hew ready"} {
 		if !strings.Contains(ClaudeSnippet, want) {
 			t.Errorf("snippet missing %q:\n%s", want, ClaudeSnippet)
+		}
+	}
+}
+
+// primerByteBudget is the ~1200-token primer target at a conservative four
+// bytes per token. It is a tripwire for prose creeping in, not a tokenizer.
+const primerByteBudget = 4800
+
+func TestPrimersStayInsideTheTokenBudget(t *testing.T) {
+	for name, primer := range map[string]string{"github": PrimerStatic, "local": PrimerLocal} {
+		if len(primer) > primerByteBudget {
+			t.Errorf("%s primer is %d bytes, over the %d-byte budget", name, len(primer), primerByteBudget)
+		}
+	}
+}
+
+func TestPrimerLocalCompletesWorkByClosing(t *testing.T) {
+	workflow, _, _ := strings.Cut(PrimerLocal, "\n")
+	if !strings.Contains(workflow, "hew close <n> --completed") {
+		t.Errorf("workflow line does not finish with close --completed: %q", workflow)
+	}
+	// There are no pull requests to open, so nothing may send the agent to hew
+	// pr, and the GitHub-only sandbox note has no place here either.
+	for _, banned := range []string{"pr [--for", "hew pr", "Fixes #n", "Sandboxed sessions", "PR exists"} {
+		if strings.Contains(PrimerLocal, banned) {
+			t.Errorf("local primer mentions %q:\n%s", banned, PrimerLocal)
+		}
+	}
+}
+
+// The two primers share their conventions and command pieces, so the local one
+// can differ only where the backend does.
+func TestPrimerLocalKeepsTheSharedConventions(t *testing.T) {
+	for _, want := range []string{"Conventions (enforced", "Dedup before filing", "start refuses claimed issues", "epic create", "apply <plan.jsonl>"} {
+		if !strings.Contains(PrimerLocal, want) {
+			t.Errorf("local primer lost shared content %q", want)
+		}
+	}
+}
+
+func TestClaudeSnippetLocal(t *testing.T) {
+	for _, want := range []string{"locally", ".hew", "`hew` CLI", "hew prime", "hew ready"} {
+		if !strings.Contains(ClaudeSnippetLocal, want) {
+			t.Errorf("local snippet missing %q:\n%s", want, ClaudeSnippetLocal)
+		}
+	}
+	if strings.Contains(ClaudeSnippetLocal, "GitHub Issues") {
+		t.Errorf("local snippet points at GitHub Issues:\n%s", ClaudeSnippetLocal)
+	}
+}
+
+// docs/primer-mock.md shows both primers verbatim; this is the tie that keeps
+// the mock from drifting when either changes.
+func TestPrimerMockEmbedsBothPrimers(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/primer-mock.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock := string(raw)
+	for name, primer := range map[string]string{"PrimerStatic": PrimerStatic, "PrimerLocal": PrimerLocal} {
+		if !strings.Contains(mock, primer) {
+			t.Errorf("docs/primer-mock.md no longer embeds %s verbatim", name)
 		}
 	}
 }

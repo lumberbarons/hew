@@ -1,7 +1,10 @@
 package git
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -62,4 +65,13 @@ func linkedWorktree(r runner, dir string) (string, error) {
 		return "", nil
 	}
 	return filepath.Clean(root), nil
+}
+
+// IsNotRepo reports whether err is git saying the directory is not inside a
+// repository, as opposed to git being missing or failing for another reason.
+// Callers that treat "no checkout" as an ordinary answer use it to avoid also
+// swallowing the failures that would make the answer wrong.
+func IsNotRepo(err error) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && bytes.Contains(exit.Stderr, []byte("not a git repository"))
 }
