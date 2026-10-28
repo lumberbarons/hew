@@ -775,3 +775,43 @@ func TestMigrationEngineAssignsNamedLoginsWithoutLookingUpTheViewer(t *testing.T
 		t.Errorf("Viewer called %d times, want once for the one item that asked", n)
 	}
 }
+
+func TestMigrationEngineRejectsDuplicateKeysBeforeWriting(t *testing.T) {
+	f, app, _, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "First"},
+		migrationItem{Key: "a", Title: "Second"},
+	)
+	_, err := app.runMigration(ctx, eng, state)
+	if err == nil || !strings.Contains(err.Error(), "more than once") {
+		t.Fatalf("err = %v, want a duplicate-key rejection", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("wrote before rejecting: %v", f.calls)
+	}
+}
+
+// A resume may find an edge already on GitHub even though this run's attempt
+// to wire it failed (a duplicate is answered with an error), so a failed edge
+// must still count toward the cycle check.
+func TestMigrationEngineChecksCyclesThroughEdgesThatFailedToWire(t *testing.T) {
+	f, app, _, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "A", BlockedBy: []string{"b"}},
+		migrationItem{Key: "b", Title: "B", BlockedBy: []string{"c"}},
+		migrationItem{Key: "c", Title: "C", BlockedBy: []string{"a"}},
+	)
+	f.failOn["AddBlockedBy"] = errors.New("already exists")
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, c := state.Mapping["a"], state.Mapping["c"]
+	var dropped bool
+	for _, w := range res.Warnings {
+		if strings.Contains(w, fmt.Sprintf("edge #%d→#%d dropped", c, a)) {
+			dropped = true
+		}
+	}
+	if !dropped {
+		t.Errorf("c→a was not dropped as a cycle through the failed edges: %q", res.Warnings)
+	}
+}

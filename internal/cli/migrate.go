@@ -280,7 +280,6 @@ func beadItems(selected []beads.Bead) []migrationItem {
 		}
 		if b.Closed() {
 			item.Closed = true
-			item.CloseReason = gh.CloseCompleted
 			if b.CloseReason != "" {
 				item.Comments = []string{b.CloseReason}
 			}

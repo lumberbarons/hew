@@ -248,6 +248,13 @@ func (a *App) runMigration(ctx context.Context, eng migrationEngine, state *batc
 			return migrationResult{}, fmt.Errorf("%s %s has comments but is not closed; comments are only posted when an item is closed", eng.ItemNoun, it.Key)
 		}
 	}
+	seen := make(map[string]bool, len(eng.Items))
+	for _, it := range eng.Items {
+		if seen[it.Key] {
+			return migrationResult{}, fmt.Errorf("%s %s appears more than once; keys identify items in the checkpoint and must be unique", eng.ItemNoun, it.Key)
+		}
+		seen[it.Key] = true
+	}
 	var res migrationResult
 	created, err := a.migrationCreate(ctx, eng, state)
 	res.Created = created
@@ -368,7 +375,8 @@ func (a *App) migrationWire(ctx context.Context, eng migrationEngine, mapping ma
 }
 
 // migrationClose closes the migrated items that are marked closed, posting
-// their comments first. Tolerant: re-closing on resume just warns.
+// their comments first. Tolerant: an issue already closed (a resume of a
+// finished run) is skipped silently, and a failed call warns and moves on.
 //
 // The provenance check repeats here rather than trusting the up-front pass:
 // commenting and closing is the most destructive thing a migration does, and
