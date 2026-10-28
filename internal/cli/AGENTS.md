@@ -22,6 +22,7 @@ Checkpoint state is trusted local scratch, never a portable input. A state file 
 | File | What | When to read |
 |---|---|---|
 | `fake_test.go` | `fakeClient`, a stateful in-memory `gh.Client` where mutations really mutate, so guarded flows (claim, re-read after claim) behave like the real API | Writing a test that needs a new client behavior |
+| `conformance_test.go` | Runs the shared `internal/conformance` suite against `fakeClient`, so the fake and the local store cannot disagree about what a backend does | Changing `fakeClient` behavior |
 | `read_test.go` | Covers `read.go` except search: filtering, sorting, empty states, and the cycle and truncated-connection warnings | Changing a read command |
 | `search_test.go` | Covers `search` in `read.go`: title and body matching, closed issues, best-match order | Changing search behavior |
 | `write_test.go` | Covers `write.go`: label swaps, the claim guard, cycle rejection, body composition | Changing a mutation |
