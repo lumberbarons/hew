@@ -36,15 +36,15 @@ The layering exists so everything with behavior is testable without hitting GitH
 | Directory | What | When to read |
 |---|---|---|
 | `cmd/hew/` | main + urfave/cli v3 flag wiring only — no behavior, excluded from coverage | Adding a command or flag |
-| `internal/cli/` | The commands, written against the `gh.Client` interface — see [internal/cli/AGENTS.md](internal/cli/AGENTS.md) | Changing command behavior or guarded flows |
-| `internal/gh/` | Thin API layer: the `Client` interface and its go-gh-backed implementation; auth reuses the `gh` CLI's stored credentials (no auth flow of our own), repo detection comes from the git remote | Changing queries, auth, or API calls |
+| `internal/cli/` | The commands, written against the `gh.IssueStore` interface, with `gh.PullRequests` for `pr` alone — see [internal/cli/AGENTS.md](internal/cli/AGENTS.md) | Changing command behavior or guarded flows |
+| `internal/gh/` | Thin API layer: the `IssueStore` and `PullRequests` interfaces (`Client` is their union) and the go-gh-backed implementation of both; auth reuses the `gh` CLI's stored credentials (no auth flow of our own), repo detection comes from the git remote | Changing queries, auth, or API calls |
 | `internal/model/` | Pure domain logic: readiness, label normalization, cycle detection — no I/O, plain unit tests | Changing readiness or label semantics |
 | `internal/render/` | Text and JSON renderers, golden-file tested (`testdata/*.golden`) | Changing output format |
 | `internal/conventions/` | The opinions: label set, issue and PR body templates, primer text | Changing labels, a template, or the primer |
 | `internal/git/` | Local branch state for `pr` (current branch, the upstream branch name a PR is opened from, has-upstream) and the main checkout's path from any linked worktree (where the local tracker lives); shells out to git behind an injectable runner | Changing what `pr` knows about the checkout |
 | `internal/beads/` | Parses a beads (bd) `issues.jsonl` snapshot for `migrate` — pure parsing, no runtime dependency on bd | Changing the beads migration |
 | `internal/plan/` | The `apply` plan-file schema: JSONL parsing, local-`id` resolution, dangling-reference and cycle rejection — all validation happens before anything is written | Changing the plan schema or `apply` validation |
-| `internal/local/` | The JSONL-backed `gh.IssueStore` for local-only repos: one `issues.jsonl` in a self-ignoring `.hew/` at the main checkout, every mutation under an exclusive lock and an atomic rename; the default viewer is per worktree and the store's atomic claim backs the guard | Changing the local file format, locking, claim identity, or local-only behavior |
+| `internal/local/` | The JSONL-backed `gh.IssueStore` for local-only repos: one `issues.jsonl` in a self-ignoring `.hew/` at the main checkout, every mutation under an exclusive lock and an atomic rename; the default viewer is per worktree and the store's atomic claim backs the guard; `.hew/` is untracked, so `git clean -fdx` at the main checkout deletes the only copy of the tracker | Changing the local file format, locking, claim identity, or local-only behavior |
 | `internal/conformance/` | The behavior every `gh.IssueStore` shares, run against `local` and against the `fakeClient` the command tests use — a test helper package, no production code depends on it | Changing what a backend must do, or a fake that drifts from the real client |
 | `internal/editor/` | Launches `$EDITOR` seeded with the body template, for `--edit` on `create` and `epic create` | Changing the `--edit` flow |
 | `docs/` | Primer mock: `conventions.PrimerStatic` verbatim plus invented state sections — keep it in sync when the primer changes | Revising primer output |

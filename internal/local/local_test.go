@@ -435,7 +435,7 @@ func TestClaimIssueJudgesTheInProgressLabelLikeTheModel(t *testing.T) {
 
 func TestARefusedChangeLeavesTheFileUntouched(t *testing.T) {
 	s := newStore(t)
-	a, b := mustCreate(t, s, "a", ""), mustCreate(t, s, "b", "")
+	a := mustCreate(t, s, "a", "")
 	before := readFile(t, s.path())
 
 	if err := s.AddBlockedBy(ctx, a, a); err == nil {
@@ -447,7 +447,6 @@ func TestARefusedChangeLeavesTheFileUntouched(t *testing.T) {
 	if err := s.AddSubIssue(ctx, a, a, false); err == nil {
 		t.Fatal("an issue became its own sub-issue")
 	}
-	_ = b
 	if after := readFile(t, s.path()); after != before {
 		t.Errorf("file changed across refused mutations:\n%s\nvs\n%s", before, after)
 	}
@@ -618,6 +617,19 @@ func TestReadingRejectsFilesThatAreNotATracker(t *testing.T) {
 		must(t, os.WriteFile(path, []byte(content), 0o644))
 		if _, err := readData(path); err == nil {
 			t.Errorf("%s: no error", name)
+		}
+	}
+}
+
+func TestReadingRejectsAnUnknownStateNamingIt(t *testing.T) {
+	meta := `{"_type":"meta","version":1}` + "\n"
+	for _, state := range []string{"open", "closed", "DONE", ""} {
+		path := filepath.Join(t.TempDir(), issuesFile)
+		rec := fmt.Sprintf(`{"number":1,"title":"t","state":%q,"created_at":"2026-07-01T00:00:00Z"}`+"\n", state)
+		must(t, os.WriteFile(path, []byte(meta+rec), 0o644))
+		_, err := readData(path)
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%q", state)) {
+			t.Errorf("state %q: err = %v, want one naming it", state, err)
 		}
 	}
 }

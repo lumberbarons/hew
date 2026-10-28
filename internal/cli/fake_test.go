@@ -12,8 +12,9 @@ import (
 	"github.com/lumberbarons/hew/internal/model"
 )
 
-// fakeClient is a stateful in-memory gh.Client: mutations really mutate,
-// so guarded flows (claim, re-read) behave like the API.
+// fakeClient is a stateful in-memory gh.IssueStore and gh.PullRequests:
+// mutations really mutate, so guarded flows (claim, re-read) behave like
+// the API.
 type fakeClient struct {
 	viewer   string
 	issues   []*model.Issue
