@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/gh"
 )
 
 // migrationFixture covers the shapes seen in real beads databases: an
@@ -558,7 +561,7 @@ func TestMigrateBeadsRejectsStateMappingABeadToAnotherBeadsIssue(t *testing.T) {
 	assertOnlyReads(t, f)
 }
 
-// migrateClose is the last gate before the two destructive calls. Reaching it
+// migrationClose is the last gate before the two destructive calls. Reaching it
 // needs an issue that verifies at load and loses its marker before the close
 // pass — what a concurrent body edit looks like.
 func TestMigrateBeadsDoesNotCloseAnIssueThatLostItsProvenance(t *testing.T) {
@@ -624,5 +627,191 @@ func TestMigrateBeadsDefaultStatePath(t *testing.T) {
 	want := filepath.Join(filepath.Dir(opts.File), "github-migration.json")
 	if _, err := os.Stat(want); err != nil {
 		t.Errorf("no state file at the default path %s: %v", want, err)
+	}
+}
+
+// engineSetup runs the engine directly with a fresh checkpoint, so the tests
+// below pin what it does for any source rather than what beads happens to send.
+func engineSetup(t *testing.T, items ...migrationItem) (*fakeClient, *App, *bytes.Buffer, migrationEngine, *batchState) {
+	t.Helper()
+	f := newFake()
+	app, _, errOut := newApp(f)
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	state, err := loadBatchState(statePath, "o/r", "sha256:test", "snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := migrationEngine{
+		Kind: conventions.ProvenanceMigrate, ItemNoun: "item", SourceNoun: "source",
+		Items: items, StatePath: statePath,
+	}
+	return f, app, errOut, eng, state
+}
+
+func TestMigrationEngineClosesWithTheItemsReasonAndComments(t *testing.T) {
+	f, app, _, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "Dropped", Closed: true, CloseReason: gh.CloseNotPlanned, Comments: []string{"first", "second"}},
+		migrationItem{Key: "b", Title: "Done", Closed: true},
+	)
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Created != 2 || res.Closed != 2 {
+		t.Fatalf("result = %+v, want 2 created and 2 closed", res)
+	}
+	a, b := state.Mapping["a"], state.Mapping["b"]
+	if got := f.byNumber(a).StateReason; got != string(gh.CloseNotPlanned) {
+		t.Errorf("a closed as %q, want the item's NOT_PLANNED", got)
+	}
+	if got := f.byNumber(b).StateReason; got != string(gh.CloseCompleted) {
+		t.Errorf("b closed as %q, want COMPLETED when the item names no reason", got)
+	}
+	if got := f.comments[a]; !slices.Equal(got, []string{"first", "second"}) {
+		t.Errorf("a comments = %q, want both in order", got)
+	}
+	if got := f.comments[b]; len(got) != 0 {
+		t.Errorf("b got comments %q, but its item carried none", got)
+	}
+}
+
+func TestMigrationEngineRejectsCommentsOnAnOpenItemBeforeWriting(t *testing.T) {
+	f, app, _, eng, state := engineSetup(t,
+		migrationItem{Key: "ok", Title: "Fine"},
+		migrationItem{Key: "bad", Title: "Open with comments", Comments: []string{"would be lost"}},
+	)
+	_, err := app.runMigration(ctx, eng, state)
+	if err == nil || !strings.Contains(err.Error(), "bad") {
+		t.Fatalf("err = %v, want a rejection naming the item", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("wrote before rejecting: %v", f.calls)
+	}
+}
+
+func TestMigrationEngineDropsABlockedByEdgeThatClosesACycle(t *testing.T) {
+	// a→b→c→a: GitHub itself accepts a three-issue cycle, so the engine has
+	// to be the one to refuse it. The first two edges are fine; the third is
+	// the one that closes the loop.
+	f, app, errOut, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "A", BlockedBy: []string{"b"}},
+		migrationItem{Key: "b", Title: "B", BlockedBy: []string{"c"}},
+		migrationItem{Key: "c", Title: "C", BlockedBy: []string{"a"}},
+	)
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b, c := state.Mapping["a"], state.Mapping["b"], state.Mapping["c"]
+	if res.Wired != 2 {
+		t.Errorf("wired %d edges, want 2", res.Wired)
+	}
+	if !slices.Contains(f.calls, fmt.Sprintf("AddBlockedBy %d %d", a, b)) || !slices.Contains(f.calls, fmt.Sprintf("AddBlockedBy %d %d", b, c)) {
+		t.Errorf("the two safe edges were not wired: %v", f.calls)
+	}
+	if slices.Contains(f.calls, fmt.Sprintf("AddBlockedBy %d %d", c, a)) {
+		t.Error("wired the edge that closes the cycle")
+	}
+	want := fmt.Sprintf("blocked-by edge #%d→#%d dropped: would create dependency cycle #%d → #%d → #%d → #%d", c, a, c, a, b, c)
+	if len(res.Warnings) != 1 || res.Warnings[0] != want {
+		t.Errorf("warnings = %q, want [%q]", res.Warnings, want)
+	}
+	if !strings.Contains(errOut.String(), "dependency cycle") {
+		t.Errorf("cycle not surfaced on stderr: %q", errOut.String())
+	}
+}
+
+func TestMigrationEngineDropsASelfBlock(t *testing.T) {
+	f, app, _, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "A", BlockedBy: []string{"a"}},
+	)
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Wired != 0 || len(res.Warnings) != 1 {
+		t.Errorf("result = %+v, want the self-block dropped with one warning", res)
+	}
+	for _, call := range f.calls {
+		if strings.HasPrefix(call, "AddBlockedBy") {
+			t.Errorf("attempted a self-block: %s", call)
+		}
+	}
+}
+
+func TestMigrationEngineWiresAnAcyclicDiamond(t *testing.T) {
+	// d is blocked by b and c, both blocked by a: two paths to the same
+	// ancestor are not a cycle.
+	_, app, _, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "A"},
+		migrationItem{Key: "b", Title: "B", BlockedBy: []string{"a"}},
+		migrationItem{Key: "c", Title: "C", BlockedBy: []string{"a"}},
+		migrationItem{Key: "d", Title: "D", BlockedBy: []string{"b", "c"}},
+	)
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Wired != 4 || len(res.Warnings) != 0 {
+		t.Errorf("result = %+v, want 4 edges and no warnings", res)
+	}
+}
+
+func TestMigrationEngineAssignsNamedLoginsWithoutLookingUpTheViewer(t *testing.T) {
+	f, app, _, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "A", Assignees: []string{"octocat"}},
+		migrationItem{Key: "b", Title: "B", Assignees: []string{assigneeViewer}},
+	)
+	if _, err := app.runMigration(ctx, eng, state); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.byNumber(state.Mapping["a"]).Assignees; !slices.Equal(got, []string{"octocat"}) {
+		t.Errorf("a assignees = %v, want [octocat]", got)
+	}
+	if got := f.byNumber(state.Mapping["b"]).Assignees; !slices.Equal(got, []string{f.viewer}) {
+		t.Errorf("b assignees = %v, want the viewer %q", got, f.viewer)
+	}
+	if n := f.callCounts["Viewer"]; n != 1 {
+		t.Errorf("Viewer called %d times, want once for the one item that asked", n)
+	}
+}
+
+func TestMigrationEngineRejectsDuplicateKeysBeforeWriting(t *testing.T) {
+	f, app, _, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "First"},
+		migrationItem{Key: "a", Title: "Second"},
+	)
+	_, err := app.runMigration(ctx, eng, state)
+	if err == nil || !strings.Contains(err.Error(), "more than once") {
+		t.Fatalf("err = %v, want a duplicate-key rejection", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("wrote before rejecting: %v", f.calls)
+	}
+}
+
+// A resume may find an edge already on GitHub even though this run's attempt
+// to wire it failed (a duplicate is answered with an error), so a failed edge
+// must still count toward the cycle check.
+func TestMigrationEngineChecksCyclesThroughEdgesThatFailedToWire(t *testing.T) {
+	f, app, _, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "A", BlockedBy: []string{"b"}},
+		migrationItem{Key: "b", Title: "B", BlockedBy: []string{"c"}},
+		migrationItem{Key: "c", Title: "C", BlockedBy: []string{"a"}},
+	)
+	f.failOn["AddBlockedBy"] = errors.New("already exists")
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, c := state.Mapping["a"], state.Mapping["c"]
+	var dropped bool
+	for _, w := range res.Warnings {
+		if strings.Contains(w, fmt.Sprintf("edge #%d→#%d dropped", c, a)) {
+			dropped = true
+		}
+	}
+	if !dropped {
+		t.Errorf("c→a was not dropped as a cycle through the failed edges: %q", res.Warnings)
 	}
 }
