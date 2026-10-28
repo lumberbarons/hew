@@ -80,8 +80,17 @@ type PRContext struct {
 	OpenCount int
 }
 
-// Client is the API surface the commands use; the tests fake it.
+// Client is the full GitHub API surface; the tests fake it. It is the union
+// of the two halves below so a backend with no pull requests (the local
+// store) can implement IssueStore alone.
 type Client interface {
+	IssueStore
+	PullRequests
+}
+
+// IssueStore is the issue-tracking half of the API: everything every command
+// but `pr` needs.
+type IssueStore interface {
 	// Viewer returns the authenticated user's login.
 	Viewer(ctx context.Context) (string, error)
 	// ListIssues fetches all issues in the given states with body, labels,
@@ -118,6 +127,10 @@ type Client interface {
 	RemoveSubIssue(ctx context.Context, parentNumber, childNumber int) error
 	ListLabels(ctx context.Context) ([]Label, error)
 	CreateLabel(ctx context.Context, label Label) error
+}
+
+// PullRequests is the pull-request half of the API, used only by `pr`.
+type PullRequests interface {
 	// PullRequestContext fetches the default branch and any open pull
 	// request whose head is the given branch.
 	PullRequestContext(ctx context.Context, head string) (PRContext, error)

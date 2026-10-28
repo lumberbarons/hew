@@ -463,6 +463,7 @@ func newApp(f *fakeClient) (*App, *bytes.Buffer, *bytes.Buffer) {
 	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
 	return &App{
 		Client: f,
+		PRs:    f,
 		Repo:   gh.Repo{Owner: "o", Name: "r"},
 		Out:    out,
 		ErrOut: errOut,

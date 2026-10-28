@@ -50,7 +50,9 @@ func genericErr(format string, args ...any) *ExitError {
 
 // App holds the dependencies every command needs.
 type App struct {
-	Client gh.Client
+	Client gh.IssueStore
+	// PRs is nil on a backend with no pull requests; `pr` refuses there.
+	PRs    gh.PullRequests
 	Repo   gh.Repo
 	Out    io.Writer
 	ErrOut io.Writer
