@@ -103,7 +103,7 @@ func (s *Store) CreateIssue(ctx context.Context, title, body string, labels []st
 		}
 		rec := &issueRec{Number: next, Title: title, Body: body, State: string(gh.StateOpen), CreatedAt: s.now()}
 		for _, l := range labels {
-			rec.Labels = appendUnique(rec.Labels, l)
+			rec.Labels = appendUniqueFold(rec.Labels, d.labelName(l, rec.Labels))
 		}
 		d.issues = append(d.issues, rec)
 		var err error
@@ -122,18 +122,42 @@ func (s *Store) EditBody(ctx context.Context, number int, body string) error {
 }
 
 func (s *Store) AddLabels(ctx context.Context, number int, labels []string) error {
-	return s.edit(number, func(_ *data, r *issueRec) error {
+	return s.edit(number, func(d *data, r *issueRec) error {
 		for _, l := range labels {
-			r.Labels = appendUnique(r.Labels, l)
+			r.Labels = appendUniqueFold(r.Labels, d.labelName(l, r.Labels))
 		}
 		return nil
 	})
 }
 
 // RemoveLabel treats an absent label as success, as the GitHub client does.
+// Label names are case-insensitive, so the removal matches the same way.
 func (s *Store) RemoveLabel(ctx context.Context, number int, label string) error {
 	return s.edit(number, func(_ *data, r *issueRec) error {
-		r.Labels = slices.DeleteFunc(r.Labels, func(l string) bool { return l == label })
+		r.Labels = slices.DeleteFunc(r.Labels, func(l string) bool { return strings.EqualFold(l, label) })
+		return nil
+	})
+}
+
+// ClaimIssue is the atomic claim: under the store's lock it checks the issue
+// is unclaimed and writes the assignee and the in-progress label together, so
+// two concurrent starts cannot both succeed. It is the Claimer capability
+// Start uses instead of check-then-act.
+func (s *Store) ClaimIssue(ctx context.Context, number int, login string, force bool) error {
+	return s.edit(number, func(d *data, r *issueRec) error {
+		if r.State != string(gh.StateOpen) {
+			return fmt.Errorf("#%d is closed", number)
+		}
+		claimed := len(r.Assignees) > 0 ||
+			slices.ContainsFunc(r.Labels, func(l string) bool { return strings.EqualFold(l, model.InProgressLabel) })
+		if claimed && !force {
+			return fmt.Errorf("%w: #%d", gh.ErrClaimConflict, number)
+		}
+		if force {
+			r.Assignees = nil
+		}
+		r.Assignees = appendUnique(r.Assignees, login)
+		r.Labels = appendUniqueFold(r.Labels, d.labelName(model.InProgressLabel, r.Labels))
 		return nil
 	})
 }
@@ -259,7 +283,7 @@ func (s *Store) ListLabels(ctx context.Context) ([]gh.Label, error) {
 	out := slices.Clone(d.labels)
 	for _, rec := range d.issues {
 		for _, name := range rec.Labels {
-			if !slices.ContainsFunc(out, func(l gh.Label) bool { return l.Name == name }) {
+			if !slices.ContainsFunc(out, func(l gh.Label) bool { return strings.EqualFold(l.Name, name) }) {
 				out = append(out, gh.Label{Name: name})
 			}
 		}
@@ -268,10 +292,11 @@ func (s *Store) ListLabels(ctx context.Context) ([]gh.Label, error) {
 }
 
 // CreateLabel records a label's cosmetics. Creating one that exists is a
-// no-op rather than an error, so bootstrapping is safe to repeat.
+// no-op rather than an error, so bootstrapping is safe to repeat; label names
+// are case-insensitive, so an existing spelling wins.
 func (s *Store) CreateLabel(ctx context.Context, label gh.Label) error {
 	return s.update(func(d *data) error {
-		if !slices.ContainsFunc(d.labels, func(l gh.Label) bool { return l.Name == label.Name }) {
+		if !slices.ContainsFunc(d.labels, func(l gh.Label) bool { return strings.EqualFold(l.Name, label.Name) }) {
 			d.labels = append(d.labels, label)
 		}
 		return nil
@@ -295,4 +320,37 @@ func appendUnique[T comparable](list []T, v T) []T {
 		return list
 	}
 	return append(list, v)
+}
+
+// appendUniqueFold is appendUnique for names GitHub treats case-insensitively
+// (labels): the spelling already present wins.
+func appendUniqueFold(list []string, v string) []string {
+	if slices.ContainsFunc(list, func(l string) bool { return strings.EqualFold(l, v) }) {
+		return list
+	}
+	return append(list, v)
+}
+
+// labelName is the spelling a label is stored under. GitHub labels are
+// repo-scoped and case-insensitive, so a label already created or in use
+// anywhere decides the casing; a name nobody has used keeps its spelling.
+func (d *data) labelName(name string, onIssue []string) string {
+	for _, l := range d.labels {
+		if strings.EqualFold(l.Name, name) {
+			return l.Name
+		}
+	}
+	for _, l := range onIssue {
+		if strings.EqualFold(l, name) {
+			return l
+		}
+	}
+	for _, rec := range d.issues {
+		for _, l := range rec.Labels {
+			if strings.EqualFold(l, name) {
+				return l
+			}
+		}
+	}
+	return name
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -121,30 +122,81 @@ func TestReadConfigRejectsBadFiles(t *testing.T) {
 }
 
 func TestOpenDefaultsTheViewer(t *testing.T) {
-	t.Setenv("HEW_USER", "")
-	t.Setenv("USER", "login")
+	t.Setenv("HEW_USER", "agent")
 	dir := filepath.Join(t.TempDir(), DirName)
 	must(t, Init(dir))
 	s, err := Open(dir, "")
 	must(t, err)
-	if got, _ := s.Viewer(ctx); got != "login" {
-		t.Errorf("viewer = %q, want the OS login", got)
+	if got, _ := s.Viewer(ctx); got != "agent" {
+		t.Errorf("viewer = %q, want the explicit agent identity", got)
 	}
 }
 
-func TestDefaultViewerPrefersHewUserThenLoginThenAFallback(t *testing.T) {
+func TestViewerForFallsBackToALoginAndQualifiesAWorktree(t *testing.T) {
+	env := func(vars map[string]string) func(string) string {
+		return func(k string) string { return vars[k] }
+	}
+	for _, tc := range []struct {
+		name     string
+		env      map[string]string
+		worktree string
+		want     string
+	}{
+		{"main checkout", map[string]string{"USER": "jim"}, "", "jim"},
+		{"linked worktree", map[string]string{"USER": "jim"}, "agent-two", "jim-agent-two"},
+		{"no login", nil, "", "local"},
+		{"no login in a worktree", nil, "agent-two", "local-agent-two"},
+		{"explicit identity wins", map[string]string{"HEW_USER": "agent", "USER": "jim"}, "agent-two", "agent"},
+		{"separators cannot split a handle", map[string]string{"USER": "jim"}, "feature/one two", "jim-feature-one-two"},
+		{"an unusable name adds nothing", map[string]string{"USER": "jim"}, "///", "jim"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := viewerFor(env(tc.env), tc.worktree); got != tc.want {
+				t.Errorf("= %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDefaultViewerLetsAnAgentOverrideItsIdentity(t *testing.T) {
 	t.Setenv("HEW_USER", "agent")
-	t.Setenv("USER", "login")
 	if got := DefaultViewer(); got != "agent" {
 		t.Errorf("= %q, want HEW_USER first", got)
 	}
-	t.Setenv("HEW_USER", "")
-	if got := DefaultViewer(); got != "login" {
-		t.Errorf("= %q, want USER", got)
+}
+
+// Two agents under one OS account must not share a viewer: exit 5 means "this
+// claim is yours", which is only true inside one worktree. The main checkout
+// keeps the bare login; a linked worktree qualifies it with its name.
+func TestDefaultViewerTellsWorktreesApart(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
 	}
-	t.Setenv("USER", "")
-	if got := DefaultViewer(); got != "local" {
-		t.Errorf("= %q, want the fallback", got)
+	main, err := filepath.EvalSymlinks(t.TempDir())
+	must(t, err)
+	gitIn(t, main, "init", "--initial-branch=main")
+	gitIn(t, main, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "--allow-empty", "-m", "seed")
+	worktree := filepath.Join(t.TempDir(), "agent-two")
+	gitIn(t, main, "worktree", "add", "-b", "feat/two", worktree)
+
+	t.Setenv("HEW_USER", "")
+	t.Setenv("USER", "jim")
+	t.Chdir(main)
+	if got := DefaultViewer(); got != "jim" {
+		t.Errorf("main checkout viewer = %q, want the bare login", got)
+	}
+	t.Chdir(worktree)
+	if got := DefaultViewer(); got != "jim-agent-two" {
+		t.Errorf("worktree viewer = %q, want the login qualified by the worktree", got)
+	}
+}
+
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
 }
 
@@ -228,6 +280,52 @@ func TestParallelWritersLoseNothing(t *testing.T) {
 			t.Errorf("number %d was handed out twice", i.Number)
 		}
 		seen[i.Number] = true
+	}
+}
+
+// The point of the atomic claim: separate Store values over one directory
+// stand in for separate agents in separate worktrees, and a simultaneous start
+// must produce exactly one winner rather than two agents both believing they
+// claimed the issue.
+func TestConcurrentClaimsHaveExactlyOneWinner(t *testing.T) {
+	s := newStore(t)
+	n := mustCreate(t, s, "contested", "", "P2", "bug")
+
+	const agents = 8
+	type result struct {
+		viewer string
+		err    error
+	}
+	start := make(chan struct{})
+	results := make(chan result, agents)
+	for i := range agents {
+		viewer := fmt.Sprintf("agent-%d", i)
+		agent, err := Open(s.dir, viewer)
+		must(t, err)
+		go func() {
+			<-start
+			results <- result{viewer, agent.ClaimIssue(ctx, n, viewer, false)}
+		}()
+	}
+	close(start)
+
+	var winners []string
+	for range agents {
+		r := <-results
+		switch {
+		case r.err == nil:
+			winners = append(winners, r.viewer)
+		case !errors.Is(r.err, gh.ErrClaimConflict):
+			t.Errorf("%s: err = %v, want nil or ErrClaimConflict", r.viewer, r.err)
+		}
+	}
+	if len(winners) != 1 {
+		t.Fatalf("%d winners, want exactly one: %v", len(winners), winners)
+	}
+	got, err := s.GetIssue(ctx, n)
+	must(t, err)
+	if !slices.Equal(got.Assignees, winners) || !got.InProgress() {
+		t.Errorf("claim = assignees %v labels %v, want %v and in-progress", got.Assignees, got.Labels, winners)
 	}
 }
 

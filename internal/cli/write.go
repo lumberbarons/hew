@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -278,24 +279,43 @@ func (a *App) Start(ctx context.Context, number int, opts StartOpts) error {
 	if err != nil {
 		return err
 	}
-	if err := a.swapPriority(ctx, issue, priority); err != nil {
-		return err
-	}
-	if force && len(issue.Assignees) > 0 {
-		if err := a.Client.RemoveAssignees(ctx, number, issue.Assignees); err != nil {
+	// The local store can make the claim conditional: one locked write checks
+	// and claims, so simultaneous starts have exactly one winner. Claim
+	// before the priority swap so a loser has not already changed the issue.
+	// GitHub has no conditional writes, so it falls through to the
+	// check-then-act path and the re-read after claiming.
+	if claimer, ok := a.Client.(gh.Claimer); ok {
+		if err := claimer.ClaimIssue(ctx, number, viewer, force); err != nil {
+			if errors.Is(err, gh.ErrClaimConflict) {
+				current, readErr := a.Client.GetIssue(ctx, number)
+				if readErr != nil {
+					return readErr
+				}
+				return a.claimRefusal(ctx, current)
+			}
+			return err
+		}
+		if err := a.swapPriority(ctx, issue, priority); err != nil {
+			return err
+		}
+	} else {
+		if err := a.swapPriority(ctx, issue, priority); err != nil {
+			return err
+		}
+		if force && len(issue.Assignees) > 0 {
+			if err := a.Client.RemoveAssignees(ctx, number, issue.Assignees); err != nil {
+				return err
+			}
+		}
+		if !issue.InProgress() {
+			if err := a.Client.AddLabels(ctx, number, []string{model.InProgressLabel}); err != nil {
+				return err
+			}
+		}
+		if err := a.Client.AddAssignee(ctx, number, viewer); err != nil {
 			return err
 		}
 	}
-	if !issue.InProgress() {
-		if err := a.Client.AddLabels(ctx, number, []string{model.InProgressLabel}); err != nil {
-			return err
-		}
-	}
-	if err := a.Client.AddAssignee(ctx, number, viewer); err != nil {
-		return err
-	}
-	// GitHub has no conditional writes, so the guard is check-then-act:
-	// re-read and make sure we're the only claimant.
 	after, err := a.Client.GetIssue(ctx, number)
 	if err != nil {
 		return err

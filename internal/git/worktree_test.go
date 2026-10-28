@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -53,6 +54,38 @@ func TestMainCheckoutReportsGitFailureAndOddOutput(t *testing.T) {
 	}
 }
 
+func TestWorktreeNameIsEmptyInTheMainCheckoutAndNamedInALinkedOne(t *testing.T) {
+	r := func(_ string, args ...string) (string, error) {
+		switch {
+		case slices.Contains(args, "--show-toplevel"):
+			if args[0] == "-C" && args[1] == "/work/wt" {
+				return "/work/wt", nil
+			}
+			return "/work/main", nil
+		case slices.Contains(args, "list"):
+			return "worktree /work/main\nHEAD abc\n", nil
+		}
+		return "", errors.New("unexpected command")
+	}
+	if name, err := worktreeName(r, ""); err != nil || name != "" {
+		t.Errorf("main checkout = %q, %v; want no name", name, err)
+	}
+	if name, err := worktreeName(r, "/work/wt"); err != nil || name != "wt" {
+		t.Errorf("linked worktree = %q, %v; want wt", name, err)
+	}
+}
+
+func TestWorktreeNameReportsGitFailure(t *testing.T) {
+	failing := func(string, ...string) (string, error) { return "", errors.New("not a git repository") }
+	if _, err := worktreeName(failing, ""); err == nil || !strings.Contains(err.Error(), "not a git repository") {
+		t.Errorf("err = %v, want the git failure wrapped", err)
+	}
+	empty := func(string, ...string) (string, error) { return "", nil }
+	if _, err := worktreeName(empty, ""); err == nil {
+		t.Error("expected an error when git returns no path")
+	}
+}
+
 // The reason this exists: from a linked worktree, the answer must be the
 // main checkout, not the worktree. Real git, because a fake runner accepts any
 // argument string.
@@ -85,6 +118,13 @@ func TestMainCheckoutFromALinkedWorktreeFindsTheMainCheckout(t *testing.T) {
 		}
 		if got != main {
 			t.Errorf("%s: MainCheckout = %q, want %q", name, got, main)
+		}
+		wantName := ""
+		if name == "linked" {
+			wantName = filepath.Base(wt)
+		}
+		if got, err := WorktreeName(dir); err != nil || got != wantName {
+			t.Errorf("%s: WorktreeName = %q, %v; want %q", name, got, err, wantName)
 		}
 	}
 }

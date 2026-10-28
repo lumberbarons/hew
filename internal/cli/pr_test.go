@@ -1876,20 +1876,36 @@ func TestPRBodyFileSectionWarnings(t *testing.T) {
 }
 
 // A backend with no pull requests (the local store) leaves PRs nil; pr must
-// refuse before it reads a single issue rather than nil-dereference.
+// refuse before it reads a single issue rather than nil-dereference. Both
+// entry points refuse, and a usage error stays a usage error: exit 2 is the
+// actionable signal, while "no GitHub backend" would misdescribe a bad flag.
 func TestPRRefusesWithoutAPullRequestBackend(t *testing.T) {
-	f := newFake(claimed(30, "PR creation command", "P2", "enhancement"))
-	app, _, _ := newApp(f)
-	app.PRs = nil
-	onBranch(app, "feat/pr-command")
+	cases := []struct {
+		name string
+		opts PROpts
+		code int
+		want string
+	}{
+		{"create", PROpts{}, ExitGeneric, "GitHub backend"},
+		{"amend", PROpts{Amend: true}, ExitGeneric, "GitHub backend"},
+		{"usage error wins over the backend", PROpts{Amend: true, Ready: true}, ExitUsage, "--amend cannot be combined"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake(claimed(30, "PR creation command", "P2", "enhancement"))
+			app, _, _ := newApp(f)
+			app.PRs = nil
+			onBranch(app, "feat/pr-command")
 
-	err := app.PR(context.Background(), PROpts{})
-	var exit *ExitError
-	if !errors.As(err, &exit) || exit.Code != ExitGeneric {
-		t.Fatalf("err = %v, want a generic ExitError", err)
+			err := app.PR(context.Background(), tc.opts)
+			var exit *ExitError
+			if !errors.As(err, &exit) || exit.Code != tc.code {
+				t.Fatalf("err = %v, want an ExitError with code %d", err, tc.code)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("message = %q, want it to contain %q", err, tc.want)
+			}
+			assertOnlyReads(t, f)
+		})
 	}
-	if !strings.Contains(err.Error(), "GitHub backend") {
-		t.Errorf("message does not name the backend: %v", err)
-	}
-	assertOnlyReads(t, f)
 }

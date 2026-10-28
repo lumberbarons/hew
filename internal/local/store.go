@@ -15,10 +15,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/git"
 )
 
 // DirName is the store directory, created at the root of the main checkout.
@@ -105,16 +107,50 @@ func Init(dir string) error {
 	return nil
 }
 
-// DefaultViewer is who the local tracker says you are: HEW_USER, else the OS
-// login. It is login-shaped on purpose — it lands in assignee lists and
-// "@user" output, where a git display name with spaces would read badly.
+// DefaultViewer is who the local tracker says this agent is. HEW_USER wins
+// when set: it is the escape hatch for a harness, and it must be unique per
+// concurrent agent, because a shared identity cannot tell "this claim is
+// mine" from "a sibling session holds it". Otherwise the OS login is
+// qualified with the current linked worktree's name, so two agents under one
+// OS account in different worktrees are distinct claimants and start's exit
+// codes stay meaningful; the main checkout keeps the bare login. It is
+// login-shaped on purpose — it lands in assignee lists and "@user" output,
+// where a git display name with spaces would read badly.
 func DefaultViewer() string {
-	for _, name := range []string{"HEW_USER", "USER"} {
-		if v := os.Getenv(name); v != "" {
-			return v
+	worktree, _ := git.WorktreeName("")
+	return viewerFor(os.Getenv, worktree)
+}
+
+// viewerFor is the identity rule with the environment and checkout injected,
+// so its fallbacks and qualification are testable without either.
+func viewerFor(getenv func(string) string, worktree string) string {
+	if v := getenv("HEW_USER"); v != "" {
+		return v
+	}
+	login := getenv("USER")
+	if login == "" {
+		login = "local"
+	}
+	if name := identityPart(worktree); name != "" {
+		return login + "-" + name
+	}
+	return login
+}
+
+// identityPart reduces a worktree directory name to the characters an
+// assignee handle can carry: a path may contain spaces or punctuation that
+// would read as several names in "@user" output.
+func identityPart(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
 		}
 	}
-	return "local"
+	return strings.Trim(b.String(), "-")
 }
 
 // Store is an open local tracker.
@@ -124,7 +160,10 @@ type Store struct {
 	now    func() time.Time
 }
 
-var _ gh.IssueStore = (*Store)(nil)
+var (
+	_ gh.IssueStore = (*Store)(nil)
+	_ gh.Claimer    = (*Store)(nil)
+)
 
 // Open opens the tracker in dir as viewer. It refuses a directory whose config
 // no longer says local: after migration the issues are an archive, and writing

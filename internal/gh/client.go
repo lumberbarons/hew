@@ -91,25 +91,36 @@ type Client interface {
 // IssueStore is the issue-tracking half of the API: everything every command
 // but `pr` needs.
 type IssueStore interface {
-	// Viewer returns the authenticated user's login.
+	// Viewer returns the identity this backend attributes new work to: the
+	// authenticated login on GitHub, the agent's local identity in a local
+	// store (see local.DefaultViewer). It is what `start` assigns and what
+	// `pr` looks for when it infers the claimed issue.
 	Viewer(ctx context.Context) (string, error)
 	// ListIssues fetches all issues in the given states with body, labels,
 	// assignees, parent, sub-issues, and blockers, paginating the outer
-	// connection. Nested connections are capped (see query).
+	// connection. Nested connections are capped (see query). Relationships,
+	// totals and labels are part of this view, not just GetIssue's: the
+	// list-shaped commands read nothing else.
 	ListIssues(ctx context.Context, states []IssueState) ([]model.Issue, error)
-	// GetIssue fetches one issue in any state, including body and recent
-	// comments.
+	// GetIssue fetches one issue in any state, including body, creation
+	// time and recent comments.
 	GetIssue(ctx context.Context, number int) (model.Issue, error)
 	// SearchIssues runs a repo-scoped text search over issues in both
-	// states, in the API's best-match order. Results are capped (see
-	// searchCap); total is the server's full match count so callers can
-	// warn on truncation.
+	// states. Results are in the backend's relevance order — GitHub's
+	// best-match, the local store's title-first — and callers must not
+	// depend on a more specific order. Results are capped (see searchCap);
+	// total is the backend's full match count, or len(issues) when it has
+	// no server-side count, so a caller warns about truncation only when
+	// total exceeds what came back.
 	SearchIssues(ctx context.Context, terms string) (issues []model.Issue, total int, err error)
 	CreateIssue(ctx context.Context, title, body string, labels []string) (model.Issue, error)
 	EditTitle(ctx context.Context, number int, title string) error
 	EditBody(ctx context.Context, number int, body string) error
 	AddLabels(ctx context.Context, number int, labels []string) error
 	RemoveLabel(ctx context.Context, number int, label string) error
+	// AddAssignee records login as given. Whether the login resolves to a
+	// real user is a server concern — GitHub validates it, a local store has
+	// no user directory — so it is not part of this contract.
 	AddAssignee(ctx context.Context, number int, login string) error
 	RemoveAssignees(ctx context.Context, number int, logins []string) error
 	Comment(ctx context.Context, number int, body string) error
@@ -127,6 +138,24 @@ type IssueStore interface {
 	RemoveSubIssue(ctx context.Context, parentNumber, childNumber int) error
 	ListLabels(ctx context.Context) ([]Label, error)
 	CreateLabel(ctx context.Context, label Label) error
+}
+
+// ErrClaimConflict marks a Claimer's refusal because another writer claimed
+// the issue first. Start turns it into the same exit codes as a claim the
+// pre-read saw: 3 when someone else holds it, 5 when the identity matches.
+var ErrClaimConflict = errors.New("issue is already claimed")
+
+// Claimer is an optional IssueStore capability: an atomic claim, for a
+// backend that can make the write conditional. GitHub has no conditional
+// writes, so its client does not implement it and Start keeps the
+// check-then-act guard with a re-read after claiming; the local store holds
+// an exclusive lock, so it can decide and write in one step.
+type Claimer interface {
+	// ClaimIssue assigns login and adds the in-progress label in one locked
+	// write. force replaces an existing claim. It fails with
+	// ErrClaimConflict, leaving the issue unchanged, when another claimant
+	// won between Start's read and this write.
+	ClaimIssue(ctx context.Context, number int, login string, force bool) error
 }
 
 // PullRequests is the pull-request half of the API, used only by `pr`.

@@ -6,7 +6,7 @@ The commands themselves, written against the `gh.Client` interface so `cmd/hew` 
 |---|---|---|
 | `app.go` | The `App` struct every command hangs off: client, repo, output writers, and the `emit*` helpers that pick text vs `--json` | Adding a command, or changing how output is emitted |
 | `read.go` | The read commands: `ready`, `list`, `show`, `search`, `triage`, `prime`, `epic status` — one query, filtered client-side | Changing what a read command returns or how it filters |
-| `write.go` | The mutating commands: `create`, `start`, `set`, `close`, `reopen`, `block`, `unblock`, `epic create`, `init`; label swaps never stack, and `start` re-reads after claiming | Changing a mutation or the claim guard |
+| `write.go` | The mutating commands: `create`, `start`, `set`, `close`, `reopen`, `block`, `unblock`, `epic create`, `init`; label swaps never stack, and `start` uses a backend's atomic claim when it has one, re-reading after the check-then-act path otherwise | Changing a mutation or the claim guard |
 | `draft.go` | `draft`: composes an issue body from the section flags, or revalidates a draft file, with no `gh.Client` use — the local counterpart to `create --body-file` | Changing the local body preflight |
 | `pr.go` | `pr`: infers the claimed issue, composes the body from it, enforces exactly one `Fixes #n`, derives the title from the issue type | Changing PR composition or issue inference |
 | `apply.go` | `apply`: walks a parsed `internal/plan` plan, creating issues then wiring dependency edges | Changing `apply` execution (schema and validation live in `internal/plan`) |
