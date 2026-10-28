@@ -340,3 +340,42 @@ func TestSortByPriorityStable(t *testing.T) {
 		t.Errorf("SortByPriority order: %v %v %v", issues[0].Number, issues[1].Number, issues[2].Number)
 	}
 }
+
+func TestRelatedGroups(t *testing.T) {
+	ref := func(n int) *Ref { return &Ref{Number: n, State: "OPEN"} }
+	numbers := func(groups [][]Issue) [][]int {
+		out := make([][]int, len(groups))
+		for i, g := range groups {
+			for _, issue := range g {
+				out[i] = append(out[i], issue.Number)
+			}
+		}
+		return out
+	}
+	cases := map[string]struct {
+		issues []Issue
+		want   [][]int
+	}{
+		"shared area":                     {[]Issue{{Number: 1, Labels: []string{"cli"}}, {Number: 2, Labels: []string{"cli"}}}, [][]int{{1, 2}}},
+		"priority and type do not relate": {[]Issue{{Number: 1, Labels: []string{"P2", "bug", "in-progress"}}, {Number: 2, Labels: []string{"P2", "bug", "in-progress"}}}, [][]int{{1}, {2}}},
+		"shared parent":                   {[]Issue{{Number: 1, Parent: ref(9)}, {Number: 2, Parent: ref(9)}}, [][]int{{1, 2}}},
+		"different parent":                {[]Issue{{Number: 1, Parent: ref(9)}, {Number: 2, Parent: ref(8)}}, [][]int{{1}, {2}}},
+		"dependency":                      {[]Issue{{Number: 1}, {Number: 2, BlockedBy: []Ref{*ref(1)}}}, [][]int{{1, 2}}},
+		"dependency reverse":              {[]Issue{{Number: 1, BlockedBy: []Ref{*ref(2)}}, {Number: 2}}, [][]int{{1, 2}}},
+		"nothing in common":               {[]Issue{{Number: 1}, {Number: 2}}, [][]int{{1}, {2}}},
+		"connected through a third": {[]Issue{
+			{Number: 1, Labels: []string{"cli"}}, {Number: 2, Labels: []string{"render"}}, {Number: 3, Labels: []string{"cli", "render"}},
+		}, [][]int{{1, 2, 3}}},
+		"order of first appearance": {[]Issue{
+			{Number: 5}, {Number: 3, Labels: []string{"cli"}}, {Number: 4}, {Number: 1, Labels: []string{"cli"}},
+		}, [][]int{{5}, {3, 1}, {4}}},
+		"single": {[]Issue{{Number: 1}}, [][]int{{1}}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := numbers(RelatedGroups(tc.issues)); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("groups = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

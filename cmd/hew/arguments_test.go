@@ -104,7 +104,7 @@ func TestIssueFlagsRejectNonPositive(t *testing.T) {
 	}
 	for _, tc := range cases {
 		values := []string{"0", "-5"}
-		if tc.flag == "blocked-by" || tc.flag == "children" {
+		if tc.flag == "blocked-by" || tc.flag == "children" || tc.flag == "for" {
 			values = append(values, "12,0", "12,-5", "0,12", "-5,12")
 		}
 		for _, value := range values {
@@ -129,7 +129,7 @@ func TestIssueFlagsAcceptPositive(t *testing.T) {
 		{[]string{"create"}, []string{"--parent", "1", "--discovered-from", "2", "--blocked-by", "3,4", "--blocked-by", "5"}},
 		{[]string{"set"}, []string{"12", "--parent", "1"}},
 		{[]string{"list"}, []string{"--epic", "1"}},
-		{[]string{"pr"}, []string{"--for", "1"}},
+		{[]string{"pr"}, []string{"--for", "1", "--for", "2"}},
 		{[]string{"close"}, []string{"12", "--duplicate-of", "1"}},
 		{[]string{"epic", "create"}, []string{"--children", "1,2", "--children", "3"}},
 	} {

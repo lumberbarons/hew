@@ -297,6 +297,19 @@ merges, checks and PR listing stay where they are.
   quietly lose one — and never a second copy. A body already carrying a
   closing keyword (`fixes`/`closes`/`resolves`, any case — GitHub acts on all
   of them) is refused if it names a different issue, or several.
+- **A declared set.** `--for` repeats, and then the PR closes exactly that set:
+  one `Fixes #n` per declared issue, `--body-file` must close the same set (a
+  missing, extra, repeated or different ref is refused), and `--json` reports
+  the scalar `fixes` (the first issue, kept for compatibility) plus the full
+  `fixedIssues` array. Inference still resolves at most one issue — several are
+  always declared, which is what keeps the accidental-closure protection. A set
+  gets no What/Why defaults, because one issue's Fix does not describe the
+  others. Issues with no shared parent, area label or dependency draw a warning
+  rather than a refusal: whether a combined PR stays reviewable is a judgement
+  hew cannot make. The trade-off is that issue-to-PR links stop being 1:1 — a PR
+  closes exactly the declared set — so one issue per branch stays the default
+  workflow, and this only makes the deliberate combined case first-class instead
+  of a `gh pr edit` bypass the guard never sees (#134).
 - **Body template.** `### What / ### Why / ### Testing / ### Risk`, mapping
   onto the issue template and living beside it in `internal/conventions`. What and Why
   default to the issue's own `Fix`/`Approach` and `Problem`/`Goal` sections — the

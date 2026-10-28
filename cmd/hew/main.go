@@ -93,14 +93,14 @@ func fixedArgs(min, max int) ucli.BeforeFunc {
 		if err := appcli.ValidateArgCount(cmd.Args().Slice(), min, max, usage); err != nil {
 			return ctx, err
 		}
-		for _, name := range []string{"parent", "epic", "for", "duplicate-of", "discovered-from", "on", "from"} {
+		for _, name := range []string{"parent", "epic", "duplicate-of", "discovered-from", "on", "from"} {
 			if cmd.IsSet(name) {
 				if err := appcli.ValidateIssueNumbers(name, cmd.Int(name)); err != nil {
 					return ctx, err
 				}
 			}
 		}
-		for _, name := range []string{"blocked-by", "children"} {
+		for _, name := range []string{"blocked-by", "children", "for"} {
 			if cmd.IsSet(name) {
 				if err := appcli.ValidateIssueNumbers(name, cmd.IntSlice(name)...); err != nil {
 					return ctx, err
@@ -441,6 +441,12 @@ from what you have claimed (a number in the branch name breaks ties, and
 the issue, and the base is the repo's default branch. Push the branch first —
 GitHub can only open a PR for a ref it can see.
 
+Repeat --for to declare a small set of coupled issues one PR closes together:
+the body then carries one "Fixes #n" per declared issue, and a --body-file
+must close exactly that set. Several issues are only ever declared, never
+inferred. One issue per branch stays the default; a set gets no What/Why
+defaults, since one issue's Fix does not describe the others.
+
 ` + conventions.PRBodyGuidance + `
 
 Use --amend to revise the open PR on this branch. Omitted sections and the
@@ -454,7 +460,7 @@ repository. --ready and --base are creation-only flags.
 ` + conventions.CodeSpanGuidance,
 		Flags: []ucli.Flag{
 			&ucli.BoolFlag{Name: "amend", Usage: "revise the open PR title/body; preserve omitted sections"},
-			&ucli.IntFlag{Name: "for", Usage: "link issue `N` instead of inferring it"},
+			&ucli.IntSliceFlag{Name: "for", Usage: "link issue `N` instead of inferring it; repeat to declare a set one PR closes together"},
 			&ucli.StringFlag{Name: "title", Usage: "PR title (default: derived from the issue type/title; preserved with --amend)"},
 			&proseSliceFlag{Name: "what", Usage: "body section: what the change does (default: the issue's Fix/Approach); repeat for a bullet list"},
 			&proseSliceFlag{Name: "why", Usage: "body section: why (default: the issue's Problem/Goal); repeat for a bullet list"},
@@ -473,7 +479,7 @@ repository. --ready and --base are creation-only flags.
 			return app.PR(ctx, appcli.PROpts{
 				Amend:        cmd.Bool("amend"),
 				SectionFlags: prSectionFlagsSet(cmd),
-				For:          cmd.Int("for"),
+				For:          cmd.IntSlice("for"),
 				Title:        cmd.String("title"),
 				Sections:     prSectionsFromFlags(cmd),
 				BodyFile:     cmd.String("body-file"),

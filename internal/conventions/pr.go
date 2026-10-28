@@ -156,12 +156,12 @@ func (s PRSections) IsZero() bool {
 	return s.What == "" && s.Why == "" && s.Testing == "" && s.Risk == ""
 }
 
-// PRTrailers are the tracker links that close the claim lifecycle: exactly
-// one Fixes line so a merge closes the issue, plus the epic the issue hangs
-// off, when it has one.
+// PRTrailers are the tracker links that close the claim lifecycle: one Fixes
+// line per issue the PR closes (normally exactly one; several only when the
+// author declared the set), plus each epic those issues hang off.
 type PRTrailers struct {
-	Fixes int
-	Epic  int
+	Fixes []int
+	Epics []int
 }
 
 // FixesLine is the closing keyword GitHub links a merged PR to its issue by.
@@ -178,11 +178,11 @@ func PartOfLine(n int) string { return fmt.Sprintf("Part of #%d", n) }
 // the escape hatch can't quietly lose a link the template would have made.
 func (t PRTrailers) Render() string {
 	var lines []string
-	if t.Fixes > 0 {
-		lines = append(lines, FixesLine(t.Fixes))
+	for _, n := range t.Fixes {
+		lines = append(lines, FixesLine(n))
 	}
-	if t.Epic > 0 {
-		lines = append(lines, PartOfLine(t.Epic))
+	for _, n := range t.Epics {
+		lines = append(lines, PartOfLine(n))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -207,7 +207,7 @@ func (s PRSections) Compose(t PRTrailers) string {
 }
 
 // FixesReferences returns the issue numbers a body already closes, in order
-// of appearance, so the write path can enforce exactly one. It matches the
+// of appearance, so the write path can compare them with the declared set. It matches the
 // closing keywords GitHub itself acts on (case-insensitively), not just the
 // one this tool writes — a hand-written "Closes #7" links the PR just as
 // hard as "Fixes #7", and silently adding a second link would close two

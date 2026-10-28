@@ -130,11 +130,12 @@ hew set <n> [--priority ..] [--type ..] [--add-area X] [--remove-area X]
            [--closed]             # set/block/unblock refuse a closed target — an
                                   # edit landing on one is almost always stale
                                   # state; this is the override
-hew pr [--for N] [--title "..."]
+hew pr [--for N ...] [--title "..."]
           [--what "..."] [--why "..."] [--testing "..."] [--risk "..."]
                                   # draft PR for the claimed issue: body composed from
                                   # the issue (What/Why default to its Fix/Approach and
-                                  # Problem/Goal), exactly one "Fixes #n", base is the
+                                  # Problem/Goal), exactly one "Fixes #n" (repeat --for
+                                  # to close a declared set of coupled issues), base is the
                                   # repo default. Testing is evidence on Before:/After:
                                   # lines; Risk is a Reversibility: line and a Blast
                                   # radius: line. The title defaults to the
