@@ -1212,6 +1212,57 @@ func TestPRBodyFileMustMatchTheDeclaredSet(t *testing.T) {
 	}
 }
 
+func TestPRRepeatedForWarnsThatTheTitleIsFromOneIssue(t *testing.T) {
+	for name, tc := range map[string]struct {
+		opts PROpts
+		warn bool
+	}{
+		"default title": {PROpts{For: []int{46, 50}}, true},
+		"explicit":      {PROpts{For: []int{46, 50}, Title: "feat: both"}, false},
+		"single":        {PROpts{For: []int{46}}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, app, errOut := multiSetup()
+			tc.opts.Sections = sections("w", "y", "t")
+			if err := app.PR(context.Background(), tc.opts); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(errOut.String(), "title comes from #46 alone"); got != tc.warn {
+				t.Errorf("title warning = %v, want %v: %q", got, tc.warn, errOut.String())
+			}
+		})
+	}
+}
+
+func TestPRBodyFileRepeatedReferenceToOneIssueSaysSo(t *testing.T) {
+	f := newFake(claimed(30, "one"))
+	app, _, _ := newApp(f)
+	onBranch(app, "feat/x")
+
+	err := app.PR(context.Background(), PROpts{BodyFile: writeTemp(t, "Fixes #30\nCloses #30\n")})
+	requireExit(t, err, ExitUsage, "closes #30 more than once")
+	assertNoPR(t, f)
+}
+
+func TestPRAmendFindsItsTrailersWhateverTheForOrder(t *testing.T) {
+	f := newFake(claimed(46, "first"), claimed(50, "second"))
+	f.openPRs["feat/combined"] = gh.PullRequest{
+		Number: 501, Draft: true, Title: "feat: combined", Base: "main", HeadRepository: "o/r",
+		Body: "### What\n\nOriginal what\n\nFixes #46\nFixes #50",
+	}
+	app, _, _ := newApp(f)
+	onBranch(app, "feat/combined")
+
+	opts := PROpts{Amend: true, For: []int{50, 46}, Sections: conventions.PRSections{Testing: "New tests"}}
+	if err := app.PR(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	want := "### What\n\nOriginal what\n\n### Testing\n\nNew tests\n\nFixes #46\nFixes #50"
+	if got := f.openPRs["feat/combined"].Body; got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
 func TestPRJSONListsEveryDeclaredIssue(t *testing.T) {
 	f, app, _ := multiSetup()
 	app.JSON = true

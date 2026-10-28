@@ -114,6 +114,9 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 	if title == "" {
 		issueType, _ := issue.Type()
 		title = conventions.PRTitle(issueType, issue.Title)
+		if len(linked) > 1 {
+			a.warnf("title comes from #%d alone; pass --title to name the whole change", issue.Number)
+		}
 	}
 
 	created, err := a.Client.CreatePullRequest(ctx, gh.NewPullRequest{
@@ -423,7 +426,9 @@ func (a *App) amendPR(ctx context.Context, opts PROpts, linked []model.Issue, he
 }
 
 func prTrailers(linked []model.Issue) conventions.PRTrailers {
-	trailers := conventions.PRTrailers{Fixes: issueNumbers(linked)}
+	// Sorted so the rendered block is the same however --for was ordered,
+	// which --amend relies on to find and detach the trailers it wrote.
+	trailers := conventions.PRTrailers{Fixes: slices.Sorted(slices.Values(issueNumbers(linked)))}
 	for _, issue := range linked {
 		if issue.Parent != nil && !slices.Contains(trailers.Epics, issue.Parent.Number) {
 			trailers.Epics = append(trailers.Epics, issue.Parent.Number)
@@ -494,6 +499,9 @@ func sameClosingSet(refs, want []int) bool {
 
 func closingSetErr(source string, refs, want []int) error {
 	if len(want) == 1 && len(refs) > 1 {
+		if distinct := slices.Compact(slices.Sorted(slices.Values(refs))); len(distinct) == 1 {
+			return usageErr("%s closes #%d more than once; write the closing reference once", source, distinct[0])
+		}
 		return usageErr("%s closes %d issues; a PR closes exactly one (declare a set with repeated --for)", source, len(refs))
 	}
 	return usageErr("%s closes %s but this PR is for %s", source, formatRefs(refs), formatRefs(want))
