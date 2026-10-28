@@ -197,17 +197,14 @@ var (
 // no longer says local: after migration the issues are an archive, and writing
 // to them would quietly fork the tracker from GitHub.
 func Open(dir, viewer string) (*Store, error) {
-	cfg, err := ReadConfig(dir)
-	if err != nil {
+	if err := requireLocal(dir); err != nil {
 		return nil, err
-	}
-	if cfg.Backend != BackendLocal {
-		return nil, fmt.Errorf("%s tracks issues in %q, not locally", dir, cfg.Backend)
 	}
 	if _, err := os.Stat(filepath.Join(dir, issuesFile)); err != nil {
 		return nil, err
 	}
 	if viewer == "" {
+		var err error
 		if viewer, err = DefaultViewer(); err != nil {
 			return nil, err
 		}
@@ -229,6 +226,11 @@ func (s *Store) update(fn func(d *data) error) error {
 		return err
 	}
 	defer unlock()
+	// Checked under the lock, after Open: a store opened before a migration
+	// must not write to what has since become an archive.
+	if err := requireLocal(s.dir); err != nil {
+		return err
+	}
 	d, err := s.load()
 	if err != nil {
 		return err
