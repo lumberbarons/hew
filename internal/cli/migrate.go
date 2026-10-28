@@ -124,20 +124,20 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 		return err
 	}
 
-	viewer := ""
-	created, err := a.migrateCreate(ctx, selected, state, opts, &viewer)
+	res, err := a.runMigration(ctx, migrationEngine{
+		Kind: conventions.ProvenanceMigrate, ItemNoun: "bead", SourceNoun: "snapshot",
+		Items: beadItems(selected), StatePath: opts.StatePath, Throttle: opts.Throttle,
+	}, state)
 	if err != nil {
 		return err
 	}
-	wired, warned := a.migrateWire(ctx, selected, state.Mapping, opts)
-	closed := a.migrateClose(ctx, selected, state, opts)
 
 	return a.emitResult(map[string]any{
-		"created": created, "wired": wired, "closed": closed,
-		"skippedClosed": skippedClosed, "warnings": warned,
+		"created": res.Created, "wired": res.Wired, "closed": res.Closed,
+		"skippedClosed": skippedClosed, "warnings": res.Warnings,
 		"mapping": state.Mapping,
 	}, func() {
-		a.printf("migrated %d beads: %d created, %d dependencies wired, %d closed", len(selected), created, wired, closed)
+		a.printf("migrated %d beads: %d created, %d dependencies wired, %d closed", len(selected), res.Created, res.Wired, res.Closed)
 		if skippedClosed > 0 {
 			a.printf(" (%d closed beads skipped; use --include-closed)", skippedClosed)
 		}
@@ -251,19 +251,21 @@ func beadAreaLabels(selected []beads.Bead) []gh.Label {
 	return out
 }
 
-func (a *App) migrateCreate(ctx context.Context, selected []beads.Bead, state *batchState, opts MigrateOpts, viewer *string) (int, error) {
-	created := 0
+// beadItems maps beads onto the engine's item shape: the convention labels
+// derived from priority, type and status, the epic title prefix, the viewer as
+// assignee for in-progress beads, and the close reason as a comment on closed
+// ones. The provenance marker is the engine's to add.
+func beadItems(selected []beads.Bead) []migrationItem {
+	items := make([]migrationItem, 0, len(selected))
 	for _, b := range selected {
-		if n, ok := state.Mapping[b.ID]; ok {
-			a.progressf("already migrated: %s → #%d\n", b.ID, n)
-			continue
-		}
 		labels := []string{model.Priority(clampPriority(b.Priority)).String()}
 		if t := beadTypeLabels[b.IssueType]; t != "" {
 			labels = append(labels, t)
 		}
+		var assignees []string
 		if b.Status == "in_progress" {
 			labels = append(labels, model.InProgressLabel)
+			assignees = []string{assigneeViewer}
 		}
 		labels = append(labels, areaLabels(b.Labels)...)
 
@@ -272,125 +274,20 @@ func (a *App) migrateCreate(ctx context.Context, selected []beads.Bead, state *b
 			title = conventions.EpicTitlePrefix + title
 		}
 
-		issue, err := a.Client.CreateIssue(ctx, title, beadBodyWithProvenance(b, state.Digest), labels)
-		if err != nil {
-			return created, fmt.Errorf("creating %s (rerun to resume): %w", b.ID, err)
+		item := migrationItem{
+			Key: b.ID, Title: title, Body: beadBody(b), Labels: labels,
+			Assignees: assignees, Parent: b.Parent(), BlockedBy: b.BlockedBy(),
 		}
-		state.Mapping[b.ID] = issue.Number
-		if err := saveBatchState(opts.StatePath, state); err != nil {
-			return created, err
-		}
-		created++
-		a.progressf("created #%d from %s: %s\n", issue.Number, b.ID, b.Title)
-		if b.Status == "in_progress" {
-			if *viewer == "" {
-				v, err := a.Client.Viewer(ctx)
-				if err != nil {
-					return created, err
-				}
-				*viewer = v
-			}
-			if err := a.Client.AddAssignee(ctx, issue.Number, *viewer); err != nil {
-				a.warnf("assigning #%d: %v", issue.Number, err)
+		if b.Closed() {
+			item.Closed = true
+			item.CloseReason = gh.CloseCompleted
+			if b.CloseReason != "" {
+				item.Comments = []string{b.CloseReason}
 			}
 		}
-		sleep(opts.Throttle)
+		items = append(items, item)
 	}
-	return created, nil
-}
-
-// migrateWire connects parents and blockers. Failures warn and continue —
-// on resume the edges are retried, and a duplicate edge is harmless.
-func (a *App) migrateWire(ctx context.Context, selected []beads.Bead, state map[string]int, opts MigrateOpts) (wired int, warnings []string) {
-	warn := func(format string, args ...any) {
-		msg := fmt.Sprintf(format, args...)
-		warnings = append(warnings, msg)
-		a.warnf("%s", msg)
-	}
-	edge := func(fromBead, toBead, kind string, connect func(from, to int) error) {
-		from, ok := state[fromBead]
-		if !ok {
-			return
-		}
-		to, ok := state[toBead]
-		if !ok {
-			warn("%s of %s not migrated, %s edge dropped", toBead, fromBead, kind)
-			return
-		}
-		if err := connect(from, to); err != nil {
-			warn("%s edge #%d→#%d: %v", kind, from, to, err)
-			return
-		}
-		wired++
-		sleep(opts.Throttle)
-	}
-	for _, b := range selected {
-		if p := b.Parent(); p != "" {
-			edge(b.ID, p, "parent", func(child, parent int) error {
-				return a.Client.AddSubIssue(ctx, parent, child, true)
-			})
-		}
-		for _, blocker := range b.BlockedBy() {
-			edge(b.ID, blocker, "blocked-by", func(issue, blocker int) error {
-				return a.Client.AddBlockedBy(ctx, issue, blocker)
-			})
-		}
-	}
-	return wired, warnings
-}
-
-// migrateClose closes migrated beads that were closed, commenting the
-// close reason first. Tolerant: re-closing on resume just warns.
-//
-// The provenance check repeats here rather than trusting the up-front pass:
-// commenting and closing is the most destructive thing migrate does, and the
-// mapping it reads includes entries this run added after that pass. Failing
-// closed on a mapping that cannot be vouched for skips one bead instead of
-// aborting a migration that is already part-written (#81).
-func (a *App) migrateClose(ctx context.Context, selected []beads.Bead, state *batchState, opts MigrateOpts) int {
-	closed := 0
-	for _, b := range selected {
-		if !b.Closed() {
-			continue
-		}
-		number, ok := state.Mapping[b.ID]
-		if !ok {
-			continue
-		}
-		issue, err := a.Client.GetIssue(ctx, number)
-		if err != nil {
-			a.warnf("closing #%d: %v", number, err)
-			continue
-		}
-		if !issue.IsOpen() {
-			continue
-		}
-		if !conventions.HasProvenanceMarker(issue.Body, conventions.ProvenanceMigrate, b.ID, state.Digest) {
-			a.warnf("not closing #%d: it does not carry the hew provenance marker for bead %s from this snapshot", number, b.ID)
-			continue
-		}
-		if b.CloseReason != "" {
-			if err := a.Client.Comment(ctx, number, b.CloseReason); err != nil {
-				a.warnf("close comment on #%d: %v", number, err)
-			}
-		}
-		if err := a.Client.CloseIssue(ctx, number, gh.CloseCompleted); err != nil {
-			a.warnf("closing #%d: %v", number, err)
-			continue
-		}
-		closed++
-		sleep(opts.Throttle)
-	}
-	return closed
-}
-
-// beadBodyWithProvenance is what actually gets written: the composed body
-// plus the marker binding the issue to this bead and this snapshot file.
-// The human-readable footer below is prose and stays prose — a person may
-// reword or delete it — so verification reads only the marker (#81).
-func beadBodyWithProvenance(b beads.Bead, digest string) string {
-	marker := conventions.ProvenanceMarker(conventions.ProvenanceMigrate, b.ID, digest)
-	return beadBody(b) + "\n\n" + marker
+	return items
 }
 
 // beadBody assembles the issue body from the bead's prose fields, with a

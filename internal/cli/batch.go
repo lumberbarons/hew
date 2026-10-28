@@ -16,7 +16,9 @@ import (
 
 	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/model"
 	"github.com/lumberbarons/hew/internal/plan"
+	"github.com/lumberbarons/hew/internal/render"
 )
 
 // ensureLabels creates any missing convention labels plus the given extras.
@@ -177,4 +179,239 @@ func sleep(d time.Duration) {
 	if d > 0 {
 		time.Sleep(d)
 	}
+}
+
+// assigneeViewer in a migrationItem's Assignees stands for the authenticated
+// user, resolved lazily so a migration with nobody to assign never pays for
+// the lookup.
+const assigneeViewer = "@me"
+
+// migrationItem is one issue a migration creates, in the source-neutral shape
+// the engine works from. Adapters (beads today) map their own records onto it;
+// everything GitHub-specific — labels, provenance, ordering of writes — is the
+// engine's, so each source gets the same resume and trust guarantees.
+type migrationItem struct {
+	// Key identifies the item within its source. It is the checkpoint key and
+	// the key in the provenance marker.
+	Key   string
+	Title string
+	// Body is the prose the issue shows; the engine appends the provenance
+	// marker, so adapters never stamp one themselves.
+	Body   string
+	Labels []string
+	// Assignees are logins; assigneeViewer means the authenticated user.
+	Assignees []string
+	// Closed items are closed after their edges are wired.
+	Closed bool
+	// CloseReason is the GitHub close reason; empty means completed.
+	CloseReason gh.CloseReason
+	// Comments are posted, in order, immediately before the issue is closed.
+	// They belong to the close pass so a resume re-posts them only on an
+	// issue that is still open; an item that is not Closed must carry none.
+	Comments []string
+	// Parent and BlockedBy are the Keys of other items.
+	Parent    string
+	BlockedBy []string
+}
+
+// migrationEngine drives the create, wire and close passes over a source's
+// items. The caller owns everything that happens before a write — parsing,
+// the dry run, and state verification — because those depend on the source.
+type migrationEngine struct {
+	// Kind is the provenance kind stamped into created bodies and checked
+	// before the close pass touches an issue.
+	Kind string
+	// ItemNoun and SourceNoun name the source's records and file in messages
+	// ("bead", "snapshot").
+	ItemNoun   string
+	SourceNoun string
+	Items      []migrationItem
+	StatePath  string
+	Throttle   time.Duration
+}
+
+// migrationResult is what the passes did, for the caller to report.
+type migrationResult struct {
+	Created  int
+	Wired    int
+	Closed   int
+	Warnings []string
+}
+
+// runMigration creates every item not already in the checkpoint, wires
+// parents and blockers, then closes the items marked closed. A create failure
+// aborts (the checkpoint makes the rerun resume); wire and close failures warn
+// and continue.
+func (a *App) runMigration(ctx context.Context, eng migrationEngine, state *batchState) (migrationResult, error) {
+	for _, it := range eng.Items {
+		if len(it.Comments) > 0 && !it.Closed {
+			return migrationResult{}, fmt.Errorf("%s %s has comments but is not closed; comments are only posted when an item is closed", eng.ItemNoun, it.Key)
+		}
+	}
+	var res migrationResult
+	created, err := a.migrationCreate(ctx, eng, state)
+	res.Created = created
+	if err != nil {
+		return res, err
+	}
+	res.Wired, res.Warnings = a.migrationWire(ctx, eng, state.Mapping)
+	res.Closed = a.migrationClose(ctx, eng, state)
+	return res, nil
+}
+
+func (a *App) migrationCreate(ctx context.Context, eng migrationEngine, state *batchState) (int, error) {
+	created := 0
+	viewer := ""
+	for _, it := range eng.Items {
+		if n, ok := state.Mapping[it.Key]; ok {
+			a.progressf("already migrated: %s → #%d\n", it.Key, n)
+			continue
+		}
+		body := it.Body + "\n\n" + conventions.ProvenanceMarker(eng.Kind, it.Key, state.Digest)
+		issue, err := a.Client.CreateIssue(ctx, it.Title, body, it.Labels)
+		if err != nil {
+			return created, fmt.Errorf("creating %s (rerun to resume): %w", it.Key, err)
+		}
+		state.Mapping[it.Key] = issue.Number
+		if err := saveBatchState(eng.StatePath, state); err != nil {
+			return created, err
+		}
+		created++
+		a.progressf("created #%d from %s: %s\n", issue.Number, it.Key, it.Title)
+		for _, login := range it.Assignees {
+			if login == assigneeViewer {
+				if viewer == "" {
+					v, err := a.Client.Viewer(ctx)
+					if err != nil {
+						return created, err
+					}
+					viewer = v
+				}
+				login = viewer
+			}
+			if err := a.Client.AddAssignee(ctx, issue.Number, login); err != nil {
+				a.warnf("assigning #%d: %v", issue.Number, err)
+			}
+		}
+		sleep(eng.Throttle)
+	}
+	return created, nil
+}
+
+// migrationWire connects parents and blockers. Failures warn and continue —
+// on resume the edges are retried, and a duplicate edge is harmless.
+//
+// GitHub rejects self-blocks and two-issue cycles but silently accepts longer
+// ones, and a cycle removes all its members from ready — so every blocked-by
+// edge is checked against the edges accepted so far before it is wired, and an
+// edge that would close a cycle is dropped with a warning. The graph is the
+// items' own: only they can reference each other, and replaying the items in
+// order on a resume rebuilds the same graph. An edge enters the graph once it
+// passes the check, even if wiring it then fails, because a resume may find it
+// already on GitHub — missing it would hide a cycle.
+func (a *App) migrationWire(ctx context.Context, eng migrationEngine, mapping map[string]int) (wired int, warnings []string) {
+	warn := func(format string, args ...any) {
+		msg := fmt.Sprintf(format, args...)
+		warnings = append(warnings, msg)
+		a.warnf("%s", msg)
+	}
+
+	graph := make([]model.Issue, 0, len(mapping))
+	index := make(map[int]int, len(mapping))
+	for _, it := range eng.Items {
+		if n, ok := mapping[it.Key]; ok {
+			index[n] = len(graph)
+			graph = append(graph, model.Issue{Number: n, State: string(gh.StateOpen)})
+		}
+	}
+
+	edge := func(fromKey, toKey, kind string, connect func(from, to int) error) {
+		from, ok := mapping[fromKey]
+		if !ok {
+			return
+		}
+		to, ok := mapping[toKey]
+		if !ok {
+			warn("%s of %s not migrated, %s edge dropped", toKey, fromKey, kind)
+			return
+		}
+		if kind == "blocked-by" {
+			check := model.CheckBlockedBy(graph, from, to)
+			if check.Cycle != nil {
+				warn("blocked-by edge #%d→#%d dropped: would create dependency cycle %s", from, to, render.FormatCycle(check.Cycle))
+				return
+			}
+			i := index[from]
+			graph[i].BlockedBy = append(graph[i].BlockedBy, model.Ref{Number: to, State: string(gh.StateOpen)})
+			graph[i].BlockedByTotal = len(graph[i].BlockedBy)
+		}
+		if err := connect(from, to); err != nil {
+			warn("%s edge #%d→#%d: %v", kind, from, to, err)
+			return
+		}
+		wired++
+		sleep(eng.Throttle)
+	}
+	for _, it := range eng.Items {
+		if it.Parent != "" {
+			edge(it.Key, it.Parent, "parent", func(child, parent int) error {
+				return a.Client.AddSubIssue(ctx, parent, child, true)
+			})
+		}
+		for _, blocker := range it.BlockedBy {
+			edge(it.Key, blocker, "blocked-by", func(issue, blocker int) error {
+				return a.Client.AddBlockedBy(ctx, issue, blocker)
+			})
+		}
+	}
+	return wired, warnings
+}
+
+// migrationClose closes the migrated items that are marked closed, posting
+// their comments first. Tolerant: re-closing on resume just warns.
+//
+// The provenance check repeats here rather than trusting the up-front pass:
+// commenting and closing is the most destructive thing a migration does, and
+// the mapping it reads includes entries this run added after that pass.
+// Failing closed on a mapping that cannot be vouched for skips one item
+// instead of aborting a migration that is already part-written (#81).
+func (a *App) migrationClose(ctx context.Context, eng migrationEngine, state *batchState) int {
+	closed := 0
+	for _, it := range eng.Items {
+		if !it.Closed {
+			continue
+		}
+		number, ok := state.Mapping[it.Key]
+		if !ok {
+			continue
+		}
+		issue, err := a.Client.GetIssue(ctx, number)
+		if err != nil {
+			a.warnf("closing #%d: %v", number, err)
+			continue
+		}
+		if !issue.IsOpen() {
+			continue
+		}
+		if !conventions.HasProvenanceMarker(issue.Body, eng.Kind, it.Key, state.Digest) {
+			a.warnf("not closing #%d: it does not carry the hew provenance marker for %s %s from this %s", number, eng.ItemNoun, it.Key, eng.SourceNoun)
+			continue
+		}
+		for _, c := range it.Comments {
+			if err := a.Client.Comment(ctx, number, c); err != nil {
+				a.warnf("close comment on #%d: %v", number, err)
+			}
+		}
+		reason := it.CloseReason
+		if reason == "" {
+			reason = gh.CloseCompleted
+		}
+		if err := a.Client.CloseIssue(ctx, number, reason); err != nil {
+			a.warnf("closing #%d: %v", number, err)
+			continue
+		}
+		closed++
+		sleep(eng.Throttle)
+	}
+	return closed
 }
