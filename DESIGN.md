@@ -254,6 +254,21 @@ obvious from a flag name.
   to sub-issues, in_progress to a claim, and close_reason to the closing comment,
   with a provenance footer. It takes open beads by default (real databases are
   over 95% closed); `--include-closed` brings the full history.
+- **`migrate local`** moves a local tracker to GitHub: every issue, closed ones
+  included, keeping close reasons and comments (a lead line credits the original
+  author and date, the author in a code span so a local handle never mentions a
+  real account), wiring parents and blockers, and rewriting `#n` references in
+  bodies and comments to the new numbers outside code spans and fenced blocks.
+  Numbers are unknown until the issues exist, so bodies are created as written and
+  edited once all are created; a body a person changed in between is left alone
+  with a warning. The tracker is locked for the whole run, so nothing written
+  locally is lost behind the snapshot. Only when every step finished does it write
+  `.hew/migrated.json` (local → GitHub number map) and flip `config.json` to
+  `github`; the local file stays as an archive and refuses writes, including from a
+  store opened before the flip. A run with unfinished steps leaves the tracker
+  local so a rerun can finish, resuming from a checkpoint bound like the other
+  batch writers' — which means local issues cannot change between a failed run and
+  its rerun.
 - **`hooks install|remove`** injects `hew prime` at session start in the selected
   agent's project configuration. Claude and codex get a `SessionStart` hook
   guarded with `command -v hew`, so a contributor without hew gets an install
@@ -456,7 +471,7 @@ object is neither the text primer nor the data schema.
 
 ## Checkpoint binding
 
-The batch writers (`apply`, `migrate beads`) checkpoint a source-key → issue-number
+The batch writers (`apply`, `migrate beads`, `migrate local`) checkpoint a source-key → issue-number
 mapping so an interrupted run resumes instead of duplicating. That file is ordinary
 repository content: it sits next to the plan or the beads snapshot, and anything an
 agent checks out can contain one. Treating it as an authoritative mapping meant a

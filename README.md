@@ -180,6 +180,14 @@ hew migrate beads [--file F] [--state F] [--throttle D]
                                  # deps, epics, in-progress state; resumable
                                  # defaults: --file .beads/issues.jsonl, --state
                                  # github-migration.json next to it, --throttle 500ms
+hew migrate local [--state F] [--dry-run] [--throttle D]
+                                 # move a local tracker to GitHub (the --repo or git
+                                 # remote repository): every issue, close reasons,
+                                 # comments, edges, #n references rewritten; then
+                                 # .hew/migrated.json records the number map and the
+                                 # repo switches to GitHub, keeping the local file as
+                                 # an archive. Resumable; default --state
+                                 # .hew/migration-state.json
 ```
 
 Output is one compact line per issue, annotated with whatever keeps it from
@@ -353,7 +361,7 @@ any write — including under `--dry-run`, so the plan-only pass reaches the sam
 verdict as the real one. Editing the plan between runs invalidates the
 checkpoint by design; if you need to change it mid-flight, start a fresh run
 with a new `--state` path and expect the entries already created to be created
-again. The same rules apply to `migrate beads` and its snapshot.
+again. The same rules apply to `migrate beads` and its snapshot, and to `migrate local` and `.hew/issues.jsonl`.
 
 ## Auto-triage in CI
 

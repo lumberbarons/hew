@@ -203,29 +203,7 @@ func (a *App) migrationPlan(selected []beads.Bead, state map[string]int, skipped
 				a.printf("already migrated: %s → #%d\n", st.id, st.migrated)
 				continue
 			}
-			item := st.item
-			line := fmt.Sprintf("create: %s as %s", item.ID, item.Priority)
-			if item.Type != nil {
-				line += " " + *item.Type
-			}
-			line += "  " + item.Title
-			var marks []string
-			if item.Parent != nil {
-				marks = append(marks, "parent "+*item.Parent)
-			}
-			if len(item.BlockedBy) > 0 {
-				marks = append(marks, "blocked by "+strings.Join(item.BlockedBy, " "))
-			}
-			if item.InProgress {
-				marks = append(marks, "in progress")
-			}
-			if item.ThenClose {
-				marks = append(marks, "then close")
-			}
-			if len(marks) > 0 {
-				line += "  [" + strings.Join(marks, "; ") + "]"
-			}
-			a.printf("%s\n", line)
+			a.printf("%s\n", planLine(st.item))
 		}
 		a.printf("dry run: %d beads would be migrated", len(selected))
 		if skippedClosed > 0 {
@@ -233,6 +211,32 @@ func (a *App) migrationPlan(selected []beads.Bead, state map[string]int, skipped
 		}
 		a.printf("\n")
 	})
+}
+
+// planLine is the text a dry run prints for one issue it would create.
+func planLine(item migrationPlanEntry) string {
+	line := fmt.Sprintf("create: %s as %s", item.ID, item.Priority)
+	if item.Type != nil {
+		line += " " + *item.Type
+	}
+	line += "  " + item.Title
+	var marks []string
+	if item.Parent != nil {
+		marks = append(marks, "parent "+*item.Parent)
+	}
+	if len(item.BlockedBy) > 0 {
+		marks = append(marks, "blocked by "+strings.Join(item.BlockedBy, " "))
+	}
+	if item.InProgress {
+		marks = append(marks, "in progress")
+	}
+	if item.ThenClose {
+		marks = append(marks, "then close")
+	}
+	if len(marks) > 0 {
+		line += "  [" + strings.Join(marks, "; ") + "]"
+	}
+	return line
 }
 
 // beadAreaLabels collects every distinct area label the beads carry, for

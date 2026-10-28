@@ -26,7 +26,7 @@ import (
 const (
 	// ProvenanceApply marks issues created by `hew apply`.
 	ProvenanceApply = "apply"
-	// ProvenanceMigrate marks issues created by `hew migrate beads`.
+	// ProvenanceMigrate marks issues created by `hew migrate` (beads or local).
 	ProvenanceMigrate = "migrate"
 )
 

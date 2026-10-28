@@ -675,17 +675,149 @@ func TestMigrationEngineClosesWithTheItemsReasonAndComments(t *testing.T) {
 	}
 }
 
-func TestMigrationEngineRejectsCommentsOnAnOpenItemBeforeWriting(t *testing.T) {
+func TestMigrationEnginePostsCommentsOnOpenItemsExactlyOnce(t *testing.T) {
 	f, app, _, eng, state := engineSetup(t,
-		migrationItem{Key: "ok", Title: "Fine"},
-		migrationItem{Key: "bad", Title: "Open with comments", Comments: []string{"would be lost"}},
+		migrationItem{Key: "a", Title: "Open with notes", Comments: []string{"one", "two"}},
 	)
-	_, err := app.runMigration(ctx, eng, state)
-	if err == nil || !strings.Contains(err.Error(), "bad") {
-		t.Fatalf("err = %v, want a rejection naming the item", err)
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(f.calls) != 0 {
-		t.Errorf("wrote before rejecting: %v", f.calls)
+	n := state.Mapping["a"]
+	if got := f.comments[n]; !slices.Equal(got, []string{"one", "two"}) {
+		t.Fatalf("comments = %q, want both in order", got)
+	}
+	if res.Closed != 0 || f.byNumber(n).State != "OPEN" {
+		t.Errorf("closed=%d state=%s, want the item left open", res.Closed, f.byNumber(n).State)
+	}
+
+	// The issue is still open, so only the checkpoint stops a resume from
+	// posting the notes again.
+	reloaded, err := loadBatchState(eng.StatePath, "o/r", "sha256:test", "snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.runMigration(ctx, eng, reloaded); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.comments[n]; len(got) != 2 {
+		t.Errorf("resume re-posted comments: %q", got)
+	}
+}
+
+func TestMigrationEngineResumesCommentingWhereItStopped(t *testing.T) {
+	f, app, errOut, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "Open", Comments: []string{"one", "two", "three"}},
+	)
+	f.failAfter["Comment"] = failPoint{calls: 1, err: errors.New("boom")}
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Failed == 0 || !strings.Contains(errOut.String(), "boom") {
+		t.Fatalf("failed=%d stderr=%q, want the comment failure reported", res.Failed, errOut.String())
+	}
+	n := state.Mapping["a"]
+
+	delete(f.failAfter, "Comment")
+	reloaded, err := loadBatchState(eng.StatePath, "o/r", "sha256:test", "snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.runMigration(ctx, eng, reloaded); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.comments[n]; !slices.Equal(got, []string{"one", "two", "three"}) {
+		t.Errorf("comments after resume = %q, want each exactly once, in order", got)
+	}
+}
+
+func TestMigrationEngineRelinksBodiesAndCommentsOnceNumbersAreKnown(t *testing.T) {
+	f, app, _, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "A", Body: "blocks @b", Closed: true, Comments: []string{"see @b"}},
+		migrationItem{Key: "b", Title: "B", Body: "after @a and @zzz"},
+	)
+	eng.Relink = func(text string, m map[string]int) string {
+		for key, n := range m {
+			text = strings.ReplaceAll(text, "@"+key, fmt.Sprintf("#%d", n))
+		}
+		return text
+	}
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := state.Mapping["a"], state.Mapping["b"]
+	if res.Relinked != 2 {
+		t.Errorf("relinked = %d, want both bodies", res.Relinked)
+	}
+	wantA := fmt.Sprintf("blocks #%d", b)
+	if got := f.byNumber(a).Body; !strings.HasPrefix(got, wantA+"\n\n<!-- hew:migrate key=a") {
+		t.Errorf("a body = %q, want %q then the provenance marker", got, wantA)
+	}
+	if got := f.byNumber(b).Body; !strings.HasPrefix(got, fmt.Sprintf("after #%d and @zzz\n\n", a)) {
+		t.Errorf("b body = %q, want a's number and the unknown key untouched", got)
+	}
+	if got := f.comments[a]; !slices.Equal(got, []string{fmt.Sprintf("see #%d", b)}) {
+		t.Errorf("a comments = %q, want the reference rewritten", got)
+	}
+	if !conventions.HasProvenanceMarker(f.byNumber(a).Body, conventions.ProvenanceMigrate, "a", "sha256:test") {
+		t.Error("relinking dropped the provenance marker")
+	}
+
+	before := len(f.calls)
+	if _, err := app.runMigration(ctx, eng, state); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.calls[before:] {
+		if strings.HasPrefix(c, "EditBody") || strings.HasPrefix(c, "Comment") {
+			t.Errorf("a finished migration wrote again: %s", c)
+		}
+	}
+}
+
+func TestMigrationEngineLeavesABodyAloneThatChangedSinceItWasCreated(t *testing.T) {
+	f, app, errOut, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "A", Body: "see @b"},
+		migrationItem{Key: "b", Title: "B"},
+	)
+	// First pass without a relinker: the bodies stay as the source wrote them.
+	if _, err := app.runMigration(ctx, eng, state); err != nil {
+		t.Fatal(err)
+	}
+	a := state.Mapping["a"]
+	f.byNumber(a).Body += "\n\nedited by a person"
+
+	eng.Relink = func(text string, m map[string]int) string { return strings.ReplaceAll(text, "@b", "#7") }
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.byNumber(a).Body; !strings.Contains(got, "edited by a person") || strings.Contains(got, "#7") {
+		t.Errorf("body = %q, want the person's edit kept and no rewrite", got)
+	}
+	// Nothing a rerun could change, so it must not stop a migration from finishing.
+	if res.Relinked != 0 || res.Failed != 0 || !strings.Contains(errOut.String(), fmt.Sprintf("#%d", a)) {
+		t.Errorf("relinked=%d failed=%d stderr=%q, want a warning naming the issue and no failure", res.Relinked, res.Failed, errOut.String())
+	}
+	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "not relinking") {
+		t.Errorf("warnings = %q, want the skipped relink listed for --json callers", res.Warnings)
+	}
+}
+
+func TestMigrationEngineCountsFailedRelinksAndCloses(t *testing.T) {
+	f, app, _, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "A", Body: "see @a", Closed: true},
+	)
+	eng.Relink = func(text string, m map[string]int) string { return strings.ReplaceAll(text, "@a", "#1") }
+	f.failOn["EditBody"] = errors.New("no edit")
+	f.failOn["CloseIssue"] = errors.New("no close")
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Failed != 2 || res.Relinked != 0 || res.Closed != 0 {
+		t.Errorf("result = %+v, want two failures and nothing relinked or closed", res)
 	}
 }
 
@@ -813,5 +945,87 @@ func TestMigrationEngineChecksCyclesThroughEdgesThatFailedToWire(t *testing.T) {
 	}
 	if !dropped {
 		t.Errorf("c→a was not dropped as a cycle through the failed edges: %q", res.Warnings)
+	}
+}
+
+func TestMigrationEngineDoesNotRewireEdgesItAlreadyWired(t *testing.T) {
+	f, app, errOut, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "A"},
+		migrationItem{Key: "b", Title: "B", Parent: "a", BlockedBy: []string{"a"}},
+	)
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil || res.Wired != 2 {
+		t.Fatalf("first run wired %d, err %v, want both edges", res.Wired, err)
+	}
+	// GitHub rejects a duplicate edge, so a resume that tried again would
+	// warn about work it had already done.
+	f.failOn["AddSubIssue"] = errors.New("already exists")
+	f.failOn["AddBlockedBy"] = errors.New("already exists")
+	res, err = app.runMigration(ctx, eng, state)
+	if err != nil || res.Wired != 0 || res.Failed != 0 {
+		t.Errorf("resume = %+v, err %v, want no edge attempted and no failures", res, err)
+	}
+	if strings.Contains(errOut.String(), "already exists") {
+		t.Errorf("resume retried a wired edge: %s", errOut.String())
+	}
+}
+
+func TestMigrationEngineRelinksTitlesAndKeepsEditedOnes(t *testing.T) {
+	f, app, errOut, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "A"},
+		migrationItem{Key: "b", Title: "Follow-up to @a"},
+		migrationItem{Key: "c", Title: "Also @a"},
+	)
+	if _, err := app.runMigration(ctx, eng, state); err != nil {
+		t.Fatal(err)
+	}
+	f.byNumber(state.Mapping["c"]).Title = "Renamed by a person"
+
+	eng.Relink = func(text string, m map[string]int) string {
+		return strings.ReplaceAll(text, "@a", fmt.Sprintf("#%d", m["a"]))
+	}
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := f.byNumber(state.Mapping["b"]).Title, fmt.Sprintf("Follow-up to #%d", state.Mapping["a"]); got != want {
+		t.Errorf("b title = %q, want %q", got, want)
+	}
+	if got := f.byNumber(state.Mapping["c"]).Title; got != "Renamed by a person" {
+		t.Errorf("c title = %q, want the person's edit kept", got)
+	}
+	if res.Relinked != 1 || res.Failed != 0 || !strings.Contains(errOut.String(), "title") {
+		t.Errorf("relinked=%d failed=%d stderr=%q", res.Relinked, res.Failed, errOut.String())
+	}
+}
+
+func TestMigrationEngineListsEveryWarningInTheResult(t *testing.T) {
+	f, app, _, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "A", Closed: true, Comments: []string{"note"}},
+	)
+	f.failOn["Comment"] = errors.New("no comment")
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Failed != 1 || len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "no comment") {
+		t.Errorf("result = %+v, want the comment failure counted and listed", res)
+	}
+	if res.Closed != 0 {
+		t.Error("closed an issue whose comments did not all post; a rerun could not finish them")
+	}
+}
+
+func TestEnsureLabelsTreatsNamesAsCaseInsensitive(t *testing.T) {
+	f := newFake()
+	f.labels = []gh.Label{{Name: "area:cli"}}
+	app, _, _ := newApp(f)
+	if err := app.ensureLabels(ctx, []gh.Label{{Name: "Area:CLI"}, {Name: "New"}, {Name: "new"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "CreateLabel") && (strings.Contains(c, "Area:CLI") || strings.Contains(c, `"new"`)) {
+			t.Errorf("created a label GitHub already has under another case: %s", c)
+		}
 	}
 }

@@ -72,11 +72,15 @@ func readData(path string) (*data, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
+	return decodeData(f, path)
+}
 
+// decodeData parses the file's records; path only names the source in errors.
+func decodeData(r io.Reader, path string) (*data, error) {
 	d := &data{}
 	seen := map[int]bool{}
 	sawMeta := false
-	dec := json.NewDecoder(f)
+	dec := json.NewDecoder(r)
 	for n := 1; ; n++ {
 		var raw json.RawMessage
 		if err := dec.Decode(&raw); errors.Is(err, io.EOF) {

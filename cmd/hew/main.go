@@ -52,6 +52,21 @@ func globalFlags() []ucli.Flag {
 // store, and anything else — including no `.hew` at all — is GitHub exactly as
 // before.
 func buildApp(cmd *ucli.Command) (*appcli.App, error) {
+	if cmd.String("repo") == "" {
+		tracker, isLocal, err := local.Locate("")
+		if err != nil {
+			return nil, err
+		}
+		if isLocal {
+			return buildLocalApp(cmd, tracker)
+		}
+	}
+	return buildGitHubApp(cmd)
+}
+
+// buildGitHubApp talks to GitHub whatever the checkout's config says: the
+// repository is --repo, or the git remote's.
+func buildGitHubApp(cmd *ucli.Command) (*appcli.App, error) {
 	var repo gh.Repo
 	if spec := cmd.String("repo"); spec != "" {
 		parsed, err := appcli.ParseRepoSpec(spec)
@@ -60,13 +75,6 @@ func buildApp(cmd *ucli.Command) (*appcli.App, error) {
 		}
 		repo = parsed
 	} else {
-		tracker, isLocal, err := local.Locate("")
-		if err != nil {
-			return nil, err
-		}
-		if isLocal {
-			return buildLocalApp(cmd, tracker)
-		}
 		current, err := repository.Current()
 		if err != nil {
 			return nil, fmt.Errorf("cannot detect repository (use --repo owner/name): %w", err)
@@ -809,7 +817,7 @@ and it is refused rather than trusted.
 func migrateCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:  "migrate",
-		Usage: "import issues from another tracker",
+		Usage: "import issues from another tracker, or move the local tracker to GitHub",
 		Commands: []*ucli.Command{
 			{
 				Name:  "beads",
@@ -845,6 +853,43 @@ func migrateCmd() *ucli.Command {
 						DryRun:        cmd.Bool("dry-run"),
 						IncludeClosed: cmd.Bool("include-closed"),
 						Throttle:      cmd.Duration("throttle"),
+					})
+				},
+			},
+			{
+				Name:  "local",
+				Usage: "move the local tracker's issues to GitHub and keep .hew/issues.jsonl as an archive",
+				Description: `Creates every local issue on GitHub, closed ones included, with their close
+reasons and comments, wires parents and blockers, and rewrites #n references in
+bodies and comments to the new numbers (code spans and fenced blocks are left
+alone). On success .hew/migrated.json records the local → GitHub number map and
+.hew/config.json is switched to github, after which the local file takes no
+writes and every command uses GitHub.
+
+The target is --repo, or the git remote. The local tracker is locked for the
+whole run. If a step fails the tracker stays local and rerunning resumes where
+it stopped; the checkpoint is bound to the repository and to the exact contents
+of issues.jsonl, so changing local issues between runs is refused.`,
+				Flags: []ucli.Flag{
+					&ucli.StringFlag{Name: "state", Usage: "resume-state `FILE`, bound to this repo and issues.jsonl (default: .hew/migration-state.json)"},
+					&ucli.BoolFlag{Name: "dry-run", Usage: "print the plan without creating anything"},
+					&ucli.DurationFlag{Name: "throttle", Usage: "pause between writes", Value: 500 * time.Millisecond},
+				},
+				Before: fixedArgs(0, 0),
+				Action: func(ctx context.Context, cmd *ucli.Command) error {
+					tracker, err := local.MainDir("")
+					if err != nil {
+						return err
+					}
+					app, err := buildGitHubApp(cmd)
+					if err != nil {
+						return err
+					}
+					return app.MigrateLocal(ctx, appcli.MigrateLocalOpts{
+						Dir:       tracker,
+						StatePath: cmd.String("state"),
+						DryRun:    cmd.Bool("dry-run"),
+						Throttle:  cmd.Duration("throttle"),
 					})
 				},
 			},
