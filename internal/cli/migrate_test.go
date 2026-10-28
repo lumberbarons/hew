@@ -796,8 +796,12 @@ func TestMigrationEngineLeavesABodyAloneThatChangedSinceItWasCreated(t *testing.
 	if got := f.byNumber(a).Body; !strings.Contains(got, "edited by a person") || strings.Contains(got, "#7") {
 		t.Errorf("body = %q, want the person's edit kept and no rewrite", got)
 	}
-	if res.Relinked != 0 || res.Failed == 0 || !strings.Contains(errOut.String(), fmt.Sprintf("#%d", a)) {
-		t.Errorf("relinked=%d failed=%d stderr=%q, want a warning naming the issue", res.Relinked, res.Failed, errOut.String())
+	// Nothing a rerun could change, so it must not stop a migration from finishing.
+	if res.Relinked != 0 || res.Failed != 0 || !strings.Contains(errOut.String(), fmt.Sprintf("#%d", a)) {
+		t.Errorf("relinked=%d failed=%d stderr=%q, want a warning naming the issue and no failure", res.Relinked, res.Failed, errOut.String())
+	}
+	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "not relinking") {
+		t.Errorf("warnings = %q, want the skipped relink listed for --json callers", res.Warnings)
 	}
 }
 
@@ -963,5 +967,65 @@ func TestMigrationEngineDoesNotRewireEdgesItAlreadyWired(t *testing.T) {
 	}
 	if strings.Contains(errOut.String(), "already exists") {
 		t.Errorf("resume retried a wired edge: %s", errOut.String())
+	}
+}
+
+func TestMigrationEngineRelinksTitlesAndKeepsEditedOnes(t *testing.T) {
+	f, app, errOut, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "A"},
+		migrationItem{Key: "b", Title: "Follow-up to @a"},
+		migrationItem{Key: "c", Title: "Also @a"},
+	)
+	if _, err := app.runMigration(ctx, eng, state); err != nil {
+		t.Fatal(err)
+	}
+	f.byNumber(state.Mapping["c"]).Title = "Renamed by a person"
+
+	eng.Relink = func(text string, m map[string]int) string {
+		return strings.ReplaceAll(text, "@a", fmt.Sprintf("#%d", m["a"]))
+	}
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := f.byNumber(state.Mapping["b"]).Title, fmt.Sprintf("Follow-up to #%d", state.Mapping["a"]); got != want {
+		t.Errorf("b title = %q, want %q", got, want)
+	}
+	if got := f.byNumber(state.Mapping["c"]).Title; got != "Renamed by a person" {
+		t.Errorf("c title = %q, want the person's edit kept", got)
+	}
+	if res.Relinked != 1 || res.Failed != 0 || !strings.Contains(errOut.String(), "title") {
+		t.Errorf("relinked=%d failed=%d stderr=%q", res.Relinked, res.Failed, errOut.String())
+	}
+}
+
+func TestMigrationEngineListsEveryWarningInTheResult(t *testing.T) {
+	f, app, _, eng, state := engineSetup(t,
+		migrationItem{Key: "a", Title: "A", Closed: true, Comments: []string{"note"}},
+	)
+	f.failOn["Comment"] = errors.New("no comment")
+	res, err := app.runMigration(ctx, eng, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Failed != 1 || len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "no comment") {
+		t.Errorf("result = %+v, want the comment failure counted and listed", res)
+	}
+	if res.Closed != 0 {
+		t.Error("closed an issue whose comments did not all post; a rerun could not finish them")
+	}
+}
+
+func TestEnsureLabelsTreatsNamesAsCaseInsensitive(t *testing.T) {
+	f := newFake()
+	f.labels = []gh.Label{{Name: "area:cli"}}
+	app, _, _ := newApp(f)
+	if err := app.ensureLabels(ctx, []gh.Label{{Name: "Area:CLI"}, {Name: "New"}, {Name: "new"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "CreateLabel") && (strings.Contains(c, "Area:CLI") || strings.Contains(c, `"new"`)) {
+			t.Errorf("created a label GitHub already has under another case: %s", c)
+		}
 	}
 }

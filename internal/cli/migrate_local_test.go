@@ -161,7 +161,7 @@ func TestMigrateLocalCarriesLabelsEdgesAndClaims(t *testing.T) {
 func TestMigrateLocalRewritesReferencesOutsideCodeSpans(t *testing.T) {
 	s, dir := localTracker(t)
 	a := mustCreateLocal(t, s, "A", "Blocked on #2 and `#2` and #99.\n\n```\n#2 in a fence\n```\n", "P2", "task")
-	b := mustCreateLocal(t, s, "B", "Follow-up to #1", "P2", "task")
+	b := mustCreateLocal(t, s, "Follow-up to #1", "Follow-up to #1", "P2", "task")
 	mustLocal(t, s.Comment(ctx, a, "see #2, not `#2`"))
 	mustLocal(t, s.CloseIssue(ctx, a, gh.CloseCompleted))
 	mustLocal(t, s.Comment(ctx, b, "back to #1"))
@@ -174,6 +174,9 @@ func TestMigrateLocalRewritesReferencesOutsideCodeSpans(t *testing.T) {
 	wantA := "Blocked on #102 and `#2` and #99.\n\n```\n#2 in a fence\n```"
 	if got := f.byNumber(101).Body; !strings.HasPrefix(got, wantA) {
 		t.Errorf("a body = %q, want prefix %q", got, wantA)
+	}
+	if got := f.byNumber(102).Title; got != "Follow-up to #101" {
+		t.Errorf("b title = %q, want the reference in it rewritten too", got)
 	}
 	if got := f.byNumber(102).Body; !strings.HasPrefix(got, "Follow-up to #101") {
 		t.Errorf("b body = %q, want its reference to a rewritten", got)

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -29,7 +30,7 @@ func (a *App) ensureLabels(ctx context.Context, extras []gh.Label) error {
 	}
 	have := map[string]bool{}
 	for _, l := range existing {
-		have[l.Name] = true
+		have[strings.ToLower(l.Name)] = true
 	}
 	var want []gh.Label
 	for _, l := range conventions.Labels {
@@ -37,12 +38,14 @@ func (a *App) ensureLabels(ctx context.Context, extras []gh.Label) error {
 	}
 	want = append(want, extras...)
 	for _, l := range want {
-		if have[l.Name] {
+		// GitHub label names are case-insensitive, so Area:CLI is area:cli.
+		if have[strings.ToLower(l.Name)] {
 			continue
 		}
 		if err := a.Client.CreateLabel(ctx, l); err != nil {
 			return fmt.Errorf("creating label %q: %w", l.Name, err)
 		}
+		have[strings.ToLower(l.Name)] = true
 	}
 	return nil
 }
@@ -172,7 +175,25 @@ func saveBatchState(path string, state *batchState) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	// Written to a temp name and renamed over the checkpoint: it is rewritten
+	// after every create, edge and comment, and a torn file would be refused
+	// as corrupt with only a duplicating restart on offer.
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 func sleep(d time.Duration) {
@@ -205,16 +226,17 @@ type migrationItem struct {
 	Closed bool
 	// CloseReason is the GitHub close reason; empty means completed.
 	CloseReason gh.CloseReason
-	// Comments are posted, in order, immediately before the issue is closed.
-	// They belong to the close pass so a resume re-posts them only on an
-	// issue that is still open; an item that is not Closed must carry none.
+	// Comments are posted, in order, after the edges are wired and before the
+	// issue is closed, if it is. Each one is checkpointed once posted, so a
+	// resume carries on from the first that is missing; a Closed item whose
+	// issue is already closed is skipped, which keeps a finished run quiet.
 	Comments []string
 	// Parent and BlockedBy are the Keys of other items.
 	Parent    string
 	BlockedBy []string
 }
 
-// migrationEngine drives the create, wire and close passes over a source's
+// migrationEngine drives the create, wire, relink and finish (comment, close) passes over a source's
 // items. The caller owns everything that happens before a write — parsing,
 // the dry run, and state verification — because those depend on the source.
 type migrationEngine struct {
@@ -236,8 +258,10 @@ type migrationEngine struct {
 }
 
 // migrationResult is what the passes did, for the caller to report. Failed
-// counts the steps that warned instead of finishing, so a caller can tell a
-// migration that is whole from one that needs another run.
+// counts the steps that failed and would be tried again by a rerun, so a caller
+// can tell a migration that is whole from one that needs another run; warnings
+// about things a rerun cannot change (an edge dropped for a cycle, a body a
+// person edited) are listed in Warnings but are not failures.
 type migrationResult struct {
 	Created  int
 	Wired    int
@@ -245,6 +269,19 @@ type migrationResult struct {
 	Relinked int
 	Failed   int
 	Warnings []string
+}
+
+// note records a warning that a rerun cannot change.
+func (r *migrationResult) note(a *App, format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	r.Warnings = append(r.Warnings, msg)
+	a.warnf("%s", msg)
+}
+
+// fail records a warning for a step a rerun will try again.
+func (r *migrationResult) fail(a *App, format string, args ...any) {
+	r.note(a, format, args...)
+	r.Failed++
 }
 
 // runMigration creates every item not already in the checkpoint, wires
@@ -265,13 +302,9 @@ func (a *App) runMigration(ctx context.Context, eng migrationEngine, state *batc
 	if err != nil {
 		return res, err
 	}
-	res.Wired, res.Warnings = a.migrationWire(ctx, eng, state)
-	res.Failed = len(res.Warnings)
-	var failed int
-	res.Relinked, failed = a.migrationRelink(ctx, eng, state)
-	res.Failed += failed
-	res.Closed, failed = a.migrationFinish(ctx, eng, state)
-	res.Failed += failed
+	a.migrationWire(ctx, eng, state, &res)
+	a.migrationRelink(ctx, eng, state, &res)
+	a.migrationFinish(ctx, eng, state, &res)
 	return res, nil
 }
 
@@ -327,13 +360,8 @@ func (a *App) migrationCreate(ctx context.Context, eng migrationEngine, state *b
 // order on a resume rebuilds the same graph. An edge enters the graph once it
 // passes the check, even if wiring it then fails, because a resume may find it
 // already on GitHub — missing it would hide a cycle.
-func (a *App) migrationWire(ctx context.Context, eng migrationEngine, state *batchState) (wired int, warnings []string) {
+func (a *App) migrationWire(ctx context.Context, eng migrationEngine, state *batchState, res *migrationResult) {
 	mapping := state.Mapping
-	warn := func(format string, args ...any) {
-		msg := fmt.Sprintf(format, args...)
-		warnings = append(warnings, msg)
-		a.warnf("%s", msg)
-	}
 
 	graph := make([]model.Issue, 0, len(mapping))
 	index := make(map[int]int, len(mapping))
@@ -351,13 +379,13 @@ func (a *App) migrationWire(ctx context.Context, eng migrationEngine, state *bat
 		}
 		to, ok := mapping[toKey]
 		if !ok {
-			warn("%s of %s not migrated, %s edge dropped", toKey, fromKey, kind)
+			res.note(a, "%s of %s not migrated, %s edge dropped", toKey, fromKey, kind)
 			return
 		}
 		if kind == "blocked-by" {
 			check := model.CheckBlockedBy(graph, from, to)
 			if check.Cycle != nil {
-				warn("blocked-by edge #%d→#%d dropped: would create dependency cycle %s", from, to, render.FormatCycle(check.Cycle))
+				res.note(a, "blocked-by edge #%d→#%d dropped: would create dependency cycle %s", from, to, render.FormatCycle(check.Cycle))
 				return
 			}
 			i := index[from]
@@ -369,14 +397,14 @@ func (a *App) migrationWire(ctx context.Context, eng migrationEngine, state *bat
 			return
 		}
 		if err := connect(from, to); err != nil {
-			warn("%s edge #%d→#%d: %v", kind, from, to, err)
+			res.fail(a, "%s edge #%d→#%d: %v", kind, from, to, err)
 			return
 		}
 		state.Edges[key] = true
 		if err := saveBatchState(eng.StatePath, state); err != nil {
-			warn("saving checkpoint: %v", err)
+			res.fail(a, "saving checkpoint: %v", err)
 		}
-		wired++
+		res.Wired++
 		sleep(eng.Throttle)
 	}
 	for _, it := range eng.Items {
@@ -391,17 +419,15 @@ func (a *App) migrationWire(ctx context.Context, eng migrationEngine, state *bat
 			})
 		}
 	}
-	return wired, warnings
 }
 
-// migrationRelink rewrites the references in each created issue's body now
-// that every item has a number. It only edits a body still exactly as the
-// create wrote it: one a person has changed since is left alone with a
-// warning, and one already rewritten is skipped, so a resume is quiet. It
-// returns how many bodies it rewrote and how many it could not.
-func (a *App) migrationRelink(ctx context.Context, eng migrationEngine, state *batchState) (relinked, failed int) {
+// migrationRelink rewrites the references in each created issue's title and
+// body now that every item has a number. It only edits text still exactly as
+// the create wrote it: one a person has changed since is left alone with a
+// warning, and one already rewritten is skipped, so a resume is quiet.
+func (a *App) migrationRelink(ctx context.Context, eng migrationEngine, state *batchState, res *migrationResult) {
 	if eng.Relink == nil {
-		return 0, 0
+		return
 	}
 	for _, it := range eng.Items {
 		number, ok := state.Mapping[it.Key]
@@ -411,33 +437,47 @@ func (a *App) migrationRelink(ctx context.Context, eng migrationEngine, state *b
 		marker := conventions.ProvenanceMarker(eng.Kind, it.Key, state.Digest)
 		original := it.Body + "\n\n" + marker
 		rewritten := eng.Relink(it.Body, state.Mapping) + "\n\n" + marker
-		if rewritten == original {
+		title := eng.Relink(it.Title, state.Mapping)
+		if rewritten == original && title == it.Title {
 			continue
 		}
 		issue, err := a.Client.GetIssue(ctx, number)
 		if err != nil {
-			a.warnf("relinking #%d: %v", number, err)
-			failed++
+			res.fail(a, "relinking #%d: %v", number, err)
 			continue
 		}
-		switch strings.TrimSpace(issue.Body) {
-		case strings.TrimSpace(rewritten):
-			continue
-		case strings.TrimSpace(original):
-		default:
-			a.warnf("not relinking #%d: its body changed since it was created, so references to other %ss are left as written", number, eng.ItemNoun)
-			failed++
-			continue
+		edited := false
+		if rewritten != original {
+			switch strings.TrimSpace(issue.Body) {
+			case strings.TrimSpace(rewritten):
+			case strings.TrimSpace(original):
+				if err := a.Client.EditBody(ctx, number, rewritten); err != nil {
+					res.fail(a, "relinking #%d: %v", number, err)
+					continue
+				}
+				edited = true
+			default:
+				res.note(a, "not relinking #%d: its body changed since it was created, so references to other %ss are left as written", number, eng.ItemNoun)
+			}
 		}
-		if err := a.Client.EditBody(ctx, number, rewritten); err != nil {
-			a.warnf("relinking #%d: %v", number, err)
-			failed++
-			continue
+		if title != it.Title {
+			switch issue.Title {
+			case title:
+			case it.Title:
+				if err := a.Client.EditTitle(ctx, number, title); err != nil {
+					res.fail(a, "relinking the title of #%d: %v", number, err)
+					continue
+				}
+				edited = true
+			default:
+				res.note(a, "not relinking the title of #%d: it changed since it was created", number)
+			}
 		}
-		relinked++
-		sleep(eng.Throttle)
+		if edited {
+			res.Relinked++
+			sleep(eng.Throttle)
+		}
 	}
-	return relinked, failed
 }
 
 // commentKey identifies one posted comment in the checkpoint's edge record.
@@ -448,14 +488,14 @@ func commentKey(itemKey string, index int) string {
 // migrationFinish posts the items' comments, in order, then closes the ones
 // marked closed. Tolerant: an issue already closed (a resume of a finished
 // run) is skipped silently, and a failed call warns and moves on. It returns
-// how many issues it closed and how many steps failed.
+// its counts in res.
 //
 // The provenance check repeats here rather than trusting the up-front pass:
 // commenting and closing is the most destructive thing a migration does, and
 // the mapping it reads includes entries this run added after that pass.
 // Failing closed on a mapping that cannot be vouched for skips one item
 // instead of aborting a migration that is already part-written (#81).
-func (a *App) migrationFinish(ctx context.Context, eng migrationEngine, state *batchState) (closed, failed int) {
+func (a *App) migrationFinish(ctx context.Context, eng migrationEngine, state *batchState, res *migrationResult) {
 	for _, it := range eng.Items {
 		if !it.Closed && len(it.Comments) == 0 {
 			continue
@@ -466,16 +506,14 @@ func (a *App) migrationFinish(ctx context.Context, eng migrationEngine, state *b
 		}
 		issue, err := a.Client.GetIssue(ctx, number)
 		if err != nil {
-			a.warnf("closing #%d: %v", number, err)
-			failed++
+			res.fail(a, "closing #%d: %v", number, err)
 			continue
 		}
 		if it.Closed && !issue.IsOpen() {
 			continue
 		}
 		if !conventions.HasProvenanceMarker(issue.Body, eng.Kind, it.Key, state.Digest) {
-			a.warnf("not closing #%d: it does not carry the hew provenance marker for %s %s from this %s", number, eng.ItemNoun, it.Key, eng.SourceNoun)
-			failed++
+			res.fail(a, "not closing #%d: it does not carry the hew provenance marker for %s %s from this %s", number, eng.ItemNoun, it.Key, eng.SourceNoun)
 			continue
 		}
 		commented := true
@@ -488,8 +526,7 @@ func (a *App) migrationFinish(ctx context.Context, eng migrationEngine, state *b
 				c = eng.Relink(c, state.Mapping)
 			}
 			if err := a.Client.Comment(ctx, number, c); err != nil {
-				a.warnf("comment on #%d: %v", number, err)
-				failed++
+				res.fail(a, "comment on #%d: %v", number, err)
 				// Later comments would land out of order, and closing now would
 				// stop a rerun from posting the rest; leave both for the rerun.
 				commented = false
@@ -497,8 +534,7 @@ func (a *App) migrationFinish(ctx context.Context, eng migrationEngine, state *b
 			}
 			state.Edges[key] = true
 			if err := saveBatchState(eng.StatePath, state); err != nil {
-				a.warnf("saving checkpoint: %v", err)
-				failed++
+				res.fail(a, "saving checkpoint: %v", err)
 			}
 			sleep(eng.Throttle)
 		}
@@ -510,12 +546,10 @@ func (a *App) migrationFinish(ctx context.Context, eng migrationEngine, state *b
 			reason = gh.CloseCompleted
 		}
 		if err := a.Client.CloseIssue(ctx, number, reason); err != nil {
-			a.warnf("closing #%d: %v", number, err)
-			failed++
+			res.fail(a, "closing #%d: %v", number, err)
 			continue
 		}
-		closed++
+		res.Closed++
 		sleep(eng.Throttle)
 	}
-	return closed, failed
 }
