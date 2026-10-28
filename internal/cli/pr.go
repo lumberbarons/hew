@@ -46,6 +46,9 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 	if opts.Amend && (opts.Ready || opts.Base != "") {
 		return usageErr("--amend cannot be combined with --ready or --base; it edits the title and body only")
 	}
+	if a.PRs == nil {
+		return genericErr("pr needs the GitHub backend; this repo tracks issues locally")
+	}
 	if a.Git == nil {
 		return genericErr("pr needs a git checkout; it is not available here")
 	}
@@ -77,7 +80,7 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 	// the default title.
 	issue := linked[0]
 
-	prCtx, err := a.Client.PullRequestContext(ctx, head)
+	prCtx, err := a.PRs.PullRequestContext(ctx, head)
 	if err != nil {
 		return err
 	}
@@ -119,7 +122,7 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 		}
 	}
 
-	created, err := a.Client.CreatePullRequest(ctx, gh.NewPullRequest{
+	created, err := a.PRs.CreatePullRequest(ctx, gh.NewPullRequest{
 		Title: title, Body: body,
 		Head: head, Base: base, Draft: !opts.Ready,
 	})
@@ -413,7 +416,7 @@ func (a *App) amendPR(ctx context.Context, opts PROpts, linked []model.Issue, he
 	if title == "" {
 		title = existing.Title
 	}
-	if err := a.Client.UpdatePullRequest(ctx, existing.Number, title, body); err != nil {
+	if err := a.PRs.UpdatePullRequest(ctx, existing.Number, title, body); err != nil {
 		return err
 	}
 	return a.emitResult(prJSON{

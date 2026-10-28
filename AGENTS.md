@@ -41,9 +41,11 @@ The layering exists so everything with behavior is testable without hitting GitH
 | `internal/model/` | Pure domain logic: readiness, label normalization, cycle detection — no I/O, plain unit tests | Changing readiness or label semantics |
 | `internal/render/` | Text and JSON renderers, golden-file tested (`testdata/*.golden`) | Changing output format |
 | `internal/conventions/` | The opinions: label set, issue and PR body templates, primer text | Changing labels, a template, or the primer |
-| `internal/git/` | Local branch state for `pr` (current branch, the upstream branch name a PR is opened from, has-upstream); shells out to git behind an injectable runner | Changing what `pr` knows about the checkout |
+| `internal/git/` | Local branch state for `pr` (current branch, the upstream branch name a PR is opened from, has-upstream) and the main checkout's path from any linked worktree (where the local tracker lives); shells out to git behind an injectable runner | Changing what `pr` knows about the checkout |
 | `internal/beads/` | Parses a beads (bd) `issues.jsonl` snapshot for `migrate` — pure parsing, no runtime dependency on bd | Changing the beads migration |
 | `internal/plan/` | The `apply` plan-file schema: JSONL parsing, local-`id` resolution, dangling-reference and cycle rejection — all validation happens before anything is written | Changing the plan schema or `apply` validation |
+| `internal/local/` | The JSONL-backed `gh.IssueStore` for local-only repos: one `issues.jsonl` in a self-ignoring `.hew/` at the main checkout, every mutation under an exclusive lock and an atomic rename | Changing the local file format, locking, or local-only behavior |
+| `internal/conformance/` | The behavior every `gh.IssueStore` shares, run against `local` and against the `fakeClient` the command tests use — a test helper package, no production code depends on it | Changing what a backend must do, or a fake that drifts from the real client |
 | `internal/editor/` | Launches `$EDITOR` seeded with the body template, for `--edit` on `create` and `epic create` | Changing the `--edit` flow |
 | `docs/` | Primer mock: `conventions.PrimerStatic` verbatim plus invented state sections — keep it in sync when the primer changes | Revising primer output |
 | `site/` | Self-contained landing page for lumberbarons.github.io/hew (no build step, no external assets), published to `gh-pages` by `publish-install` | Changing the landing page |

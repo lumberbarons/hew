@@ -1874,3 +1874,22 @@ func TestPRBodyFileSectionWarnings(t *testing.T) {
 		})
 	}
 }
+
+// A backend with no pull requests (the local store) leaves PRs nil; pr must
+// refuse before it reads a single issue rather than nil-dereference.
+func TestPRRefusesWithoutAPullRequestBackend(t *testing.T) {
+	f := newFake(claimed(30, "PR creation command", "P2", "enhancement"))
+	app, _, _ := newApp(f)
+	app.PRs = nil
+	onBranch(app, "feat/pr-command")
+
+	err := app.PR(context.Background(), PROpts{})
+	var exit *ExitError
+	if !errors.As(err, &exit) || exit.Code != ExitGeneric {
+		t.Fatalf("err = %v, want a generic ExitError", err)
+	}
+	if !strings.Contains(err.Error(), "GitHub backend") {
+		t.Errorf("message does not name the backend: %v", err)
+	}
+	assertOnlyReads(t, f)
+}

@@ -67,6 +67,7 @@ func buildApp(cmd *ucli.Command) (*appcli.App, error) {
 	}
 	return &appcli.App{
 		Client: client,
+		PRs:    client,
 		Repo:   repo,
 		Out:    os.Stdout,
 		ErrOut: os.Stderr,

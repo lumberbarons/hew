@@ -298,6 +298,10 @@ func (f *fakeClient) Comment(ctx context.Context, number int, body string) error
 		return err
 	}
 	f.comments[number] = append(f.comments[number], body)
+	// GetIssue returns recent comments, so a stored comment has to be visible there.
+	i := f.byNumber(number)
+	i.Comments = append(i.Comments, model.Comment{Author: f.viewer, Body: body})
+	i.CommentsTotal = len(i.Comments)
 	return nil
 }
 
@@ -367,7 +371,11 @@ func (f *fakeClient) RemoveBlockedBy(ctx context.Context, number, blockingNumber
 	if err != nil {
 		return err
 	}
+	before := len(i.BlockedBy)
 	i.BlockedBy = slices.DeleteFunc(slices.Clone(i.BlockedBy), func(r model.Ref) bool { return r.Number == b.Number })
+	if removed := before - len(i.BlockedBy); removed > 0 {
+		i.BlockedByTotal = max(0, i.BlockedByTotal-removed)
+	}
 	return nil
 }
 
@@ -387,8 +395,7 @@ func (f *fakeClient) AddSubIssue(ctx context.Context, parentNumber, childNumber 
 		if !replaceParent {
 			return fmt.Errorf("#%d already has a parent", child.Number)
 		}
-		old := f.byNumber(child.Parent.Number)
-		old.SubIssues = slices.DeleteFunc(slices.Clone(old.SubIssues), func(r model.Ref) bool { return r.Number == child.Number })
+		dropSubIssue(f.byNumber(child.Parent.Number), child.Number)
 	}
 	child.Parent = &model.Ref{Number: parent.Number, State: parent.State}
 	parent.SubIssues = append(parent.SubIssues, model.Ref{Number: child.Number, State: child.State})
@@ -408,8 +415,19 @@ func (f *fakeClient) RemoveSubIssue(ctx context.Context, parentNumber, childNumb
 		return err
 	}
 	child.Parent = nil
-	parent.SubIssues = slices.DeleteFunc(slices.Clone(parent.SubIssues), func(r model.Ref) bool { return r.Number == child.Number })
+	dropSubIssue(parent, child.Number)
 	return nil
+}
+
+// dropSubIssue removes a child from a parent's list and lowers the total with
+// it. refreshRefs never lowers a total, because tests set a larger one on
+// purpose to simulate a capped connection; a real removal still has to count.
+func dropSubIssue(parent *model.Issue, child int) {
+	before := len(parent.SubIssues)
+	parent.SubIssues = slices.DeleteFunc(slices.Clone(parent.SubIssues), func(r model.Ref) bool { return r.Number == child })
+	if removed := before - len(parent.SubIssues); removed > 0 {
+		parent.SubIssuesTotal = max(0, parent.SubIssuesTotal-removed)
+	}
 }
 
 func (f *fakeClient) ListLabels(ctx context.Context) ([]gh.Label, error) {
@@ -463,6 +481,7 @@ func newApp(f *fakeClient) (*App, *bytes.Buffer, *bytes.Buffer) {
 	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
 	return &App{
 		Client: f,
+		PRs:    f,
 		Repo:   gh.Repo{Owner: "o", Name: "r"},
 		Out:    out,
 		ErrOut: errOut,
