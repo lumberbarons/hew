@@ -2,6 +2,7 @@ package git
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -149,5 +150,38 @@ func TestMainCheckoutFromALinkedWorktreeFindsTheMainCheckout(t *testing.T) {
 		if got, err := LinkedWorktree(dir); err != nil || got != wantName {
 			t.Errorf("%s: LinkedWorktree = %q, %v; want %q", name, got, err, wantName)
 		}
+	}
+}
+
+func TestIsNotRepoSeparatesNoCheckoutFromOtherGitFailures(t *testing.T) {
+	notRepo := fmt.Errorf("cannot find the main checkout: %w",
+		&exec.ExitError{Stderr: []byte("fatal: not a git repository (or any of the parent directories): .git")})
+	other := &exec.ExitError{Stderr: []byte("fatal: detected dubious ownership in repository")}
+	for name, tc := range map[string]struct {
+		err  error
+		want bool
+	}{
+		"not a repository, wrapped": {notRepo, true},
+		"another git failure":       {other, false},
+		"git not installed":         {exec.ErrNotFound, false},
+		"nil":                       {nil, false},
+	} {
+		if got := IsNotRepo(tc.err); got != tc.want {
+			t.Errorf("%s: IsNotRepo = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+// Real git rather than a canned message: the stderr text is what IsNotRepo
+// keys on, so a changed message must fail a test, not production.
+func TestIsNotRepoRecognisesRealGitOutsideACheckout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolateGit(t)
+	dir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	if _, err := MainCheckout(dir); !IsNotRepo(err) {
+		t.Errorf("MainCheckout outside a checkout = %v, want a not-a-repository error", err)
 	}
 }

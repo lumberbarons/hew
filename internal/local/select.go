@@ -3,6 +3,7 @@ package local
 import (
 	"errors"
 	"io/fs"
+	"os"
 	"path/filepath"
 
 	"github.com/lumberbarons/hew/internal/git"
@@ -24,10 +25,11 @@ func mainDir(mainCheckout func(string) (string, error), dir string) (string, err
 // Locate reports the tracker directory when the repository around dir is
 // configured to track issues locally. No `.hew/config.json` means the repo is
 // not local, and neither does a config that names another backend (a migrated
-// repo keeps its local issues as an archive). A directory git cannot place in
-// a checkout has no tracker either, so that is also "not local" and left for
-// the GitHub path to report in its own terms. A config that exists but cannot
-// be read is an error: guessing GitHub there would send writes to the wrong
+// repo keeps its local issues as an archive), a `.hew` that is not a
+// directory, or a directory git says is not in a checkout at all — those are
+// left for the GitHub path to report in its own terms. Anything else that goes
+// wrong is an error: git failing for another reason, or a config that exists
+// but cannot be read. Guessing GitHub there would send writes to the wrong
 // tracker.
 func Locate(dir string) (trackerDir string, ok bool, err error) {
 	return locate(git.MainCheckout, dir)
@@ -35,7 +37,14 @@ func Locate(dir string) (trackerDir string, ok bool, err error) {
 
 func locate(mainCheckout func(string) (string, error), dir string) (string, bool, error) {
 	tracker, err := mainDir(mainCheckout, dir)
-	if err != nil {
+	switch {
+	case git.IsNotRepo(err):
+		return "", false, nil
+	case err != nil:
+		return "", false, err
+	}
+	if info, err := os.Stat(tracker); err != nil || !info.IsDir() {
+		// Absent, or something else named .hew: no opt-in to local either way.
 		return "", false, nil
 	}
 	cfg, err := ReadConfig(tracker)

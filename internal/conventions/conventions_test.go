@@ -1,6 +1,7 @@
 package conventions
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -326,5 +327,20 @@ func TestClaudeSnippetLocal(t *testing.T) {
 	}
 	if strings.Contains(ClaudeSnippetLocal, "GitHub Issues") {
 		t.Errorf("local snippet points at GitHub Issues:\n%s", ClaudeSnippetLocal)
+	}
+}
+
+// docs/primer-mock.md shows both primers verbatim; this is the tie that keeps
+// the mock from drifting when either changes.
+func TestPrimerMockEmbedsBothPrimers(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/primer-mock.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock := string(raw)
+	for name, primer := range map[string]string{"PrimerStatic": PrimerStatic, "PrimerLocal": PrimerLocal} {
+		if !strings.Contains(mock, primer) {
+			t.Errorf("docs/primer-mock.md no longer embeds %s verbatim", name)
+		}
 	}
 }

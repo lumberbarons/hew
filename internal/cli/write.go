@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"slices"
 	"strings"
@@ -787,15 +788,16 @@ func (a *App) InitLocal(dir string) error {
 	if err != nil {
 		return genericErr("%v", err)
 	}
-	if err := local.Init(tracker); err != nil {
-		return genericErr("creating %s: %v", tracker, err)
-	}
-	cfg, err := local.ReadConfig(tracker)
-	if err != nil {
+	// Read before writing: a repo that has moved to another backend must be
+	// refused without touching its archived tracker.
+	switch cfg, err := local.ReadConfig(tracker); {
+	case err == nil && cfg.Backend != local.BackendLocal:
+		return genericErr("%s already tracks issues in %q, not locally", tracker, cfg.Backend)
+	case err != nil && !errors.Is(err, fs.ErrNotExist):
 		return genericErr("%v", err)
 	}
-	if cfg.Backend != local.BackendLocal {
-		return genericErr("%s already tracks issues in %q, not locally", tracker, cfg.Backend)
+	if err := local.Init(tracker); err != nil {
+		return genericErr("creating %s: %v", tracker, err)
 	}
 	return a.emitResult(map[string]any{"backend": local.BackendLocal, "path": tracker}, func() {
 		a.printf("local tracker ready in %s\n", tracker)

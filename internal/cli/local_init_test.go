@@ -19,15 +19,25 @@ func gitRepoWithWorktree(t *testing.T) (main, worktree string) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
+	// A developer's global config (signing, hooks, identity) must not reach
+	// the throwaway repo.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 	main, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	gitIn(t, main, "init", "--initial-branch=main")
-	gitIn(t, main, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "--allow-empty", "-m", "seed")
+	gitIn(t, main, "-c", "user.email=t@example.com", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "seed")
 	worktree = filepath.Join(t.TempDir(), "wt")
 	gitIn(t, main, "worktree", "add", "-b", "feat/wt", worktree)
 	return main, worktree
+}
+
+func isolateGitConfig(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 }
 
 func TestPrimeOnTheLocalBackendDropsThePullRequestStep(t *testing.T) {
@@ -154,9 +164,18 @@ func TestInitLocalRefusesAMigratedRepo(t *testing.T) {
 	if err := local.WriteConfig(tracker, local.Config{Backend: local.BackendGitHub}); err != nil {
 		t.Fatal(err)
 	}
+	// Damage the archive so a refusal that still ran Init would show: Init
+	// recreates a missing .gitignore.
+	ignore := filepath.Join(tracker, ".gitignore")
+	if err := os.Remove(ignore); err != nil {
+		t.Fatal(err)
+	}
 	app, out, _ := newApp(newFake())
 	err := app.InitLocal(main)
 	exitCode(t, err, ExitGeneric)
+	if _, statErr := os.Stat(ignore); !os.IsNotExist(statErr) {
+		t.Errorf("refused init still wrote into the archived tracker: %v", statErr)
+	}
 	if !strings.Contains(err.Error(), "github") || out.Len() != 0 {
 		t.Errorf("err = %v, out = %q; want a refusal naming the backend and no snippet", err, out.String())
 	}
@@ -166,8 +185,13 @@ func TestInitLocalOutsideAGitCheckoutFails(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
+	isolateGitConfig(t)
+	// Keep git from walking up into a checkout that happens to enclose the
+	// temp directory.
+	dir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 	app, _, _ := newApp(newFake())
-	err := app.InitLocal(t.TempDir())
+	err := app.InitLocal(dir)
 	exitCode(t, err, ExitGeneric)
 	if !strings.Contains(err.Error(), "main checkout") {
 		t.Errorf("err = %v, want the checkout failure", err)
