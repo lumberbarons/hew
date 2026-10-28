@@ -200,9 +200,16 @@ func (f *fakeClient) CreateIssue(ctx context.Context, title, body string, labels
 		return model.Issue{}, err
 	}
 	f.nextNum++
+	var normalized []string
+	for _, l := range labels {
+		name := f.labelName(l, normalized)
+		if !slices.ContainsFunc(normalized, func(existing string) bool { return strings.EqualFold(existing, name) }) {
+			normalized = append(normalized, name)
+		}
+	}
 	i := &model.Issue{
 		ID: fmt.Sprintf("ID%d", f.nextNum), Number: f.nextNum, Title: title, Body: body,
-		State: "OPEN", Labels: slices.Clone(labels),
+		State: "OPEN", Labels: normalized,
 		CreatedAt: time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC),
 	}
 	f.issues = append(f.issues, i)
@@ -233,6 +240,30 @@ func (f *fakeClient) EditBody(ctx context.Context, number int, body string) erro
 	return nil
 }
 
+// labelName is the spelling a label is stored under. GitHub labels are
+// repo-scoped and case-insensitive, so a label already created or in use
+// anywhere decides the casing; a name nobody has used keeps its spelling.
+func (f *fakeClient) labelName(name string, onIssue []string) string {
+	for _, l := range f.labels {
+		if strings.EqualFold(l.Name, name) {
+			return l.Name
+		}
+	}
+	for _, l := range onIssue {
+		if strings.EqualFold(l, name) {
+			return l
+		}
+	}
+	for _, i := range f.issues {
+		for _, l := range i.Labels {
+			if strings.EqualFold(l, name) {
+				return l
+			}
+		}
+	}
+	return name
+}
+
 func (f *fakeClient) AddLabels(ctx context.Context, number int, labels []string) error {
 	if err := f.record(fmt.Sprintf("AddLabels %d %s", number, strings.Join(labels, ","))); err != nil {
 		return err
@@ -242,8 +273,9 @@ func (f *fakeClient) AddLabels(ctx context.Context, number int, labels []string)
 		return err
 	}
 	for _, l := range labels {
-		if !slices.Contains(i.Labels, l) {
-			i.Labels = append(i.Labels, l)
+		name := f.labelName(l, i.Labels)
+		if !slices.ContainsFunc(i.Labels, func(existing string) bool { return strings.EqualFold(existing, name) }) {
+			i.Labels = append(i.Labels, name)
 		}
 	}
 	return nil
@@ -257,7 +289,7 @@ func (f *fakeClient) RemoveLabel(ctx context.Context, number int, label string) 
 	if err != nil {
 		return err
 	}
-	i.Labels = slices.DeleteFunc(slices.Clone(i.Labels), func(l string) bool { return l == label })
+	i.Labels = slices.DeleteFunc(slices.Clone(i.Labels), func(l string) bool { return strings.EqualFold(l, label) })
 	return nil
 }
 
@@ -355,6 +387,11 @@ func (f *fakeClient) AddBlockedBy(ctx context.Context, number, blockingNumber in
 	if slices.ContainsFunc(b.BlockedBy, func(r model.Ref) bool { return r.Number == number }) {
 		return fmt.Errorf("issues #%d and #%d would block each other", number, blockingNumber)
 	}
+	// Adding an edge that already exists is a no-op, as on GitHub: the
+	// mutation is idempotent, not an error and not a second edge.
+	if slices.ContainsFunc(i.BlockedBy, func(r model.Ref) bool { return r.Number == b.Number }) {
+		return nil
+	}
 	i.BlockedBy = append(i.BlockedBy, model.Ref{Number: b.Number, State: b.State})
 	return nil
 }
@@ -392,12 +429,18 @@ func (f *fakeClient) AddSubIssue(ctx context.Context, parentNumber, childNumber 
 		return err
 	}
 	if child.Parent != nil {
+		// Re-adding the existing parent is a no-op, with or without replace:
+		// there is only ever one parent, and the tree did not change.
+		if child.Parent.Number == parent.Number {
+			return nil
+		}
 		if !replaceParent {
 			return fmt.Errorf("#%d already has a parent", child.Number)
 		}
 		dropSubIssue(f.byNumber(child.Parent.Number), child.Number)
 	}
 	child.Parent = &model.Ref{Number: parent.Number, State: parent.State}
+	child.ParentTitle = parent.Title
 	parent.SubIssues = append(parent.SubIssues, model.Ref{Number: child.Number, State: child.State})
 	return nil
 }
@@ -415,6 +458,7 @@ func (f *fakeClient) RemoveSubIssue(ctx context.Context, parentNumber, childNumb
 		return err
 	}
 	child.Parent = nil
+	child.ParentTitle = ""
 	dropSubIssue(parent, child.Number)
 	return nil
 }
@@ -440,6 +484,11 @@ func (f *fakeClient) ListLabels(ctx context.Context) ([]gh.Label, error) {
 func (f *fakeClient) CreateLabel(ctx context.Context, label gh.Label) error {
 	if err := f.record("CreateLabel " + label.Name); err != nil {
 		return err
+	}
+	// Bootstrapping is safe to repeat, and label names are case-insensitive:
+	// an existing spelling wins.
+	if slices.ContainsFunc(f.labels, func(l gh.Label) bool { return strings.EqualFold(l.Name, label.Name) }) {
+		return nil
 	}
 	f.labels = append(f.labels, label)
 	return nil

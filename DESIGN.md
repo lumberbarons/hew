@@ -91,9 +91,12 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
   `create --discovered-from <n>`.
 - **Claiming is guarded**: `start` refuses an issue that is already assigned or
   `in-progress` and exits with a distinct code, so an agent loop moves on to the
-  next ready item instead of doubling up. GitHub has no conditional writes, so the
+  next ready item instead of doubling up. GitHub has no conditional writes, so its
   guard is check-then-act with a re-read after claiming — a small race window
-  remains (see open questions).
+  remains (see open questions). The local backend holds an exclusive lock and
+  implements the optional atomic claim (`gh.Claimer`), so simultaneous starts
+  there have exactly one winner; its default identity is per worktree, which is
+  what keeps exit 3 and exit 5 distinguishable under one OS account.
 - **Untriaged, not broken**: an issue missing its priority or type label — typical
   for anything filed outside the tool — is *untriaged*, a normal state.
   `hew triage` lists them so a human can label each via `set`; nothing is ever
@@ -704,10 +707,23 @@ Findings, including the ones that don't flatter the tool:
 - **Branch coverage.** The Go toolchain only does statement coverage; `gobco` adds
   branch/condition coverage via source instrumentation but is niche and awkward in
   CI. Revisit if statement coverage starts hiding untested branches in practice.
-- **Same-user claim races.** Every agent authenticates as `@me`, so two parallel
-  sessions that race `start` inside the guard window are indistinguishable by
-  assignee or label — both think they won. If this happens in practice, tie-break
-  with a claim comment carrying a session nonce (earliest comment wins, loser backs
-  off). Deferred until actually observed. Exit 5 does not address this: it tells a
-  caller the claim is `@me`'s, which is exactly the point at which one of *my* own
-  sessions cannot tell whether the claimant is itself or a sibling.
+- **Same-user claim races — narrowed for the local backend.** Every GitHub agent
+  authenticates as `@me`, so two parallel sessions that race `start` inside the
+  guard window are indistinguishable by assignee or label — both think they won.
+  Exit 5 does not address this: it tells a caller the claim is `@me`'s, which is
+  exactly the point at which one of *my* own sessions cannot tell whether the
+  claimant is itself or a sibling. The local backend narrows both halves. Its
+  default identity is `HEW_USER` when set, else the OS login qualified with the
+  linked worktree's name and a short digest of its path (the main checkout keeps
+  the bare login), so agents under one account in different worktrees are
+  different claimants and exit 3/5 stay meaningful. It errors rather than guess
+  when git cannot say which checkout this is, since a silently different identity
+  would turn your own claim into someone else's. The identity is per worktree, not
+  per session: two sessions sharing a worktree, or both in the main checkout,
+  remain one claimant, and the later `start` gets exit 5 ("resume") instead of 3.
+  `HEW_USER` must be unique per agent wherever sessions share a checkout. Its
+  store also implements an atomic claim under the lock it already holds, so two
+  starts that both passed the pre-read still have exactly one winner and the
+  loser gets the conflict. GitHub
+  keeps check-then-act plus the post-claim warning; if that becomes a real problem,
+  the claim-comment nonce remains the fallback.

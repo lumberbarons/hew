@@ -10,15 +10,19 @@
 package local
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/git"
 )
 
 // DirName is the store directory, created at the root of the main checkout.
@@ -105,16 +109,73 @@ func Init(dir string) error {
 	return nil
 }
 
-// DefaultViewer is who the local tracker says you are: HEW_USER, else the OS
-// login. It is login-shaped on purpose — it lands in assignee lists and
-// "@user" output, where a git display name with spaces would read badly.
-func DefaultViewer() string {
-	for _, name := range []string{"HEW_USER", "USER"} {
-		if v := os.Getenv(name); v != "" {
-			return v
+// DefaultViewer is who the local tracker says this agent is. HEW_USER wins
+// when set: it is the escape hatch for a harness, and it must be unique per
+// concurrent agent, because a shared identity cannot tell "this claim is
+// mine" from "a sibling session holds it". Otherwise the OS login is
+// qualified with the current linked worktree, so two agents under one OS
+// account in different worktrees are distinct claimants and start's exit codes
+// stay meaningful; the main checkout keeps the bare login. It is login-shaped
+// on purpose — it lands in assignee lists and "@user" output, where a git
+// display name with spaces would read badly.
+//
+// It fails when the checkout cannot be determined rather than falling back to
+// the bare login: the identity would then change between invocations, and a
+// claim of your own would read as someone else's.
+func DefaultViewer() (string, error) {
+	return viewerFor(os.Getenv, func() (string, error) { return git.LinkedWorktree("") })
+}
+
+// viewerFor is the identity rule with the environment and checkout injected,
+// so its fallbacks and qualification are testable without either. worktree
+// returns the linked worktree's root path, empty for the main checkout; it is
+// only consulted when HEW_USER does not decide the answer.
+func viewerFor(getenv func(string) string, worktree func() (string, error)) (string, error) {
+	if v := getenv("HEW_USER"); v != "" {
+		return v, nil
+	}
+	login := getenv("USER")
+	if login == "" {
+		login = "local"
+	}
+	root, err := worktree()
+	if err != nil {
+		return "", fmt.Errorf("cannot tell which agent this is (set HEW_USER to name it): %w", err)
+	}
+	if root == "" {
+		return login, nil
+	}
+	return login + "-" + worktreeTag(root), nil
+}
+
+// worktreeTag names a linked worktree for an assignee handle: its directory
+// name, for readability, plus a short digest of the full path, because names
+// repeat across parents (/a/work, /b/work) and collapse once sanitised
+// (feature/one, feature-one). The digest keeps those distinct and the result
+// stable for as long as the worktree stays where it is.
+func worktreeTag(root string) string {
+	sum := sha256.Sum256([]byte(root))
+	tag := hex.EncodeToString(sum[:3])
+	if name := identityPart(filepath.Base(root)); name != "" {
+		return name + "-" + tag
+	}
+	return tag
+}
+
+// identityPart reduces a worktree directory name to the characters an
+// assignee handle can carry: a path may contain spaces or punctuation that
+// would read as several names in "@user" output.
+func identityPart(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
 		}
 	}
-	return "local"
+	return strings.Trim(b.String(), "-")
 }
 
 // Store is an open local tracker.
@@ -124,7 +185,10 @@ type Store struct {
 	now    func() time.Time
 }
 
-var _ gh.IssueStore = (*Store)(nil)
+var (
+	_ gh.IssueStore = (*Store)(nil)
+	_ gh.Claimer    = (*Store)(nil)
+)
 
 // Open opens the tracker in dir as viewer. It refuses a directory whose config
 // no longer says local: after migration the issues are an archive, and writing
@@ -141,7 +205,9 @@ func Open(dir, viewer string) (*Store, error) {
 		return nil, err
 	}
 	if viewer == "" {
-		viewer = DefaultViewer()
+		if viewer, err = DefaultViewer(); err != nil {
+			return nil, err
+		}
 	}
 	return &Store{dir: dir, viewer: viewer, now: func() time.Time { return time.Now().UTC() }}, nil
 }

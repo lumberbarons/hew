@@ -2,10 +2,13 @@ package local
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -121,30 +124,157 @@ func TestReadConfigRejectsBadFiles(t *testing.T) {
 }
 
 func TestOpenDefaultsTheViewer(t *testing.T) {
-	t.Setenv("HEW_USER", "")
-	t.Setenv("USER", "login")
+	t.Setenv("HEW_USER", "agent")
 	dir := filepath.Join(t.TempDir(), DirName)
 	must(t, Init(dir))
 	s, err := Open(dir, "")
 	must(t, err)
-	if got, _ := s.Viewer(ctx); got != "login" {
-		t.Errorf("viewer = %q, want the OS login", got)
+	if got, _ := s.Viewer(ctx); got != "agent" {
+		t.Errorf("viewer = %q, want the explicit agent identity", got)
 	}
 }
 
-func TestDefaultViewerPrefersHewUserThenLoginThenAFallback(t *testing.T) {
+func TestViewerForFallsBackToALoginAndQualifiesAWorktree(t *testing.T) {
+	env := func(vars map[string]string) func(string) string {
+		return func(k string) string { return vars[k] }
+	}
+	at := func(root string) func() (string, error) {
+		return func() (string, error) { return root, nil }
+	}
+	for _, tc := range []struct {
+		name     string
+		env      map[string]string
+		worktree string
+		want     string
+	}{
+		{"main checkout", map[string]string{"USER": "jim"}, "", "jim"},
+		{"linked worktree", map[string]string{"USER": "jim"}, "/w/agent-two", "jim-agent-two-" + shortDigest("/w/agent-two")},
+		{"no login", nil, "", "local"},
+		{"no login in a worktree", nil, "/w/agent-two", "local-agent-two-" + shortDigest("/w/agent-two")},
+		{"explicit identity wins", map[string]string{"HEW_USER": "agent", "USER": "jim"}, "/w/agent-two", "agent"},
+		{"separators cannot split a handle", map[string]string{"USER": "jim"}, "/w/feature/one two", "jim-one-two-" + shortDigest("/w/feature/one two")},
+		{"an unusable name still tells worktrees apart", map[string]string{"USER": "jim"}, "/w////", "jim-w-" + shortDigest("/w////")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := viewerFor(env(tc.env), at(tc.worktree))
+			if err != nil || got != tc.want {
+				t.Errorf("= %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// Distinct worktrees must be distinct claimants even when their directory
+// names match or only differ in characters the handle drops.
+func TestViewerForSeparatesWorktreesThatShareAName(t *testing.T) {
+	login := func(k string) string {
+		if k == "USER" {
+			return "jim"
+		}
+		return ""
+	}
+	seen := map[string]string{}
+	for _, root := range []string{"/a/work", "/b/work", "/w/feature/one", "/w/feature-one", "/w/x"} {
+		got, err := viewerFor(login, func() (string, error) { return root, nil })
+		must(t, err)
+		if prev, dup := seen[got]; dup {
+			t.Errorf("%s and %s share the identity %q", prev, root, got)
+		}
+		seen[got] = root
+	}
+	// A main-checkout user whose login looks like a qualified one stays apart.
+	other, err := viewerFor(func(k string) string {
+		if k == "USER" {
+			return "jim-x"
+		}
+		return ""
+	}, func() (string, error) { return "", nil })
+	must(t, err)
+	if prev, dup := seen[other]; dup {
+		t.Errorf("login jim-x collides with the worktree %s as %q", prev, other)
+	}
+}
+
+// A git failure must not quietly demote the identity to the bare login: the
+// same agent would be a different claimant on its next invocation.
+func TestViewerForRefusesToGuessWhenTheCheckoutIsUnknown(t *testing.T) {
+	getenv := func(k string) string {
+		if k == "USER" {
+			return "jim"
+		}
+		return ""
+	}
+	_, err := viewerFor(getenv, func() (string, error) { return "", errors.New("git: not found") })
+	if err == nil || !strings.Contains(err.Error(), "HEW_USER") || !strings.Contains(err.Error(), "git: not found") {
+		t.Errorf("err = %v, want it to name HEW_USER and wrap the git failure", err)
+	}
+	// An explicit identity needs no checkout at all.
+	got, err := viewerFor(func(k string) string {
+		if k == "HEW_USER" {
+			return "agent"
+		}
+		return ""
+	}, func() (string, error) { return "", errors.New("must not be asked") })
+	if err != nil || got != "agent" {
+		t.Errorf("= %q, %v; want HEW_USER without consulting git", got, err)
+	}
+}
+
+// shortDigest is the path tag the identity carries, spelled out independently
+// of worktreeTag so a change to the scheme is a deliberate test change.
+func shortDigest(path string) string {
+	sum := sha256.Sum256([]byte(path))
+	return hex.EncodeToString(sum[:3])
+}
+
+func TestDefaultViewerLetsAnAgentOverrideItsIdentity(t *testing.T) {
 	t.Setenv("HEW_USER", "agent")
-	t.Setenv("USER", "login")
-	if got := DefaultViewer(); got != "agent" {
-		t.Errorf("= %q, want HEW_USER first", got)
+	if got, err := DefaultViewer(); err != nil || got != "agent" {
+		t.Errorf("= %q, %v; want HEW_USER first", got, err)
 	}
+}
+
+// Two agents under one OS account must not share a viewer: exit 5 means "this
+// claim is yours", which is only true inside one worktree. The main checkout
+// keeps the bare login; a linked worktree qualifies it with its name.
+func TestDefaultViewerTellsWorktreesApart(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	main, err := filepath.EvalSymlinks(t.TempDir())
+	must(t, err)
+	gitIn(t, main, "init", "--initial-branch=main")
+	gitIn(t, main, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "--allow-empty", "-m", "seed")
+	worktree := filepath.Join(t.TempDir(), "agent-two")
+	gitIn(t, main, "worktree", "add", "-b", "feat/two", worktree)
+
 	t.Setenv("HEW_USER", "")
-	if got := DefaultViewer(); got != "login" {
-		t.Errorf("= %q, want USER", got)
+	t.Setenv("USER", "jim")
+	t.Chdir(main)
+	if got, err := DefaultViewer(); err != nil || got != "jim" {
+		t.Errorf("main checkout viewer = %q, %v; want the bare login", got, err)
 	}
-	t.Setenv("USER", "")
-	if got := DefaultViewer(); got != "local" {
-		t.Errorf("= %q, want the fallback", got)
+	t.Chdir(worktree)
+	// git reports the resolved path, which is what the tag digests.
+	real, err := filepath.EvalSymlinks(worktree)
+	must(t, err)
+	want := "jim-agent-two-" + shortDigest(real)
+	if got, err := DefaultViewer(); err != nil || got != want {
+		t.Errorf("worktree viewer = %q, %v; want %q", got, err, want)
+	}
+	// Outside any checkout there is nothing to qualify with: an error, not a guess.
+	t.Chdir(t.TempDir())
+	if got, err := DefaultViewer(); err == nil {
+		t.Errorf("outside a checkout viewer = %q, want an error", got)
+	}
+}
+
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
 }
 
@@ -228,6 +358,78 @@ func TestParallelWritersLoseNothing(t *testing.T) {
 			t.Errorf("number %d was handed out twice", i.Number)
 		}
 		seen[i.Number] = true
+	}
+}
+
+// The point of the atomic claim: separate Store values over one directory
+// stand in for separate agents in separate worktrees, and a simultaneous start
+// must produce exactly one winner rather than two agents both believing they
+// claimed the issue.
+func TestConcurrentClaimsHaveExactlyOneWinner(t *testing.T) {
+	s := newStore(t)
+	n := mustCreate(t, s, "contested", "", "P2", "bug")
+
+	const agents = 8
+	type result struct {
+		viewer string
+		err    error
+	}
+	start := make(chan struct{})
+	results := make(chan result, agents)
+	for i := range agents {
+		viewer := fmt.Sprintf("agent-%d", i)
+		agent, err := Open(s.dir, viewer)
+		must(t, err)
+		go func() {
+			<-start
+			results <- result{viewer, agent.ClaimIssue(ctx, n, viewer, false)}
+		}()
+	}
+	close(start)
+
+	var winners []string
+	for range agents {
+		r := <-results
+		switch {
+		case r.err == nil:
+			winners = append(winners, r.viewer)
+		case !errors.Is(r.err, gh.ErrClaimConflict):
+			t.Errorf("%s: err = %v, want nil or ErrClaimConflict", r.viewer, r.err)
+		}
+	}
+	if len(winners) != 1 {
+		t.Fatalf("%d winners, want exactly one: %v", len(winners), winners)
+	}
+	got, err := s.GetIssue(ctx, n)
+	must(t, err)
+	if !slices.Equal(got.Assignees, winners) || !got.InProgress() {
+		t.Errorf("claim = assignees %v labels %v, want %v and in-progress", got.Assignees, got.Labels, winners)
+	}
+}
+
+// start's pre-read decides "claimed" with the model's exact-case test, so the
+// store's atomic claim must agree: a label differing only in case is not a
+// claim, and claiming reuses its spelling rather than adding a second label.
+func TestClaimIssueJudgesTheInProgressLabelLikeTheModel(t *testing.T) {
+	s := newStore(t)
+	n := mustCreate(t, s, "odd label", "", "P2", "bug")
+	must(t, s.AddLabels(ctx, n, []string{"In-Progress"}))
+	before, err := s.GetIssue(ctx, n)
+	must(t, err)
+	if before.Claimed() {
+		t.Fatalf("labels %v read as claimed; the premise of this test is that the model says no", before.Labels)
+	}
+	must(t, s.ClaimIssue(ctx, n, "agent", false))
+	got, err := s.GetIssue(ctx, n)
+	must(t, err)
+	inProgress := 0
+	for _, l := range got.Labels {
+		if strings.EqualFold(l, "in-progress") {
+			inProgress++
+		}
+	}
+	if inProgress != 1 || !slices.Equal(got.Assignees, []string{"agent"}) {
+		t.Errorf("labels %v assignees %v, want one in-progress label and the claimant", got.Labels, got.Assignees)
 	}
 }
 

@@ -2,6 +2,7 @@ package git
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -31,4 +32,34 @@ func mainCheckout(r runner, dir string) (string, error) {
 		return "", fmt.Errorf("cannot find the main checkout: unexpected `git worktree list` output %q", first)
 	}
 	return path, nil
+}
+
+// LinkedWorktree returns the root path of the checkout containing dir when it
+// is a linked worktree, which is what tells concurrent agents in one
+// repository apart. The full path rather than the directory name, because two
+// worktrees can share a name under different parents. It is empty for the main
+// checkout, so a lone user in the primary checkout keeps the bare login, and an
+// error when dir is not in a git checkout at all.
+func LinkedWorktree(dir string) (string, error) { return linkedWorktree(run, dir) }
+
+func linkedWorktree(r runner, dir string) (string, error) {
+	args := []string{"rev-parse", "--show-toplevel"}
+	if dir != "" {
+		args = append([]string{"-C", dir}, args...)
+	}
+	root, err := r("git", args...)
+	if err != nil {
+		return "", fmt.Errorf("cannot find the working tree: %w", err)
+	}
+	if root == "" {
+		return "", fmt.Errorf("cannot find the working tree: git returned no path")
+	}
+	main, err := mainCheckout(r, dir)
+	if err != nil {
+		return "", err
+	}
+	if filepath.Clean(root) == filepath.Clean(main) {
+		return "", nil
+	}
+	return filepath.Clean(root), nil
 }
