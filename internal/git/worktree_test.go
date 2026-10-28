@@ -2,6 +2,7 @@ package git
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -86,6 +87,24 @@ func TestLinkedWorktreeReportsGitFailure(t *testing.T) {
 	}
 }
 
+// isolateGit keeps the developer's git environment out of a real-git test:
+// ambient GIT_* variables (a hook's GIT_DIR, say) would redirect the commands
+// at the wrong repository, and global or system config (commit.gpgsign,
+// init.defaultBranch) would change what they do. Both are restored on cleanup.
+func isolateGit(t *testing.T) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "GIT_") {
+			t.Setenv(k, os.Getenv(k)) // registers the restore
+			if err := os.Unsetenv(k); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+}
+
 // The reason this exists: from a linked worktree, the answer must be the
 // main checkout, not the worktree. Real git, because a fake runner accepts any
 // argument string.
@@ -93,12 +112,13 @@ func TestMainCheckoutFromALinkedWorktreeFindsTheMainCheckout(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
+	isolateGit(t)
 	git := func(dir string, args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
 		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Skipf("git %v failed: %v: %s", args, err, out)
+			t.Fatalf("git %v failed: %v: %s", args, err, out)
 		}
 	}
 	// macOS temp dirs sit behind a symlink and git reports the real path.
@@ -107,7 +127,7 @@ func TestMainCheckoutFromALinkedWorktreeFindsTheMainCheckout(t *testing.T) {
 		t.Fatal(err)
 	}
 	git(main, "init", "--initial-branch=main")
-	git(main, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "--allow-empty", "-m", "seed")
+	git(main, "-c", "user.email=t@example.com", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "seed")
 	wt := filepath.Join(t.TempDir(), "wt")
 	git(main, "worktree", "add", "-b", "feat/x", wt)
 	if wt, err = filepath.EvalSymlinks(wt); err != nil {

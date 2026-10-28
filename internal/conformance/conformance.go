@@ -439,6 +439,9 @@ func search(t *testing.T, s gh.IssueStore) {
 
 	found, total, err := s.SearchIssues(ctx, "retry")
 	must(t, err)
+	if len(found) == 0 {
+		t.Fatal("search retry found nothing")
+	}
 	var got []int
 	for _, i := range found {
 		got = append(got, i.Number)

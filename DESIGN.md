@@ -509,7 +509,14 @@ agent silently duplicating half a plan.
   nodes just to count.
 - **Layout**:
   - `cmd/hew/` — main, urfave/cli command wiring
-  - `internal/gh/` — thin API layer (interface, so commands are testable against a fake)
+  - `internal/gh/` — thin API layer, split in two so commands are testable against
+    a fake and a backend need not be GitHub: `IssueStore` is everything every
+    command but `pr` needs; `PullRequests` is `pr`'s alone; `Client` is their union,
+    which the go-gh implementation satisfies. The CLI's `App` holds the halves
+    separately, and `App.PRs` is nil on a backend with no pull requests (the local
+    store implements `IssueStore` only), where `pr` refuses rather than guesses.
+    Optional capabilities (`Claimer`, the atomic claim) are separate interfaces the
+    store may also implement.
   - `internal/model/` — Issue/Epic domain types, ready/normalization/cycle logic
     (pure, unit-tested)
   - `internal/render/` — text + JSON renderers (golden-file tests)
@@ -517,6 +524,10 @@ agent silently duplicating half a plan.
     live here)
   - `internal/git/` — local branch state for `pr` (current branch, its upstream
     name, has-upstream)
+  - `internal/local/` — the JSONL-backed `IssueStore` for repos that track work
+    locally: one `issues.jsonl` in a self-ignoring `.hew/` at the main checkout.
+    The directory is untracked and ignored, so `git clean -fdx` at the main
+    checkout deletes the only copy of the tracker.
 - **Testing**: unit tests against a fake API layer; golden files for renderer output.
   An integration smoke test against a real scratch repo (behind a build tag, run
   manually — it needs a token and mutates state, so it stays out of CI) is deferred

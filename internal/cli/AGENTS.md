@@ -1,13 +1,13 @@
 # internal/cli
 
-The commands themselves, written against the `gh.Client` interface so `cmd/hew` stays pure wiring and every behavior is testable without hitting GitHub.
+The commands themselves, written against the `gh.IssueStore` interface (and `gh.PullRequests`, for `pr` alone, which `App.PRs` leaves nil on a backend with no pull requests) so `cmd/hew` stays pure wiring and every behavior is testable without hitting GitHub.
 
 | File | What | When to read |
 |---|---|---|
 | `app.go` | The `App` struct every command hangs off: client, repo, output writers, and the `emit*` helpers that pick text vs `--json` | Adding a command, or changing how output is emitted |
 | `read.go` | The read commands: `ready`, `list`, `show`, `search`, `triage`, `prime`, `epic status` — one query, filtered client-side | Changing what a read command returns or how it filters |
 | `write.go` | The mutating commands: `create`, `start`, `set`, `close`, `reopen`, `block`, `unblock`, `epic create`, `init`; label swaps never stack, and `start` uses a backend's atomic claim when it has one, re-reading after the check-then-act path otherwise | Changing a mutation or the claim guard |
-| `draft.go` | `draft`: composes an issue body from the section flags, or revalidates a draft file, with no `gh.Client` use — the local counterpart to `create --body-file` | Changing the local body preflight |
+| `draft.go` | `draft`: composes an issue body from the section flags, or revalidates a draft file, with no `gh.IssueStore` use — the local counterpart to `create --body-file` | Changing the local body preflight |
 | `pr.go` | `pr`: infers the claimed issue, composes the body from it, enforces exactly one `Fixes #n`, derives the title from the issue type | Changing PR composition or issue inference |
 | `apply.go` | `apply`: walks a parsed `internal/plan` plan, creating issues then wiring dependency edges | Changing `apply` execution (schema and validation live in `internal/plan`) |
 | `migrate.go` | `migrate beads`: the adapter that maps a parsed beads snapshot onto the conventions (priorities, types, deps, epics, in-progress state) as engine items | Changing the beads migration |
@@ -21,7 +21,7 @@ Checkpoint state is trusted local scratch, never a portable input. A state file 
 
 | File | What | When to read |
 |---|---|---|
-| `fake_test.go` | `fakeClient`, a stateful in-memory `gh.Client` where mutations really mutate, so guarded flows (claim, re-read after claim) behave like the real API | Writing a test that needs a new client behavior |
+| `fake_test.go` | `fakeClient`, a stateful in-memory `gh.IssueStore` and `gh.PullRequests` where mutations really mutate, so guarded flows (claim, re-read after claim) behave like the real API | Writing a test that needs a new client behavior |
 | `conformance_test.go` | Runs the shared `internal/conformance` suite against `fakeClient`, so the fake and the local store cannot disagree about what a backend does | Changing `fakeClient` behavior |
 | `read_test.go` | Covers `read.go` except search: filtering, sorting, empty states, and the cycle and truncated-connection warnings | Changing a read command |
 | `search_test.go` | Covers `search` in `read.go`: title and body matching, closed issues, best-match order | Changing search behavior |

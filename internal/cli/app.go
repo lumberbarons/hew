@@ -1,6 +1,6 @@
-// Package cli implements the commands against the gh.Client interface, so
-// cmd/hew is pure wiring and everything with behavior is testable
-// against a fake.
+// Package cli implements the commands against the gh.IssueStore interface
+// (plus gh.PullRequests, for `pr` alone), so cmd/hew is pure wiring and
+// everything with behavior is testable against a fake.
 package cli
 
 import (

@@ -7,6 +7,9 @@
 // temp name and renames it into place, so concurrent agents in different
 // worktrees never lose each other's writes and a reader never sees a torn
 // file. Reads take no lock for the same reason.
+//
+// The directory ignores itself, so git treats it as untracked-and-ignored:
+// `git clean -fdx` at the main checkout deletes the only copy of the tracker.
 package local
 
 import (

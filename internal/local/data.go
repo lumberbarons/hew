@@ -116,6 +116,9 @@ func readData(path string) (*data, error) {
 			if rec.Number <= 0 || seen[rec.Number] {
 				return nil, bad(fmt.Errorf("issue number %d is invalid or repeated", rec.Number))
 			}
+			if rec.State != string(gh.StateOpen) && rec.State != string(gh.StateClosed) {
+				return nil, bad(fmt.Errorf("issue %d has unknown state %q (want %s or %s)", rec.Number, rec.State, gh.StateOpen, gh.StateClosed))
+			}
 			seen[rec.Number] = true
 			rec.Type = ""
 			d.issues = append(d.issues, &rec)
