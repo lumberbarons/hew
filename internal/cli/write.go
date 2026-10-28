@@ -10,6 +10,7 @@ import (
 
 	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/local"
 	"github.com/lumberbarons/hew/internal/model"
 	"github.com/lumberbarons/hew/internal/render"
 )
@@ -758,8 +759,47 @@ func (a *App) Init(ctx context.Context) error {
 		} else {
 			a.printf("created labels: %s\n", strings.Join(created, ", "))
 		}
-		a.printf("\nAdd to CLAUDE.md:\n\n%s\n", conventions.ClaudeSnippet)
-		a.printf("\nOr let a hook inject the primer automatically: hew hooks install <claude|codex|cursor|opencode>\n")
+		a.printClaudeSnippet(a.claudeSnippet())
+	})
+}
+
+// claudeSnippet is the CLAUDE.md text for the backend this App talks to.
+func (a *App) claudeSnippet() string {
+	if a.Local {
+		return conventions.ClaudeSnippetLocal
+	}
+	return conventions.ClaudeSnippet
+}
+
+func (a *App) printClaudeSnippet(snippet string) {
+	a.printf("\nAdd to CLAUDE.md:\n\n%s\n", snippet)
+	a.printf("\nOr let a hook inject the primer automatically: hew hooks install <claude|codex|cursor|opencode>\n")
+}
+
+// InitLocal creates the local tracker for the checkout containing dir (the
+// working directory when empty) and prints the matching CLAUDE.md snippet. The
+// tracker lives at the main checkout, so running it from a linked worktree
+// sets up the one every worktree shares. It is safe to repeat, and refuses a
+// repo whose tracker has moved to another backend rather than reporting a
+// local one that no command would use.
+func (a *App) InitLocal(dir string) error {
+	tracker, err := local.MainDir(dir)
+	if err != nil {
+		return genericErr("%v", err)
+	}
+	if err := local.Init(tracker); err != nil {
+		return genericErr("creating %s: %v", tracker, err)
+	}
+	cfg, err := local.ReadConfig(tracker)
+	if err != nil {
+		return genericErr("%v", err)
+	}
+	if cfg.Backend != local.BackendLocal {
+		return genericErr("%s already tracks issues in %q, not locally", tracker, cfg.Backend)
+	}
+	return a.emitResult(map[string]any{"backend": local.BackendLocal, "path": tracker}, func() {
+		a.printf("local tracker ready in %s\n", tracker)
+		a.printClaudeSnippet(conventions.ClaudeSnippetLocal)
 	})
 }
 

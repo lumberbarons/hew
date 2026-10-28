@@ -52,8 +52,11 @@ func genericErr(format string, args ...any) *ExitError {
 type App struct {
 	Client gh.IssueStore
 	// PRs is nil on a backend with no pull requests; `pr` refuses there.
-	PRs    gh.PullRequests
-	Repo   gh.Repo
+	PRs  gh.PullRequests
+	Repo gh.Repo
+	// Local marks the local-only backend: the primer and init output are the
+	// local variants, which have no pull-request step.
+	Local  bool
 	Out    io.Writer
 	ErrOut io.Writer
 	JSON   bool
