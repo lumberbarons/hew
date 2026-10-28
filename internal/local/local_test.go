@@ -628,8 +628,8 @@ func TestReadingRejectsAnUnknownStateNamingIt(t *testing.T) {
 		rec := fmt.Sprintf(`{"number":1,"title":"t","state":%q,"created_at":"2026-07-01T00:00:00Z"}`+"\n", state)
 		must(t, os.WriteFile(path, []byte(meta+rec), 0o644))
 		_, err := readData(path)
-		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%q", state)) {
-			t.Errorf("state %q: err = %v, want one naming it", state, err)
+		if err == nil || !strings.Contains(err.Error(), "unknown state "+fmt.Sprintf("%q", state)) {
+			t.Errorf("state %q: err = %v, want an unknown-state error naming it", state, err)
 		}
 	}
 }

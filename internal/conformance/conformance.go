@@ -439,6 +439,9 @@ func search(t *testing.T, s gh.IssueStore) {
 
 	found, total, err := s.SearchIssues(ctx, "retry")
 	must(t, err)
+	if len(found) == 0 {
+		t.Fatal("search retry found nothing")
+	}
 	var got []int
 	for _, i := range found {
 		got = append(got, i.Number)
@@ -454,9 +457,6 @@ func search(t *testing.T, s gh.IssueStore) {
 	must(t, err)
 	if len(none) != 0 || total != 0 {
 		t.Errorf("search for nothing = %d results, total %d", len(none), total)
-	}
-	if len(found) == 0 {
-		t.Fatal("search retry found nothing")
 	}
 	if !strings.Contains(strings.ToLower(found[0].Title+found[0].Body), "retry") {
 		t.Errorf("first result %q does not contain the term", found[0].Title)
