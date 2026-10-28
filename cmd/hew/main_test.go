@@ -543,3 +543,32 @@ func TestPRSectionFlagsAreRepeatable(t *testing.T) {
 		t.Errorf("empty --testing: sections = %+v, set = %v", got, set)
 	}
 }
+
+// TestPRForIsRepeatable pins #134: --for declares the set a PR closes, one
+// flag per issue, and a single --for stays a single issue.
+func TestPRForIsRepeatable(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args []string
+		want []int
+	}{
+		"none":    {nil, nil},
+		"one":     {[]string{"--for", "46"}, []int{46}},
+		"several": {[]string{"--for", "46", "--for", "50"}, []int{46, 50}},
+		"comma":   {[]string{"--for", "46,50"}, []int{46, 50}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			app := root()
+			var got []int
+			findCommand(t, app, "pr").Action = func(_ context.Context, cmd *ucli.Command) error {
+				got = cmd.IntSlice("for")
+				return nil
+			}
+			if err := app.Run(context.Background(), append([]string{"hew", "pr"}, tc.args...)); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("for = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

@@ -12,7 +12,7 @@ func TestPRComposeRendersSectionsThenTrailers(t *testing.T) {
 		Why:     "The PR step was freeform.",
 		Testing: "go test -race ./...",
 		Risk:    "Two-way door; blast radius: the pr command.",
-	}.Compose(PRTrailers{Fixes: 30, Epic: 33})
+	}.Compose(PRTrailers{Fixes: []int{30}, Epics: []int{33}})
 	want := `### What
 
 Adds the pr command.
@@ -45,7 +45,7 @@ func TestPRComposeCarriesMarkedUpTextVerbatim(t *testing.T) {
 		What:    "pr now sends `git rev-parse --abbrev-ref @{u}` as the head.",
 		Why:     "The local name failed in a worktree.",
 		Testing: "`go test -race ./...` is green.",
-	}.Compose(PRTrailers{Fixes: 65})
+	}.Compose(PRTrailers{Fixes: []int{65}})
 	want := `### What
 
 pr now sends ` + "`git rev-parse --abbrev-ref @{u}`" + ` as the head.
@@ -84,7 +84,7 @@ func TestPRComposeIsStableOnAlreadyComposedText(t *testing.T) {
 	if what != "Send the upstream name via `--for`." {
 		t.Fatalf("Sections.Compose() altered the section: %q", what)
 	}
-	body := PRSections{What: what}.Compose(PRTrailers{Fixes: 65})
+	body := PRSections{What: what}.Compose(PRTrailers{Fixes: []int{65}})
 	if !strings.Contains(body, what) {
 		t.Errorf("re-composing changed the section:\nbody:\n%s\n\nwant it to contain %q", body, what)
 	}
@@ -96,7 +96,7 @@ func TestPRComposeIsStableOnAlreadyComposedText(t *testing.T) {
 // An absent section leaves no bare header behind — the same rule the issue
 // template follows.
 func TestPRComposeOmitsEmptySections(t *testing.T) {
-	got := PRSections{Why: "  \n "}.Compose(PRTrailers{Fixes: 7})
+	got := PRSections{Why: "  \n "}.Compose(PRTrailers{Fixes: []int{7}})
 	if got != "Fixes #7" {
 		t.Errorf("Compose() = %q, want just the trailer", got)
 	}
@@ -106,7 +106,7 @@ func TestPRComposeOmitsEmptySections(t *testing.T) {
 }
 
 func TestPRComposeOmitsEpicWhenAbsent(t *testing.T) {
-	got := PRSections{What: "x"}.Compose(PRTrailers{Fixes: 7})
+	got := PRSections{What: "x"}.Compose(PRTrailers{Fixes: []int{7}})
 	if strings.Contains(got, "Part of") {
 		t.Errorf("Compose() invented an epic link: %q", got)
 	}
@@ -156,7 +156,7 @@ func TestFixesReferences(t *testing.T) {
 // FixesLine is what Compose writes, so FixesReferences must read it back —
 // otherwise the one-Fixes guard could pass a body it just mis-parsed.
 func TestFixesLineRoundTrips(t *testing.T) {
-	body := PRSections{What: "x"}.Compose(PRTrailers{Fixes: 30})
+	body := PRSections{What: "x"}.Compose(PRTrailers{Fixes: []int{30}})
 	if got := FixesReferences(body); !reflect.DeepEqual(got, []int{30}) {
 		t.Errorf("FixesReferences(Compose(...)) = %v, want [30]", got)
 	}
@@ -331,7 +331,7 @@ func TestPRListDropsBlankValues(t *testing.T) {
 }
 
 func TestPRComposeRendersListUnderSectionHeader(t *testing.T) {
-	got := PRSections{Testing: PRList([]string{"build passes", "lint is clean"})}.Compose(PRTrailers{Fixes: 57})
+	got := PRSections{Testing: PRList([]string{"build passes", "lint is clean"})}.Compose(PRTrailers{Fixes: []int{57}})
 	want := "### Testing\n\n- build passes\n- lint is clean\n\nFixes #57"
 	if got != want {
 		t.Errorf("Compose() =\n%s\n\nwant\n%s", got, want)

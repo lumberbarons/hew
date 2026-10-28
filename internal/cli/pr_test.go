@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -327,7 +328,7 @@ func TestPRForOverridesInference(t *testing.T) {
 	app, _, _ := newApp(f)
 	onBranch(app, "feat/x")
 
-	if err := app.PR(context.Background(), PROpts{For: 31, Sections: sections("", "", "t")}); err != nil {
+	if err := app.PR(context.Background(), PROpts{For: []int{31}, Sections: sections("", "", "t")}); err != nil {
 		t.Fatal(err)
 	}
 	if body := prBody(t, createdPR(t, f)); !strings.Contains(body, "Fixes #31") {
@@ -340,7 +341,7 @@ func TestPRForRejectsUnknownIssue(t *testing.T) {
 	app, _, _ := newApp(f)
 	onBranch(app, "feat/x")
 
-	err := app.PR(context.Background(), PROpts{For: 999})
+	err := app.PR(context.Background(), PROpts{For: []int{999}})
 	requireExit(t, err, ExitGeneric, "not an open issue")
 	assertNoPR(t, f)
 }
@@ -352,7 +353,7 @@ func TestPRForRejectsAnEpic(t *testing.T) {
 	app, _, _ := newApp(f)
 	onBranch(app, "feat/x")
 
-	err := app.PR(context.Background(), PROpts{For: 33})
+	err := app.PR(context.Background(), PROpts{For: []int{33}})
 	requireExit(t, err, ExitGeneric, "epic")
 	assertNoPR(t, f)
 }
@@ -411,7 +412,7 @@ func TestPRForResolvesABranchClaimMismatch(t *testing.T) {
 	app, _, _ := newApp(f)
 	onBranch(app, "fix/pagination-2")
 
-	if err := app.PR(context.Background(), PROpts{For: 2, Sections: sections("", "", "t")}); err != nil {
+	if err := app.PR(context.Background(), PROpts{For: []int{2}, Sections: sections("", "", "t")}); err != nil {
 		t.Fatal(err)
 	}
 	if body := prBody(t, createdPR(t, f)); !strings.Contains(body, "Fixes #2") {
@@ -991,11 +992,272 @@ func TestPRJSON(t *testing.T) {
 	}
 	want := prJSON{
 		Number: 501, URL: "https://github.com/o/r/pull/501", Draft: true,
-		Fixes: 30, Head: "feat/pr-command", Base: "main", Title: "PR creation command",
+		Fixes: 30, FixedIssues: []int{30}, Head: "feat/pr-command", Base: "main", Title: "PR creation command",
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("json = %+v, want %+v", got, want)
 	}
+}
+
+// --- several declared issues (#134) ---
+
+// multiSetup is two claimed issues on a branch that names neither, the shape
+// of a deliberate combined PR.
+func multiSetup(labels ...string) (*fakeClient, *App, *bytes.Buffer) {
+	f := newFake(claimed(46, "first", labels...), claimed(50, "second", labels...))
+	app, _, errOut := newApp(f)
+	onBranch(app, "feat/combined")
+	return f, app, errOut
+}
+
+func TestPRRepeatedForClosesTheDeclaredSet(t *testing.T) {
+	f, app, _ := multiSetup()
+
+	if err := app.PR(context.Background(), PROpts{For: []int{46, 50}, Sections: sections("w", "y", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	body := prBody(t, createdPR(t, f))
+	if !strings.HasSuffix(body, "Fixes #46\nFixes #50") {
+		t.Errorf("body does not close the declared set in order:\n%s", body)
+	}
+}
+
+func TestPRRepeatedForCollapsesDuplicates(t *testing.T) {
+	f, app, _ := multiSetup()
+
+	if err := app.PR(context.Background(), PROpts{For: []int{46, 46}, Sections: sections("w", "y", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	if body := prBody(t, createdPR(t, f)); strings.Count(body, "Fixes #46") != 1 || strings.Contains(body, "#50") {
+		t.Errorf("duplicate --for was not collapsed:\n%s", body)
+	}
+}
+
+// Multiple issues are declared, never inferred: two claims with a branch
+// number still resolve to exactly the one the branch names.
+func TestPRInferenceStillResolvesExactlyOne(t *testing.T) {
+	f, app, _ := multiSetup()
+	onBranch(app, "feat/46-first")
+
+	if err := app.PR(context.Background(), PROpts{Sections: sections("w", "y", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	if body := prBody(t, createdPR(t, f)); !strings.HasSuffix(body, "Fixes #46") || strings.Contains(body, "#50") {
+		t.Errorf("inference widened beyond one issue:\n%s", body)
+	}
+}
+
+func TestPRRepeatedForRejectsAnyUnusableIssue(t *testing.T) {
+	epic := issue(33, "Epic: the tree")
+	epic.SubIssues = []model.Ref{{Number: 46, State: "OPEN"}}
+	for name, tc := range map[string]struct {
+		forNums []int
+		want    string
+	}{
+		"missing": {[]int{46, 999}, "#999 is not an open issue"},
+		"epic":    {[]int{46, 33}, "epic"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFake(epic, claimed(46, "first"), claimed(50, "second"))
+			app, _, _ := newApp(f)
+			onBranch(app, "feat/combined")
+
+			err := app.PR(context.Background(), PROpts{For: tc.forNums})
+			requireExit(t, err, ExitGeneric, tc.want)
+			assertNoPR(t, f)
+		})
+	}
+}
+
+func TestPRWarnsWhenADeclaredIssueIsNotYoursOrClaimed(t *testing.T) {
+	other := claimed(50, "second")
+	other.Assignees = []string{"someone"}
+	f := newFake(claimed(46, "first"), other, issue(51, "third"))
+	app, _, errOut := newApp(f)
+	onBranch(app, "feat/combined")
+
+	if err := app.PR(context.Background(), PROpts{For: []int{46, 50, 51}, Sections: sections("w", "y", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"#50 is claimed by @someone, not you", "#51 is not claimed by you"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("stderr missing %q: %q", want, errOut.String())
+		}
+	}
+	if strings.Contains(errOut.String(), "#46 is") {
+		t.Errorf("warned about the issue the viewer holds: %q", errOut.String())
+	}
+}
+
+func TestPRWarnsWhenDeclaredIssuesLookUnrelated(t *testing.T) {
+	_, app, errOut := multiSetup()
+	if err := app.PR(context.Background(), PROpts{For: []int{46, 50}, Sections: sections("w", "y", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errOut.String(), "issues #46 | #50 look unrelated") {
+		t.Errorf("no unrelated warning: %q", errOut.String())
+	}
+}
+
+func TestPRStaysQuietWhenDeclaredIssuesAreRelated(t *testing.T) {
+	blocked := claimed(51, "third", "cli")
+	blocked.BlockedBy = []model.Ref{{Number: 50, State: "OPEN"}}
+	for name, issues := range map[string][]*model.Issue{
+		"shared area":   {claimed(46, "first", "cli"), claimed(50, "second", "cli")},
+		"shared parent": {subIssueOf(claimed(46, "first"), 33), subIssueOf(claimed(50, "second"), 33)},
+		"dependency":    {claimed(50, "second"), withBlocker(claimed(46, "first"), 50)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFake(issues...)
+			app, _, errOut := newApp(f)
+			onBranch(app, "feat/combined")
+			if err := app.PR(context.Background(), PROpts{For: []int{46, 50}, Sections: sections("w", "y", "t")}); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(errOut.String(), "unrelated") {
+				t.Errorf("warned about related issues: %q", errOut.String())
+			}
+		})
+	}
+	// The relation only has to connect the set: 51 hangs off 50, which shares
+	// an area with 46.
+	f := newFake(claimed(46, "first", "cli"), claimed(50, "second", "cli"), blocked)
+	app, _, errOut := newApp(f)
+	onBranch(app, "feat/combined")
+	if err := app.PR(context.Background(), PROpts{For: []int{46, 50, 51}, Sections: sections("w", "y", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(errOut.String(), "unrelated") {
+		t.Errorf("warned about a connected set: %q", errOut.String())
+	}
+}
+
+func withBlocker(i *model.Issue, blocker int) *model.Issue {
+	i.BlockedBy = []model.Ref{{Number: blocker, State: "OPEN"}}
+	return i
+}
+
+func TestPRSingleIssueNeverWarnsUnrelated(t *testing.T) {
+	_, app, errOut := multiSetup()
+	if err := app.PR(context.Background(), PROpts{For: []int{46}, Sections: sections("w", "y", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(errOut.String(), "unrelated") {
+		t.Errorf("single issue drew a relatedness warning: %q", errOut.String())
+	}
+}
+
+// One issue's Fix says nothing true about a PR that also fixes another, so a
+// set does not borrow the first issue's text.
+func TestPRRepeatedForDoesNotDefaultSectionsFromOneIssue(t *testing.T) {
+	first := claimed(46, "first")
+	first.Body = "### Approach\n\nOnly the first issue's approach\n\n### Goal\n\nOnly the first issue's goal"
+	f := newFake(first, claimed(50, "second"))
+	app, _, errOut := newApp(f)
+	onBranch(app, "feat/combined")
+
+	if err := app.PR(context.Background(), PROpts{For: []int{46, 50}, Sections: sections("", "", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	if body := prBody(t, createdPR(t, f)); strings.Contains(body, "first issue's") {
+		t.Errorf("a set borrowed one issue's text:\n%s", body)
+	}
+	if !strings.Contains(errOut.String(), "--what") || !strings.Contains(errOut.String(), "--why") {
+		t.Errorf("no prompt to supply What/Why: %q", errOut.String())
+	}
+}
+
+func TestPRRepeatedForSharesAnEpicTrailer(t *testing.T) {
+	f := newFake(subIssueOf(claimed(46, "first"), 33), subIssueOf(claimed(50, "second"), 33))
+	app, _, _ := newApp(f)
+	onBranch(app, "feat/combined")
+
+	if err := app.PR(context.Background(), PROpts{For: []int{46, 50}, Sections: sections("w", "y", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	if body := prBody(t, createdPR(t, f)); !strings.HasSuffix(body, "Fixes #46\nFixes #50\nPart of #33") {
+		t.Errorf("trailers = %q", body)
+	}
+}
+
+func TestPRBodyFileMustMatchTheDeclaredSet(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body    string
+		want    string // error substring; empty means accepted
+		trailer string // what the composed body must end with
+	}{
+		"equal":           {"narrative\n\nFixes #46\nFixes #50", "", "Fixes #46\nFixes #50"},
+		"equal reordered": {"narrative\n\nCloses #50\nFixes #46", "", "Closes #50\nFixes #46"},
+		"none gets all":   {"narrative", "", "narrative\n\nFixes #46\nFixes #50"},
+		"drops one":       {"narrative\n\nFixes #46", "closes #46 but this PR is for #46 #50", ""},
+		"adds one":        {"Fixes #46\nFixes #50\nFixes #51", "closes #46 #50 #51 but this PR is for #46 #50", ""},
+		"changes one":     {"Fixes #46\nFixes #99", "closes #46 #99 but this PR is for #46 #50", ""},
+		"repeats one":     {"Fixes #46\nFixes #46\nFixes #50", "closes #46 #46 #50 but this PR is for #46 #50", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, app, _ := multiSetup()
+			err := app.PR(context.Background(), PROpts{For: []int{46, 50}, BodyFile: writeTemp(t, tc.body)})
+			if tc.want != "" {
+				requireExit(t, err, ExitUsage, tc.want)
+				assertNoPR(t, f)
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if body := prBody(t, createdPR(t, f)); !strings.HasSuffix(body, tc.trailer) || strings.Count(strings.ToLower(body), "#46") != 1 {
+				t.Errorf("body = %q", body)
+			}
+		})
+	}
+}
+
+func TestPRJSONListsEveryDeclaredIssue(t *testing.T) {
+	f, app, _ := multiSetup()
+	app.JSON = true
+	out := app.Out.(*bytes.Buffer)
+	if err := app.PR(context.Background(), PROpts{For: []int{50, 46}, Sections: sections("w", "y", "t")}); err != nil {
+		t.Fatal(err)
+	}
+	createdPR(t, f)
+	var got prJSON
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("output is not JSON: %q: %v", out.String(), err)
+	}
+	if got.Fixes != 50 || !slices.Equal(got.FixedIssues, []int{50, 46}) {
+		t.Errorf("fixes = %d, fixedIssues = %v", got.Fixes, got.FixedIssues)
+	}
+}
+
+func TestPRAmendHonoursTheDeclaredSet(t *testing.T) {
+	setup := func(body string) (*fakeClient, *App) {
+		f := newFake(claimed(46, "first"), claimed(50, "second"))
+		f.openPRs["feat/combined"] = gh.PullRequest{
+			Number: 501, URL: "https://github.com/o/r/pull/501", Draft: true,
+			Title: "feat: combined", Base: "main", HeadRepository: "o/r", Body: body,
+		}
+		app, _, _ := newApp(f)
+		onBranch(app, "feat/combined")
+		return f, app
+	}
+
+	t.Run("revises a section and keeps the set", func(t *testing.T) {
+		f, app := setup("### What\n\nOriginal what\n\n### Testing\n\nOld tests\n\nFixes #46\nFixes #50")
+		opts := PROpts{Amend: true, For: []int{46, 50}, Sections: conventions.PRSections{Testing: "New tests"}}
+		if err := app.PR(context.Background(), opts); err != nil {
+			t.Fatal(err)
+		}
+		want := "### What\n\nOriginal what\n\n### Testing\n\nNew tests\n\nFixes #46\nFixes #50"
+		if got := f.openPRs["feat/combined"].Body; got != want {
+			t.Errorf("body = %q, want %q", got, want)
+		}
+	})
+	t.Run("refuses a body that closes a different set", func(t *testing.T) {
+		f, app := setup("### Testing\n\nOld tests\n\nFixes #46")
+		err := app.PR(context.Background(), PROpts{Amend: true, For: []int{46, 50}, Title: "feat: new"})
+		requireExit(t, err, ExitUsage, "closes #46 but this PR is for #46 #50")
+		assertPRReadsOnly(t, f)
+	})
 }
 
 // --- helpers ---
@@ -1178,7 +1440,7 @@ func TestPRAmendRecomposesOnlyNamedSections(t *testing.T) {
 			case "risk":
 				want.Risk = "Revised risk"
 			}
-			body := want.Compose(conventions.PRTrailers{Fixes: 30, Epic: 33})
+			body := want.Compose(conventions.PRTrailers{Fixes: []int{30}, Epics: []int{33}})
 			if got.Body != body {
 				t.Errorf("body = %q, want %q", got.Body, body)
 			}
@@ -1235,7 +1497,7 @@ func TestPRAmendPreservesBulletListSections(t *testing.T) {
 	f, app := amendSetup()
 	testing := conventions.PRList([]string{"build passes\nsecond line", "lint clean"})
 	pr := f.openPRs["feat/30-work"]
-	pr.Body = conventions.PRSections{What: "w", Testing: testing, Risk: "r"}.Compose(conventions.PRTrailers{Fixes: 30, Epic: 33})
+	pr.Body = conventions.PRSections{What: "w", Testing: testing, Risk: "r"}.Compose(conventions.PRTrailers{Fixes: []int{30}, Epics: []int{33}})
 	f.openPRs["feat/30-work"] = pr
 
 	if err := app.PR(context.Background(), PROpts{

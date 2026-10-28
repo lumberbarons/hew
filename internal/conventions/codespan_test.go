@@ -145,7 +145,7 @@ func TestUnmarkedCodeTextSpansSections(t *testing.T) {
 	body := PRSections{
 		What:    "Marks up `--title` correctly.",
 		Testing: "go test -race ./... is green; codespan.go is covered.",
-	}.Compose(PRTrailers{Fixes: 71})
+	}.Compose(PRTrailers{Fixes: []int{71}})
 	got := UnmarkedCodeText(body)
 	want := []string{"./...", "codespan.go"}
 	if !reflect.DeepEqual(got, want) {
@@ -156,7 +156,7 @@ func TestUnmarkedCodeTextSpansSections(t *testing.T) {
 // Compose must not rewrite anything: the check reports, the author fixes.
 func TestComposeLeavesBodiesVerbatim(t *testing.T) {
 	in := "pass --title to override, see internal/cli/pr.go"
-	body := PRSections{What: in}.Compose(PRTrailers{Fixes: 71})
+	body := PRSections{What: in}.Compose(PRTrailers{Fixes: []int{71}})
 	if want := "### What\n\n" + in + "\n\nFixes #71"; body != want {
 		t.Errorf("Compose() = %q, want %q — Compose must not transform", body, want)
 	}

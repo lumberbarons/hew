@@ -21,8 +21,10 @@ type PROpts struct {
 	Amend bool
 	// SectionFlags records explicitly supplied flags, including empty values.
 	SectionFlags []string
-	// For overrides issue inference; 0 means infer.
-	For      int
+	// For overrides issue inference; empty means infer. Several values are a
+	// deliberate multi-issue PR: only declared issues are ever combined,
+	// never inferred ones.
+	For      []int
 	Title    string
 	Sections conventions.PRSections
 	BodyFile string
@@ -67,17 +69,20 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 	if err != nil {
 		return err
 	}
-	issue, err := a.linkedIssue(issues, head, viewer, opts.For)
+	linked, err := a.linkedIssues(issues, head, viewer, opts.For)
 	if err != nil {
 		return err
 	}
+	// The first issue is the primary: it names the PR in messages and seeds
+	// the default title.
+	issue := linked[0]
 
 	prCtx, err := a.Client.PullRequestContext(ctx, head)
 	if err != nil {
 		return err
 	}
 	if opts.Amend {
-		return a.amendPR(ctx, opts, issue, head, prCtx)
+		return a.amendPR(ctx, opts, linked, head, prCtx)
 	}
 	if prCtx.Existing != nil {
 		return genericErr("#%d already has an open PR from %s: #%d — push to the branch or use --amend to revise its title/body",
@@ -96,11 +101,9 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 	if !conventions.IsConventionalBranch(head) {
 		a.warnf("branch %s has no %s prefix", head, strings.Join(conventions.BranchPrefixes, "|"))
 	}
-	if len(issue.Assignees) > 0 && !slices.Contains(issue.Assignees, viewer) {
-		a.warnf("#%d is claimed by @%s, not you", issue.Number, render.SanitizeInline(strings.Join(issue.Assignees, " @")))
-	}
+	a.warnPRClaims(linked, viewer)
 
-	body, err := a.composePRBody(opts, issue)
+	body, err := a.composePRBody(opts, linked)
 	if err != nil {
 		return err
 	}
@@ -126,13 +129,13 @@ func (a *App) PR(ctx context.Context, opts PROpts) error {
 	}
 	return a.emitResult(prJSON{
 		Number: created.Number, URL: created.URL, Draft: created.Draft,
-		Fixes: issue.Number, Head: head, Base: base, Title: title,
+		Fixes: issue.Number, FixedIssues: issueNumbers(linked), Head: head, Base: base, Title: title,
 	}, func() {
 		// The summary an agent branches on, then the URL a human clicks; the
 		// create response always carries one, so it is not conditional. title
 		// may carry the issue's own (GitHub-derived) text via PRTitle, so it
 		// needs the same neutralizing the JSON/API copy does not.
-		a.printf("created %s #%d for #%d: %s\n", kind, created.Number, issue.Number, render.SanitizeInline(title))
+		a.printf("created %s #%d for %s: %s\n", kind, created.Number, formatNumbers(linked), render.SanitizeInline(title))
 		a.printf("%s\n", created.URL)
 	})
 }
@@ -143,13 +146,64 @@ type prJSON struct {
 	Number int    `json:"number"`
 	URL    string `json:"url"`
 	Draft  bool   `json:"draft"`
-	Fixes  int    `json:"fixes"`
-	Head   string `json:"head"`
-	Base   string `json:"base"`
-	Title  string `json:"title"`
+	// Fixes is the primary issue and stays a scalar so existing consumers
+	// keep working; FixedIssues is the whole set the PR closes, primary first.
+	Fixes       int    `json:"fixes"`
+	FixedIssues []int  `json:"fixedIssues"`
+	Head        string `json:"head"`
+	Base        string `json:"base"`
+	Title       string `json:"title"`
 }
 
-// linkedIssue decides which issue the PR closes. The claim is the primary
+// linkedIssues resolves the set of issues the PR closes. Inference only ever
+// yields one issue; several come solely from repeated --for, because a wrong
+// Fixes line closes the wrong issue on merge and an inferred second one
+// would do it silently. A repeated number is collapsed.
+func (a *App) linkedIssues(issues []model.Issue, branch, viewer string, forNumbers []int) ([]model.Issue, error) {
+	if len(forNumbers) == 0 {
+		issue, err := a.linkedIssue(issues, branch, viewer, 0)
+		if err != nil {
+			return nil, err
+		}
+		return []model.Issue{issue}, nil
+	}
+	var linked []model.Issue
+	for _, n := range forNumbers {
+		if slices.ContainsFunc(linked, func(i model.Issue) bool { return i.Number == n }) {
+			continue
+		}
+		issue, err := a.linkedIssue(issues, branch, viewer, n)
+		if err != nil {
+			return nil, err
+		}
+		linked = append(linked, issue)
+	}
+	return linked, nil
+}
+
+// warnPRClaims flags every linked issue the viewer does not hold, and a set
+// whose members share nothing. Neither refuses: whether a combined PR stays
+// reviewable is a judgement hew cannot make.
+func (a *App) warnPRClaims(linked []model.Issue, viewer string) {
+	for _, issue := range linked {
+		switch {
+		case len(issue.Assignees) == 0:
+			a.warnf("#%d is not claimed by you (hew start %d)", issue.Number, issue.Number)
+		case !slices.Contains(issue.Assignees, viewer):
+			a.warnf("#%d is claimed by @%s, not you", issue.Number, render.SanitizeInline(strings.Join(issue.Assignees, " @")))
+		}
+	}
+	if groups := model.RelatedGroups(linked); len(groups) > 1 {
+		parts := make([]string, len(groups))
+		for i, g := range groups {
+			parts[i] = formatNumbers(g)
+		}
+		a.warnf("issues %s look unrelated (no shared parent, area label or dependency); keep a combined PR reviewable as one change",
+			strings.Join(parts, " | "))
+	}
+}
+
+// linkedIssue decides which single issue a PR closes. The claim is the primary
 // signal — it's tracker state, not a naming guess — and a number in the
 // branch name breaks ties, covers the unclaimed case, and vetoes a lone
 // claim it contradicts. Ambiguity is an error naming the candidates rather
@@ -225,32 +279,53 @@ func branchIssueNumber(branch string) (int, bool) {
 }
 
 func formatNumbers(issues []model.Issue) string {
-	parts := make([]string, len(issues))
-	for i, issue := range issues {
-		parts[i] = fmt.Sprintf("#%d", issue.Number)
+	return formatRefs(issueNumbers(issues))
+}
+
+func formatRefs(numbers []int) string {
+	parts := make([]string, len(numbers))
+	for i, n := range numbers {
+		parts[i] = fmt.Sprintf("#%d", n)
 	}
 	return strings.Join(parts, " ")
 }
 
-// composePRBody builds the body and enforces the one-Fixes invariant: the
-// composed path always writes exactly one, and a --body-file that already
-// closes the right issue is left alone rather than given a second link.
-func (a *App) composePRBody(opts PROpts, issue model.Issue) (string, error) {
+func issueNumbers(issues []model.Issue) []int {
+	numbers := make([]int, len(issues))
+	for i, issue := range issues {
+		numbers[i] = issue.Number
+	}
+	return numbers
+}
+
+// composePRBody builds the body and enforces the closing-set invariant: the
+// composed path writes exactly the declared set (one issue, unless --for was
+// repeated), and a --body-file that already closes that set is left alone
+// rather than given a second link.
+func (a *App) composePRBody(opts PROpts, linked []model.Issue) (string, error) {
 	if opts.BodyFile != "" {
-		return a.prBodyFile(opts.BodyFile, issue)
+		return a.prBodyFile(opts.BodyFile, linked)
 	}
 	sections := opts.Sections
 	// Creation defaults to the issue; amendments default to the PR itself.
-	if sections.What == "" {
-		sections.What = conventions.FirstSection(issue.Body, "Fix", "Approach")
+	// One issue's Fix says nothing true about a PR that closes several, so a
+	// set gets no defaults and is asked for its own text.
+	if len(linked) == 1 {
+		issue := linked[0]
+		if sections.What == "" {
+			sections.What = conventions.FirstSection(issue.Body, "Fix", "Approach")
+		}
+		if sections.Why == "" {
+			sections.Why = conventions.FirstSection(issue.Body, "Problem", "Goal")
+		}
+	} else if sections.What == "" || sections.Why == "" {
+		a.warnf("%s share one PR, so What/Why have no default: pass --what and --why", formatNumbers(linked))
 	}
-	if sections.Why == "" {
-		sections.Why = conventions.FirstSection(issue.Body, "Problem", "Goal")
-	}
-	return a.finishPRSections(sections, issue)
+	return a.finishPRSections(sections, linked)
 }
 
-func (a *App) amendPR(ctx context.Context, opts PROpts, issue model.Issue, head string, prCtx gh.PRContext) error {
+func (a *App) amendPR(ctx context.Context, opts PROpts, linked []model.Issue, head string, prCtx gh.PRContext) error {
+	issue := linked[0]
 	existing := prCtx.Existing
 	if existing == nil {
 		return genericErr("#%d has no open PR from %s; omit --amend to create one", issue.Number, head)
@@ -269,18 +344,19 @@ func (a *App) amendPR(ctx context.Context, opts PROpts, issue model.Issue, head 
 	var err error
 	switch {
 	case opts.BodyFile != "":
-		body, err = a.prBodyFile(opts.BodyFile, issue)
+		body, err = a.prBodyFile(opts.BodyFile, linked)
 	case opts.Sections.IsZero() && len(opts.SectionFlags) == 0:
 		// A title-only edit preserves even a freeform body.
 		edited = false
-		body, err = a.finishPRBody(existing.Body, issue, "PR body")
+		body, err = a.finishPRBody(existing.Body, linked, "PR body")
 	default:
 		content := existing.Body
 		// Section reads to the next heading, so detach our generated trailer
 		// block before reading the final section. Other closing links remain
 		// in the content and are checked along with the replacement sections.
-		trailers := prTrailers(issue)
-		for _, suffix := range []string{trailers.Render(), conventions.FixesLine(issue.Number)} {
+		trailers := prTrailers(linked)
+		fixesOnly := conventions.PRTrailers{Fixes: trailers.Fixes}
+		for _, suffix := range []string{trailers.Render(), fixesOnly.Render()} {
 			content = strings.TrimSpace(content)
 			if content == suffix {
 				content = ""
@@ -320,7 +396,7 @@ func (a *App) amendPR(ctx context.Context, opts PROpts, issue model.Issue, head 
 		if sections.Risk == "" && !slices.Contains(opts.SectionFlags, "risk") {
 			sections.Risk = preserved.Risk
 		}
-		body, err = a.finishPRSections(sections, issue)
+		body, err = a.finishPRSections(sections, linked)
 	}
 	if err != nil {
 		return err
@@ -339,23 +415,25 @@ func (a *App) amendPR(ctx context.Context, opts PROpts, issue model.Issue, head 
 	}
 	return a.emitResult(prJSON{
 		Number: existing.Number, URL: existing.URL, Draft: existing.Draft,
-		Fixes: issue.Number, Head: head, Base: existing.Base, Title: title,
+		Fixes: issue.Number, FixedIssues: issueNumbers(linked), Head: head, Base: existing.Base, Title: title,
 	}, func() {
-		a.printf("updated PR #%d for #%d: %s\n", existing.Number, issue.Number, render.SanitizeInline(title))
+		a.printf("updated PR #%d for %s: %s\n", existing.Number, formatNumbers(linked), render.SanitizeInline(title))
 		a.printf("%s\n", existing.URL)
 	})
 }
 
-func prTrailers(issue model.Issue) conventions.PRTrailers {
-	trailers := conventions.PRTrailers{Fixes: issue.Number}
-	if issue.Parent != nil {
-		trailers.Epic = issue.Parent.Number
+func prTrailers(linked []model.Issue) conventions.PRTrailers {
+	trailers := conventions.PRTrailers{Fixes: issueNumbers(linked)}
+	for _, issue := range linked {
+		if issue.Parent != nil && !slices.Contains(trailers.Epics, issue.Parent.Number) {
+			trailers.Epics = append(trailers.Epics, issue.Parent.Number)
+		}
 	}
 	return trailers
 }
 
-func (a *App) finishPRSections(sections conventions.PRSections, issue model.Issue) (string, error) {
-	return a.finishPRBody(sections.Compose(conventions.PRTrailers{}), issue, "PR body")
+func (a *App) finishPRSections(sections conventions.PRSections, linked []model.Issue) (string, error) {
+	return a.finishPRBody(sections.Compose(conventions.PRTrailers{}), linked, "PR body")
 }
 
 // warnPRSections reports the body contract at composition time. Help is read
@@ -374,30 +452,30 @@ func (a *App) warnPRSections(body string, requireRisk bool) {
 	}
 }
 
-func (a *App) prBodyFile(path string, issue model.Issue) (string, error) {
+func (a *App) prBodyFile(path string, linked []model.Issue) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return "", genericErr("cannot read --body-file: %v", err)
 	}
-	return a.finishPRBody(string(raw), issue, "--body-file")
+	return a.finishPRBody(string(raw), linked, "--body-file")
 }
 
-// Both paths enforce exactly one closing reference and append only missing
-// trailers, so a section flag cannot bypass the body-file guard either.
-func (a *App) finishPRBody(raw string, issue model.Issue, source string) (string, error) {
-	trailers := prTrailers(issue)
+// Both paths enforce that the body closes exactly the declared set, no more
+// and no less, and append only missing trailers, so a section flag cannot
+// bypass the body-file guard either. A body with no closing reference at all
+// is given the whole set.
+func (a *App) finishPRBody(raw string, linked []model.Issue, source string) (string, error) {
+	trailers := prTrailers(linked)
 	body := strings.TrimRight(raw, "\n")
-	switch refs := conventions.FixesReferences(body); {
-	case len(refs) > 1:
-		return "", usageErr("%s closes %d issues; a PR closes exactly one", source, len(refs))
-	case len(refs) == 1 && refs[0] != issue.Number:
-		return "", usageErr("%s closes #%d but this PR is for #%d", source, refs[0], issue.Number)
-	case len(refs) == 1:
-		trailers.Fixes = 0
+	if refs := conventions.FixesReferences(body); len(refs) > 0 {
+		if !sameClosingSet(refs, trailers.Fixes) {
+			return "", closingSetErr(source, refs, trailers.Fixes)
+		}
+		trailers.Fixes = nil
 	}
-	if trailers.Epic > 0 && strings.Contains(body, conventions.PartOfLine(trailers.Epic)) {
-		trailers.Epic = 0
-	}
+	trailers.Epics = slices.DeleteFunc(trailers.Epics, func(epic int) bool {
+		return strings.Contains(body, conventions.PartOfLine(epic))
+	})
 	if missing := trailers.Render(); missing != "" {
 		if body != "" {
 			body += "\n\n"
@@ -406,4 +484,17 @@ func (a *App) finishPRBody(raw string, issue model.Issue, source string) (string
 	}
 	a.warnUnmarkedCode(body, "hew pr --amend")
 	return body, nil
+}
+
+// sameClosingSet compares as sets but refuses a repeated reference: the
+// body that ships should read as exactly the declared issues.
+func sameClosingSet(refs, want []int) bool {
+	return len(refs) == len(want) && slices.Equal(slices.Sorted(slices.Values(refs)), slices.Sorted(slices.Values(want)))
+}
+
+func closingSetErr(source string, refs, want []int) error {
+	if len(want) == 1 && len(refs) > 1 {
+		return usageErr("%s closes %d issues; a PR closes exactly one (declare a set with repeated --for)", source, len(refs))
+	}
+	return usageErr("%s closes %s but this PR is for %s", source, formatRefs(refs), formatRefs(want))
 }

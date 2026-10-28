@@ -378,3 +378,55 @@ func ByNumber(issues []Issue) map[int]Issue {
 	}
 	return m
 }
+
+// RelatedGroups partitions issues into groups that are connected by a shared
+// parent, a shared area label, or a dependency between two of them. A single
+// group means the set plausibly belongs in one PR; several means some of it
+// has nothing visible in common with the rest. Groups and their members keep
+// the order the issues were given in.
+func RelatedGroups(issues []Issue) [][]Issue {
+	group := make([]int, len(issues))
+	for i := range group {
+		group[i] = i
+	}
+	find := func(i int) int {
+		for group[i] != i {
+			group[i] = group[group[i]]
+			i = group[i]
+		}
+		return i
+	}
+	for i := range issues {
+		for j := i + 1; j < len(issues); j++ {
+			if related(issues[i], issues[j]) {
+				group[find(j)] = find(i)
+			}
+		}
+	}
+	var groups [][]Issue
+	index := map[int]int{}
+	for i, issue := range issues {
+		root := find(i)
+		at, ok := index[root]
+		if !ok {
+			at = len(groups)
+			index[root] = at
+			groups = append(groups, nil)
+		}
+		groups[at] = append(groups[at], issue)
+	}
+	return groups
+}
+
+func related(a, b Issue) bool {
+	if a.Parent != nil && b.Parent != nil && a.Parent.Number == b.Parent.Number {
+		return true
+	}
+	for _, area := range a.Areas() {
+		if slices.Contains(b.Areas(), area) {
+			return true
+		}
+	}
+	return slices.ContainsFunc(a.BlockedBy, func(r Ref) bool { return r.Number == b.Number }) ||
+		slices.ContainsFunc(b.BlockedBy, func(r Ref) bool { return r.Number == a.Number })
+}
