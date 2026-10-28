@@ -16,8 +16,9 @@ session re-derives the same jq pipelines from scratch.
 ### Non-goals
 
 - Multi-user / team workflows. This is for one human and their agents.
-- A local database or offline mode (v1). Every command hits the API; a cache is a
-  later milestone only if latency actually hurts.
+- A cache or offline mirror of GitHub. Against GitHub every command hits the API; a
+  cache is a later milestone only if latency actually hurts. A repo with no GitHub
+  tracker at all is a different thing — the local backend, below — not a cache of one.
 - General GitHub client. Anything the tool doesn't have an opinion about, use `gh`.
 
 ## Concepts borrowed from beads
@@ -33,7 +34,8 @@ session re-derives the same jq pipelines from scratch.
 | `bd remember` — persistent insights | deferred (open question) | overlaps with Claude Code's own memory system |
 
 Explicitly *not* borrowed: Dolt/git storage, hash IDs, sync — GitHub is the backend,
-so the entire distributed-state problem beads solves disappears.
+so the entire distributed-state problem beads solves disappears. The local backend
+keeps that: one file at one checkout, never synced anywhere.
 
 ## Enshrined conventions
 
@@ -556,6 +558,49 @@ agent silently duplicating half a plan.
   An integration smoke test against a real scratch repo (behind a build tag, run
   manually — it needs a token and mutates state, so it stays out of CI) is deferred
   for now.
+
+## Local backend
+
+GitHub is the default and the source of truth. A repo can instead track work
+locally — no GitHub account, remote or network — for a project that has not
+earned a tracker yet, or an agent working somewhere GitHub is out of reach. It is
+a second `gh.IssueStore`, not a cache: the commands, conventions, readiness rules
+and renderers are the same, and nothing is ever synced back and forth. Moving to
+GitHub later is a one-way migration.
+
+- **Opting in.** `hew init --local` writes `.hew/config.json` naming the `local`
+  backend and creates the store. It is idempotent and keeps existing issues, and
+  refuses a repo whose config names another backend. Backend selection is in
+  Architecture.
+- **Where it lives.** One `issues.jsonl` and a `config.json` in `.hew/` at the
+  *main* checkout, so every linked worktree of a repository shares one tracker.
+  The directory carries its own `.gitignore`, so the repo's is untouched and
+  git never shows it — which also means it is untracked: `git clean -fdx` at the
+  main checkout deletes the only copy.
+- **File format.** One JSON object per line; a record's `_type` picks its shape
+  (`meta`, `label`, and an untyped issue record). Relationships are stored once, on
+  the issue that owns them (its parent, its blockers); sub-issues, ref states and
+  rollups are derived on load, so the file cannot disagree with itself. Labels
+  are stored, so the convention set is the same one GitHub carries. A `config.json`
+  or file written by a newer hew is refused rather than half-read.
+- **Locking.** Every mutation takes an exclusive `flock` on `.hew/lock`, re-reads
+  the file, applies the change and writes a temp file renamed into place, so
+  concurrent agents in different worktrees never lose each other's writes and a
+  change that fails validation leaves the file as it was. Reads take no lock; the
+  rename means they see the old whole or the new whole.
+- **Claims.** The store implements the atomic claim, so `start` has exactly one
+  winner. Identity is per worktree (see open questions), which is what keeps
+  exit 3 and exit 5 apart under one OS account; `HEW_USER` overrides it.
+- **What is absent.** There are no pull requests, so `App.PRs` is nil, `pr`
+  refuses, and the local primer finishes work with `hew close <n> --completed`
+  instead of a `Fixes #n` merge. `--repo` always means GitHub.
+- **Migration.** `hew migrate local` is the only way out, and its rules are the
+  `migrate local` entry under Command surface: it freezes the tracker, creates
+  every issue on GitHub, and only then seals it — `.hew/migrated.json` records the
+  local → GitHub number map, `config.json` flips to `github`, and
+  `issues.jsonl` stays as a read-only archive that refuses writes, including from
+  a store opened before the flip. A failed run leaves the tracker local to be
+  rerun. The target is the `--repo` or git-remote repository.
 
 ## Build & distribution
 
