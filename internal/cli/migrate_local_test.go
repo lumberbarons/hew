@@ -435,7 +435,7 @@ func TestMigrateLocalDryRunSummarisesALargeTracker(t *testing.T) {
 	if strings.Contains(out, "create: 2 as") {
 		t.Errorf("per-issue lines printed above the cap:\n%s", out)
 	}
-	for _, want := range []string{fmt.Sprintf("%d local issues would be migrated", total), "1 would be closed", "--json"} {
+	for _, want := range []string{fmt.Sprintf("%d local issues would be migrated", total), "1 would be closed after creation", "--json"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary missing %q:\n%s", want, out)
 		}
@@ -458,6 +458,66 @@ func TestMigrateLocalDryRunSummarisesALargeTracker(t *testing.T) {
 	}
 	if len(got.WouldMigrate) != total {
 		t.Errorf("json lists %d issues, want all %d", len(got.WouldMigrate), total)
+	}
+}
+
+// TestMigrateLocalPlanSummaryCountsAResumedRun: the summary's headline counts
+// what is left to do, so it agrees with its own "already migrated" figure.
+func TestMigrateLocalPlanSummaryCountsAResumedRun(t *testing.T) {
+	_, app, _ := migrateLocalSetup(t.TempDir())
+	var items []migrationItem
+	state := map[string]int{}
+	for i := 1; i <= planLineLimit+10; i++ {
+		key := localKey(i)
+		items = append(items, migrationItem{Key: key, Title: key, Labels: []string{"P2", "task"}})
+		if i <= 4 {
+			state[key] = 100 + i
+		}
+	}
+	if err := app.localMigrationPlan(items, state); err != nil {
+		t.Fatal(err)
+	}
+	out := app.Out.(interface{ String() string }).String()
+	want := fmt.Sprintf("dry run: %d local issues would be migrated (0 would be closed after creation); 4 already migrated", len(items)-4)
+	if !strings.Contains(out, want) {
+		t.Errorf("summary missing %q:\n%s", want, out)
+	}
+}
+
+// TestMigrateLocalTargetlessDryRunKeepsTheLabelWarnings: a preview that drops
+// the rename warnings differs from the run it previews.
+func TestMigrateLocalTargetlessDryRunKeepsTheLabelWarnings(t *testing.T) {
+	s, dir := localTracker(t)
+	mustCreateLocal(t, s, "Commas", "", "P2", "task", "a,b")
+	_, app, opts := migrateLocalSetup(dir)
+	app.Client, app.Repo = nil, gh.Repo{}
+	opts.DryRun = true
+	if err := app.MigrateLocal(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	if errOut := app.ErrOut.(interface{ String() string }).String(); !strings.Contains(errOut, "a,b") {
+		t.Errorf("stderr = %q, want the comma-label warning", errOut)
+	}
+}
+
+// TestMigrateLocalTargetlessDryRunRefusesAnUnreadableCheckpoint: only a
+// missing checkpoint means a fresh start; any other stat error is not
+// evidence there is none.
+func TestMigrateLocalTargetlessDryRunRefusesAnUnreadableCheckpoint(t *testing.T) {
+	s, dir := localTracker(t)
+	mustCreateLocal(t, s, "Only", "", "P3", "task")
+	_, app, opts := migrateLocalSetup(dir)
+	app.Client, app.Repo = nil, gh.Repo{}
+	opts.DryRun = true
+	// A state path whose parent is a file makes Stat fail with ENOTDIR, not ErrNotExist.
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts.StatePath = filepath.Join(file, "state.json")
+	err := app.MigrateLocal(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "cannot tell whether") {
+		t.Fatalf("err = %v, want a refusal naming the unreadable checkpoint", err)
 	}
 }
 

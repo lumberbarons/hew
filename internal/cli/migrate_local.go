@@ -72,6 +72,10 @@ func (a *App) MigrateLocal(ctx context.Context, opts MigrateLocalOpts) error {
 		frozen, snap = fr, fr.Snapshot
 	}
 
+	for _, i := range snap.Issues {
+		a.warnCommaLabels(i.Labels)
+	}
+
 	// A dry run with no target repository never contacts GitHub, which is also
 	// why it cannot vouch for a checkpoint: that has to be checked against the
 	// issues it maps. Refuse rather than list work a real run would skip.
@@ -79,6 +83,8 @@ func (a *App) MigrateLocal(ctx context.Context, opts MigrateLocalOpts) error {
 	if targetless {
 		if _, err := os.Stat(opts.StatePath); err == nil {
 			return usageErr("%s holds a checkpoint from an earlier run, and a dry run can only check it against GitHub: pass --repo", opts.StatePath)
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return genericErr("cannot tell whether %s holds a checkpoint: %v", opts.StatePath, err)
 		}
 		return a.localMigrationPlan(localItems(snap), map[string]int{})
 	}
@@ -97,9 +103,6 @@ func (a *App) MigrateLocal(ctx context.Context, opts MigrateLocalOpts) error {
 		return err
 	}
 
-	for _, i := range snap.Issues {
-		a.warnCommaLabels(i.Labels)
-	}
 	items := localItems(snap)
 	if opts.DryRun {
 		return a.localMigrationPlan(items, state.Mapping)
@@ -215,7 +218,7 @@ func localItems(snap *local.Snapshot) []migrationItem {
 // from. The footer sets the local number in a code span so reference rewriting
 // leaves the one place that names it alone.
 func localBody(i local.Issue) string {
-	footer := fmt.Sprintf("Migrated from local issue `#%d` (created %s)", i.Number, i.CreatedAt.Format("2006-01-02"))
+	footer := fmt.Sprintf("Migrated from local issue `#%d` (created %s)", i.Number, i.CreatedAt.UTC().Format("2006-01-02"))
 	if body := strings.TrimSpace(i.Body); body != "" {
 		return body + "\n\n---\n" + footer
 	}
@@ -230,7 +233,7 @@ func localComment(c local.Comment) string {
 	if author == "" {
 		author = "unknown"
 	}
-	return fmt.Sprintf("`%s` commented on %s:\n\n%s", author, c.CreatedAt.Format("2006-01-02"), c.Body)
+	return fmt.Sprintf("`%s` commented on %s:\n\n%s", author, c.CreatedAt.UTC().Format("2006-01-02"), c.Body)
 }
 
 // localLabels is every label the tracker uses that GitHub may not have yet, for
@@ -307,10 +310,9 @@ func (a *App) localMigrationPlan(items []migrationItem, state map[string]int) er
 					closing++
 				}
 			}
-			a.printf("%d would be created, %d would be closed, %d already migrated\n",
+			a.printf("dry run: %d local issues would be migrated (%d would be closed after creation); %d already migrated\n",
 				len(wouldMigrate), closing, len(already))
-			a.printf("dry run: %d local issues would be migrated; per-issue lines are omitted above %d issues, use --json for the full plan\n",
-				len(items), planLineLimit)
+			a.printf("per-issue lines are omitted for plans over %d issues; use --json for the full plan\n", planLineLimit)
 			return
 		}
 		for _, st := range steps {

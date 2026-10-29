@@ -646,6 +646,19 @@ func TestSetRejectsAnExplicitlyEmptyTitle(t *testing.T) {
 	}
 }
 
+// TestBlankTitlesAreRefusedWhoeverCalls: the check lives in validateTitle, so
+// a caller that never sets TitleSet, and create, are covered too.
+func TestBlankTitlesAreRefusedWhoeverCalls(t *testing.T) {
+	f := newFake(issue(1, "Work", "P2", "bug"))
+	app, _, _ := newApp(f)
+	exitCode(t, app.Set(ctx, 1, SetOpts{Title: " ", TitleSet: true}), ExitUsage)
+	exitCode(t, app.Create(ctx, CreateOpts{Type: "task", Title: "   ", Sections: conventions.Sections{Goal: "g", DoneWhen: []string{"d"}}}), ExitUsage)
+	exitCode(t, app.EpicCreate(ctx, EpicCreateOpts{Title: "  "}), ExitUsage)
+	if got := f.byNumber(1).Title; got != "Work" {
+		t.Errorf("title = %q after refused edits", got)
+	}
+}
+
 func TestSetSwapsLabels(t *testing.T) {
 	f := newFake(issue(1, "Work", "P2", "bug", "old-area"))
 	app, out, _ := newApp(f)

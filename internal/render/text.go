@@ -7,6 +7,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -217,6 +218,15 @@ func EpicList(w io.Writer, issues []model.Issue, s Style) {
 	lines(w, issues, lineOpts{progress: true}, s)
 }
 
+// localDay is t's calendar day in the reader's zone, with the zone's name when
+// named is set. It is the one place text output turns a timestamp into a date.
+func localDay(t time.Time, named bool) string {
+	if named {
+		return t.Local().Format("2006-01-02 MST")
+	}
+	return t.Local().Format("2006-01-02")
+}
+
 // Show renders the full detail view for one issue. Children is the issue's
 // parent-backlinked child set (empty for non-epics), used to name the epic's
 // next workable child.
@@ -228,7 +238,7 @@ func Show(w io.Writer, i model.Issue, children []model.Issue, s Style) {
 	}
 	// Dates are the reader's local day, with the zone named once here; comment
 	// dates below share it. A UTC date reads a day ahead on a late evening.
-	line := fmt.Sprintf("state: %s  created: %s", SanitizeInline(state), i.CreatedAt.Local().Format("2006-01-02 MST"))
+	line := fmt.Sprintf("state: %s  created: %s", SanitizeInline(state), localDay(i.CreatedAt, true))
 	if len(i.Assignees) > 0 {
 		line += fmt.Sprintf("  assignee: @%s", SanitizeInline(strings.Join(i.Assignees, " @")))
 	}
@@ -257,7 +267,7 @@ func Show(w io.Writer, i model.Issue, children []model.Issue, s Style) {
 		fmt.Fprintln(w, s.dim(header))
 		for _, c := range i.Comments {
 			fmt.Fprintf(w, "  @%s (%s): %s\n", SanitizeInline(c.Author),
-				c.CreatedAt.Local().Format("2006-01-02"), sanitizeBlock(strings.TrimSpace(c.Body)))
+				localDay(c.CreatedAt, false), sanitizeBlock(strings.TrimSpace(c.Body)))
 		}
 	}
 }

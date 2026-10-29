@@ -39,7 +39,7 @@ func (a *App) Create(ctx context.Context, opts CreateOpts) error {
 	if opts.Type == "epic" {
 		return usageErr("--type epic is not supported here; use hew epic create")
 	}
-	if opts.Title == "" {
+	if strings.TrimSpace(opts.Title) == "" {
 		return usageErr("--title is required")
 	}
 	if err := validateTitle(opts.Title); err != nil {
@@ -433,11 +433,10 @@ func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 	// Validate every flag up front: Set applies several mutations in
 	// sequence, so a usage error discovered mid-way would exit 2 ("nothing
 	// happened") after earlier changes had already been written.
-	if opts.TitleSet && strings.TrimSpace(opts.Title) == "" {
-		return usageErr("--title must not be empty")
-	}
-	if err := validateTitle(opts.Title); err != nil {
-		return err
+	if opts.TitleSet || opts.Title != "" {
+		if err := validateTitle(opts.Title); err != nil {
+			return err
+		}
 	}
 	var priority model.Priority
 	if opts.Priority != "" {
@@ -549,6 +548,9 @@ func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 // validateTitle checks the stored title, including any cosmetic epic prefix.
 // Count characters rather than bytes so non-ASCII titles get the same limit.
 func validateTitle(title string) error {
+	if strings.TrimSpace(title) == "" {
+		return usageErr("--title must not be empty")
+	}
 	if strings.ContainsAny(title, "\r\n\v\f\u0085\u2028\u2029") {
 		return usageErr("--title must be a single line")
 	}
@@ -891,7 +893,7 @@ type EpicCreateOpts struct {
 // get the cosmetic title prefix and a priority label but no type — they
 // are containers, not work.
 func (a *App) EpicCreate(ctx context.Context, opts EpicCreateOpts) error {
-	if opts.Title == "" {
+	if strings.TrimSpace(opts.Title) == "" {
 		return usageErr("--title is required")
 	}
 	if err := validateBodySource(opts.Sections, opts.BodyFile, opts.Edit); err != nil {

@@ -313,9 +313,9 @@ func beadBody(b beads.Bead) string {
 	if s := strings.TrimSpace(b.Notes); s != "" {
 		parts = append(parts, "### Notes\n\n"+s)
 	}
-	footer := fmt.Sprintf("Migrated from beads `%s` (created %s", b.ID, b.CreatedAt.Format("2006-01-02"))
+	footer := fmt.Sprintf("Migrated from beads `%s` (created %s", b.ID, b.CreatedAt.UTC().Format("2006-01-02"))
 	if b.ClosedAt != nil {
-		footer += ", closed " + b.ClosedAt.Format("2006-01-02")
+		footer += ", closed " + b.ClosedAt.UTC().Format("2006-01-02")
 	}
 	footer += ")"
 	parts = append(parts, "---\n"+footer)
