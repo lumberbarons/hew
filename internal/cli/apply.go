@@ -94,16 +94,18 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	// Validate pending creates before any writes. Already-created entries
 	// may contain fields older releases accepted; re-gating them would
 	// strand a checkpoint whose source digest cannot be changed to repair it.
-	for _, e := range entries {
+	for i, e := range entries {
 		if _, created := state.Mapping[e.Key()]; created {
 			continue
 		}
 		if err := validateTitle(applyTitle(e)); err != nil {
 			return usageErr("line %d: %v", e.Line, err)
 		}
-		if err := validateAreas("areas", e.Areas); err != nil {
+		areas, err := normalizeAreas("areas", e.Areas)
+		if err != nil {
 			return usageErr("line %d: %v", e.Line, err)
 		}
+		entries[i].Areas = areas
 	}
 
 	// Same reasoning: a reference to an issue that does not exist is a typo,

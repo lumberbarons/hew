@@ -60,7 +60,8 @@ func (a *App) Create(ctx context.Context, opts CreateOpts) error {
 	if err := validateBodySource(opts.Sections, opts.BodyFile, opts.Edit); err != nil {
 		return err
 	}
-	if err := validateAreas("--area", opts.Areas); err != nil {
+	areas, err := normalizeAreas("--area", opts.Areas)
+	if err != nil {
 		return err
 	}
 
@@ -101,7 +102,7 @@ func (a *App) Create(ctx context.Context, opts CreateOpts) error {
 		return err
 	}
 
-	labels := append([]string{priority.String(), opts.Type}, opts.Areas...)
+	labels := append([]string{priority.String(), opts.Type}, areas...)
 	created, err := a.Client.CreateIssue(ctx, opts.Title, body, labels)
 	if err != nil {
 		return err
@@ -450,7 +451,8 @@ func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 	if opts.Type != "" && !model.IsType(opts.Type) {
 		return usageErr("--type must be one of %s", strings.Join(model.Types, "|"))
 	}
-	if err := validateAreas("--add-area", opts.AddAreas); err != nil {
+	addAreas, err := normalizeAreas("--add-area", opts.AddAreas)
+	if err != nil {
 		return err
 	}
 	// Removal must remain available for oversized labels older local
@@ -508,8 +510,8 @@ func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 			return err
 		}
 	}
-	if len(opts.AddAreas) > 0 {
-		if err := step("add-area", a.Client.AddLabels(ctx, number, opts.AddAreas)); err != nil {
+	if len(addAreas) > 0 {
+		if err := step("add-area", a.Client.AddLabels(ctx, number, addAreas)); err != nil {
 			return err
 		}
 	}
@@ -561,7 +563,12 @@ func validateTitle(title string) error {
 	return nil
 }
 
-// validateAreas enforces GitHub's label length limit and reserves convention
+// normalizeAreas returns the area names trimmed of surrounding whitespace, or a
+// usage error. A name that is blank after trimming is refused: GitHub rejects a
+// label with no visible name, and the local store would otherwise keep one that
+// renders as `( )` and breaks a later `migrate local`. Everything else is
+// checked against the trimmed name, so " P0 " is the priority label it names.
+// The checks enforce GitHub's label length limit and reserve convention
 // labels: areas must neither change priority/type nor manufacture a claim. A
 // comma is refused too: the text renderer joins areas with it, so an area named
 // "x,y" would be indistinguishable from the two areas "x" and "y". The area
@@ -569,16 +576,24 @@ func validateTitle(title string) error {
 // hand over a name verbatim — `apply` plans and direct API use — while
 // `--area x,y` stays two areas. Removal is checked by validateAreaLabels, which
 // has no comma rule.
-func validateAreas(flag string, areas []string) error {
-	for _, area := range areas {
+func normalizeAreas(flag string, areas []string) ([]string, error) {
+	trimmed := make([]string, len(areas))
+	for i, area := range areas {
+		area = strings.TrimSpace(area)
+		if area == "" {
+			return nil, usageErr("%s must not be blank", flag)
+		}
+		trimmed[i] = area
+	}
+	for _, area := range trimmed {
 		if utf8.RuneCountInString(area) > 50 {
-			return usageErr("%s must be at most 50 characters", flag)
+			return nil, usageErr("%s must be at most 50 characters", flag)
 		}
 		if strings.Contains(area, ",") {
-			return usageErr("%s %q must not contain a comma; commas separate areas", flag, area)
+			return nil, usageErr("%s %q must not contain a comma; commas separate areas", flag, area)
 		}
 	}
-	return validateAreaLabels(flag, areas)
+	return trimmed, validateAreaLabels(flag, trimmed)
 }
 
 func validateAreaLabels(flag string, areas []string) error {

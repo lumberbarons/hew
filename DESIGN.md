@@ -146,7 +146,9 @@ primer so agents know what they're looking at:
   into two; `apply` plans and direct callers that supply a name verbatim are refused
   a comma in it. `migrate` turns a comma in a source label into a hyphen, with a
   warning. A label created on GitHub with a comma in its name is shown as it is, and
-  is the one case that still reads ambiguously. In `list`-shaped text the meta column
+  is the one case that still reads ambiguously. The write path trims whitespace
+  around an area name and refuses one that is blank afterwards (exit 2), in `create`,
+  `set --add-area` and `apply` alike. In `list`-shaped text the meta column
   is capped at a fixed width in characters; a row whose areas overflow it goes
   unaligned rather than padding every other row.
 - Bodies render as-is. The template is scaffolding for `create`, never retrofitted

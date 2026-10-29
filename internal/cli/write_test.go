@@ -154,6 +154,100 @@ func TestAreaFlagsRejectConventionLabelsInAnyCase(t *testing.T) {
 	}
 }
 
+// writeAreaPlan writes a one-entry apply plan carrying the given areas and
+// returns options that keep its checkpoint beside it.
+func writeAreaPlan(t *testing.T, areas []string) ApplyOpts {
+	t.Helper()
+	dir := t.TempDir()
+	file := filepath.Join(dir, "plan.jsonl")
+	entry, err := json.Marshal(map[string]any{"title": "T", "type": "task", "areas": areas})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, append(entry, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return ApplyOpts{File: file, StatePath: filepath.Join(dir, "state.json")}
+}
+
+// A blank area would be stored as a label named " " that renders as `( )` and
+// that GitHub refuses, so every command that takes areas refuses it first.
+func TestAreaFlagsRejectBlankNames(t *testing.T) {
+	for name, area := range map[string]string{
+		"empty": "", "space": " ", "tabs": "\t\t", "unicode space": "  ",
+	} {
+		t.Run(name, func(t *testing.T) {
+			eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+				work, err := store.CreateIssue(ctx, "Existing", "body", []string{"P2", "task"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				app, out, _ := newLocalApp(store)
+				exitCode(t, app.Create(ctx, CreateOpts{Title: "T", Type: "task", Areas: []string{area}}), ExitUsage)
+				exitCode(t, app.Set(ctx, work.Number, SetOpts{AddAreas: []string{area}}), ExitUsage)
+				exitCode(t, app.Apply(ctx, writeAreaPlan(t, []string{area})), ExitUsage)
+
+				if out.Len() != 0 {
+					t.Errorf("refused writes emitted output: %q", out.String())
+				}
+				got, err := store.GetIssue(ctx, work.Number)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(got.Labels, []string{"P2", "task"}) {
+					t.Errorf("labels mutated despite refusal: %v", got.Labels)
+				}
+				open, err := store.ListIssues(ctx, []gh.IssueState{gh.StateOpen})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(open) != 1 {
+					t.Errorf("%d open issues, want only the existing one", len(open))
+				}
+			})
+		})
+	}
+}
+
+// Whitespace around a real name is noise, not part of the label: the trimmed
+// name is what is stored, and it is the trimmed name the convention checks see.
+func TestAreaFlagsTrimSurroundingWhitespace(t *testing.T) {
+	eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+		work, err := store.CreateIssue(ctx, "Existing", "body", []string{"P2", "task"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app, _, _ := newLocalApp(store)
+		if err := app.Create(ctx, CreateOpts{Title: "Created", Type: "task", Areas: []string{" cli\t"}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := app.Set(ctx, work.Number, SetOpts{AddAreas: []string{"  render "}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := app.Apply(ctx, writeAreaPlan(t, []string{" ble "})); err != nil {
+			t.Fatal(err)
+		}
+
+		open, err := store.ListIssues(ctx, []gh.IssueState{gh.StateOpen})
+		if err != nil {
+			t.Fatal(err)
+		}
+		areasOf := map[string][]string{}
+		for _, issue := range open {
+			areasOf[issue.Title] = issue.Areas()
+		}
+		want := map[string][]string{
+			"Created": {"cli"}, "Existing": {"render"}, "T": {"ble"},
+		}
+		if !reflect.DeepEqual(areasOf, want) {
+			t.Errorf("areas = %v, want %v", areasOf, want)
+		}
+
+		exitCode(t, app.Create(ctx, CreateOpts{Title: "T2", Type: "task", Areas: []string{" P0 "}}), ExitUsage)
+		exitCode(t, app.Set(ctx, work.Number, SetOpts{AddAreas: []string{" bug"}}), ExitUsage)
+	})
+}
+
 // Re-asserting a convention label that exists in another case must neither lose
 // it (remove, then skip the add) nor stack a second one.
 func TestSetTypeAndPriorityTreatStrayCaseAsTheSameLabel(t *testing.T) {
