@@ -2,6 +2,7 @@ package local
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -96,7 +97,7 @@ func ReadSnapshot(dir string) (*Snapshot, error) {
 			Parent: rec.Parent, BlockedBy: slices.Clone(rec.BlockedBy),
 		}
 		for _, c := range rec.Comments {
-			i.Comments = append(i.Comments, Comment(c))
+			i.Comments = append(i.Comments, Comment{Author: c.Author, CreatedAt: c.CreatedAt, Body: c.Body})
 		}
 		snap.Issues = append(snap.Issues, i)
 	}
@@ -127,12 +128,12 @@ type Frozen struct {
 
 // Freeze takes the tracker's exclusive lock and snapshots it. Release it when
 // the migration ends, sealed or not.
-func Freeze(dir string) (*Frozen, error) {
+func Freeze(ctx context.Context, dir string) (*Frozen, error) {
 	if err := requireLocal(dir); err != nil {
 		return nil, err
 	}
 	s := &Store{dir: dir}
-	unlock, err := s.lock()
+	unlock, err := s.lock(ctx)
 	if err != nil {
 		return nil, err
 	}

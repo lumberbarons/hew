@@ -6,13 +6,16 @@
 // issues.jsonl. Every mutation takes an exclusive lock, rewrites the file to a
 // temp name and renames it into place, so concurrent agents in different
 // worktrees never lose each other's writes and a reader never sees a torn
-// file. Reads take no lock for the same reason.
+// file. Reads take no lock for the same reason. A writer waits for the lock
+// only until its context is done or a timeout passes, and opening the store
+// sweeps up temp files a killed writer left behind.
 //
 // The directory ignores itself, so git treats it as untracked-and-ignored:
 // `git clean -fdx` at the main checkout deletes the only copy of the tracker.
 package local
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -186,6 +189,10 @@ type Store struct {
 	dir    string
 	viewer string
 	now    func() time.Time
+
+	// lockTimeout overrides how long a writer waits for the lock; zero means
+	// defaultLockTimeout.
+	lockTimeout time.Duration
 }
 
 var (
@@ -209,6 +216,7 @@ func Open(dir, viewer string) (*Store, error) {
 			return nil, err
 		}
 	}
+	removeStaleTempFiles(dir)
 	return &Store{dir: dir, viewer: viewer, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 
@@ -220,8 +228,8 @@ func (s *Store) load() (*data, error) { return readData(s.path()) }
 
 // update runs fn against the latest data under an exclusive lock and writes
 // the result back, unless fn fails — a refused change leaves the file as it was.
-func (s *Store) update(fn func(d *data) error) error {
-	unlock, err := s.lock()
+func (s *Store) update(ctx context.Context, fn func(d *data) error) error {
+	unlock, err := s.lock(ctx)
 	if err != nil {
 		return err
 	}
@@ -245,25 +253,104 @@ func (s *Store) update(fn func(d *data) error) error {
 	return writeFileAtomic(s.path(), raw)
 }
 
-// lock takes the exclusive lock on the store. flock is per open file
-// description, so it serialises goroutines in one process as well as separate
-// processes; closing the file releases it, including if the process dies.
-func (s *Store) lock() (unlock func(), err error) {
-	f, err := os.OpenFile(filepath.Join(s.dir, lockFile), os.O_CREATE|os.O_RDWR, 0o644)
+// Writers wait for the lock by polling, because a blocking flock cannot be
+// abandoned when ctx is cancelled. Holders keep it for one small file rewrite,
+// so the poll is short and the timeout generous: reaching it means the holder
+// is hung, not busy.
+const (
+	defaultLockTimeout = 15 * time.Second
+	lockPollInterval   = 5 * time.Millisecond
+)
+
+// lock takes the exclusive lock on the store, waiting until it is free, ctx is
+// done or the timeout passes. flock is per open file description, so it
+// serialises goroutines in one process as well as separate processes; closing
+// the file releases it, including if the process dies.
+func (s *Store) lock(ctx context.Context) (unlock func(), err error) {
+	path := filepath.Join(s.dir, lockFile)
+	f, err := openLockFile(path)
 	if err != nil {
 		return nil, err
 	}
+	timeout := s.lockTimeout
+	if timeout <= 0 {
+		timeout = defaultLockTimeout
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	for {
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
-		if !errors.Is(err, syscall.EINTR) {
-			break
+		if err := waitCtx.Err(); err != nil {
+			_ = f.Close()
+			if ctx.Err() == nil {
+				return nil, fmt.Errorf("timed out after %s waiting for the lock %s: another hew process is holding it (a `hew migrate local` holds it for the whole migration; if none is running, `lsof %s` names the holder)", timeout, path, path)
+			}
+			return nil, fmt.Errorf("waiting for the lock %s: %w", path, err)
+		}
+		held, err := tryFlock(f)
+		if err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("locking %s: %w", path, err)
+		}
+		if held {
+			return func() { _ = f.Close() }, nil
+		}
+		select {
+		case <-waitCtx.Done():
+		case <-time.After(lockPollInterval):
 		}
 	}
-	if err != nil {
-		_ = f.Close()
-		return nil, fmt.Errorf("locking %s: %w", s.dir, err)
+}
+
+func openLockFile(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+}
+
+// tryFlock takes the exclusive lock without blocking and reports whether it
+// got it. Contention is not an error.
+func tryFlock(f *os.File) (bool, error) {
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		switch {
+		case err == nil:
+			return true, nil
+		case errors.Is(err, syscall.EINTR):
+		case errors.Is(err, syscall.EWOULDBLOCK):
+			return false, nil
+		default:
+			return false, err
+		}
 	}
-	return func() { _ = f.Close() }, nil
+}
+
+// staleTempAge is how old a temp file must be before cleanup touches it. Update
+// holds the lock while it writes one, but Init writes issues.jsonl without it,
+// so the lock alone cannot tell a live temp file from an abandoned one; no write
+// takes anywhere near this long.
+const staleTempAge = time.Minute
+
+// removeStaleTempFiles deletes the issues.jsonl.tmp-* files a writer killed
+// between creating its temp file and renaming it leaves behind. Only old files
+// go, and only when the lock is free: it is taken without waiting, and if
+// someone holds it their temp file is live and stays. Cleanup is best effort —
+// a read-only checkout simply keeps its leftovers.
+func removeStaleTempFiles(dir string) {
+	stale, err := filepath.Glob(filepath.Join(dir, issuesFile+".tmp-*"))
+	if err != nil || len(stale) == 0 {
+		return
+	}
+	f, err := openLockFile(filepath.Join(dir, lockFile))
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	if held, err := tryFlock(f); err != nil || !held {
+		return
+	}
+	for _, p := range stale {
+		if info, err := os.Stat(p); err == nil && time.Since(info.ModTime()) > staleTempAge {
+			_ = os.Remove(p)
+		}
+	}
 }
 
 // writeFileAtomic writes via a temp file in the same directory and renames it

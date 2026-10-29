@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -605,12 +606,11 @@ func TestReadingRejectsFilesThatAreNotATracker(t *testing.T) {
 		"no meta record":        issue(1),
 		"newer format":          `{"_type":"meta","version":99}` + "\n",
 		"unknown type":          meta + `{"_type":"mystery"}` + "\n",
-		"unknown field":         meta + `{"number":1,"title":"t","state":"OPEN","extra":true}` + "\n",
 		"repeated number":       meta + issue(1) + issue(1),
 		"non-positive":          meta + issue(0),
 		"truncated json":        meta + `{"number":1,"ti`,
-		"bad label record":      meta + `{"_type":"label","name":"x","extra":1}` + "\n",
-		"bad meta record":       `{"_type":"meta","version":1,"extra":1}` + "\n",
+		"bad label record":      meta + `{"_type":"label","name":5}` + "\n",
+		"bad meta record":       `{"_type":"meta","version":"one"}` + "\n",
 		"head is not an object": meta + "[1]\n",
 	} {
 		path := filepath.Join(t.TempDir(), issuesFile)
@@ -778,5 +778,282 @@ func TestMainDirSurfacesGitFailure(t *testing.T) {
 	_, err := mainDir(func(string) (string, error) { return "", errors.New("boom") }, "")
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("err = %v, want the git failure", err)
+	}
+}
+
+const (
+	testMeta  = `{"_type":"meta","version":1}` + "\n"
+	testIssue = `{"number":1,"title":"t","state":"OPEN","created_at":"2026-07-01T00:00:00Z"}` + "\n"
+)
+
+// A newer hew at the same format version may add fields; an older build in
+// another worktree must read them and, because every mutation rewrites the
+// whole file, hand them back untouched.
+func TestUnknownFieldsLoadAndSurviveARewrite(t *testing.T) {
+	s := newStore(t)
+	must(t, os.WriteFile(s.path(), []byte(
+		`{"_type":"meta","version":1,"writer":"hew-9"}`+"\n"+
+			`{"_type":"label","name":"P2","color":"fbca04","icon":"flame"}`+"\n"+
+			`{"number":1,"title":"t","state":"OPEN","created_at":"2026-07-01T00:00:00Z","estimate":{"points":3},"watchers":["a","b"]}`+"\n"), 0o644))
+
+	must(t, s.EditTitle(ctx, 1, "renamed"))
+
+	got := readFile(t, s.path())
+	for _, want := range []string{`"writer":"hew-9"`, `"icon":"flame"`, `"estimate":{"points":3}`, `"watchers":["a","b"]`, `"title":"renamed"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("rewritten file lost %s:\n%s", want, got)
+		}
+	}
+	// The rewrite is a fixed point: nothing is duplicated on the next one.
+	must(t, s.EditTitle(ctx, 1, "renamed"))
+	if again := readFile(t, s.path()); again != got {
+		t.Errorf("second rewrite changed the file:\n%s\nvs\n%s", got, again)
+	}
+}
+
+func TestUnknownFieldsDoNotShadowKnownOnes(t *testing.T) {
+	s := newStore(t)
+	must(t, os.WriteFile(s.path(), []byte(testMeta+
+		`{"number":1,"title":"t","state":"OPEN","created_at":"2026-07-01T00:00:00Z","parent":0,"future":1}`+"\n"), 0o644))
+	must(t, s.EditTitle(ctx, 1, "x"))
+	got := readFile(t, s.path())
+	if strings.Count(got, `"title"`) != 1 || strings.Count(got, `"future":1`) != 1 {
+		t.Errorf("fields duplicated or lost:\n%s", got)
+	}
+}
+
+func TestDecodeErrorsNameTheLineAndHowToRecover(t *testing.T) {
+	for name, tc := range map[string]struct {
+		content string
+		line    string
+	}{
+		"truncated last line": {testMeta + testIssue + `{"number":2,"ti`, "line 3"},
+		"blank lines count":   {testMeta + "\n\n" + `{"number":1,"title":`, "line 4"},
+		"repeated number":     {testMeta + testIssue + testIssue, "line 3"},
+		"not an object":       {testMeta + "[1]\n", "line 2"},
+	} {
+		path := filepath.Join(t.TempDir(), issuesFile)
+		must(t, os.WriteFile(path, []byte(tc.content), 0o644))
+		_, err := readData(path)
+		if err == nil {
+			t.Errorf("%s: no error", name)
+			continue
+		}
+		for _, want := range []string{path, tc.line, "restore"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: err = %v, want it to mention %q", name, err, want)
+			}
+		}
+	}
+}
+
+// A file from a newer hew is not damaged, so telling the user to repair it
+// would send them to corrupt a good file.
+func TestNewerFormatIsNotOfferedARepair(t *testing.T) {
+	path := filepath.Join(t.TempDir(), issuesFile)
+	must(t, os.WriteFile(path, []byte(`{"_type":"meta","version":99}`+"\n"), 0o644))
+	_, err := readData(path)
+	if err == nil || !strings.Contains(err.Error(), "newer hew") || !strings.Contains(err.Error(), "line 1") {
+		t.Fatalf("err = %v, want a newer-hew error naming line 1", err)
+	}
+	if strings.Contains(err.Error(), "restore") {
+		t.Errorf("err = %v, offers a repair for a file that is not damaged", err)
+	}
+}
+
+func TestLongLinesAreNotTruncated(t *testing.T) {
+	s := newStore(t)
+	body := strings.Repeat("x", 1<<20)
+	n := mustCreate(t, s, "big", body)
+	got, err := s.GetIssue(ctx, n)
+	must(t, err)
+	if got.Body != body {
+		t.Errorf("body length = %d, want %d", len(got.Body), len(body))
+	}
+}
+
+func TestOpenRemovesStaleTempFiles(t *testing.T) {
+	s := newStore(t)
+	stale := []string{
+		filepath.Join(s.dir, issuesFile+".tmp-123456"),
+		filepath.Join(s.dir, issuesFile+".tmp-abc"),
+	}
+	keep := filepath.Join(s.dir, "notes.tmp-1")
+	for _, p := range append(stale[:len(stale):len(stale)], keep) {
+		must(t, os.WriteFile(p, []byte("partial"), 0o644))
+		old := time.Now().Add(-time.Hour)
+		must(t, os.Chtimes(p, old, old))
+	}
+
+	if _, err := Open(s.dir, "me"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, p := range stale {
+		if _, err := os.Stat(p); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s survived Open (stat err = %v)", p, err)
+		}
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("an unrelated file was removed: %v", err)
+	}
+	if _, err := os.Stat(s.path()); err != nil {
+		t.Errorf("issues file gone: %v", err)
+	}
+}
+
+// While a writer holds the lock its temp file is live, not stale.
+func TestOpenLeavesTempFilesWhileAWriterHoldsTheLock(t *testing.T) {
+	s := newStore(t)
+	tmp := filepath.Join(s.dir, issuesFile+".tmp-live")
+	must(t, os.WriteFile(tmp, []byte("in flight"), 0o644))
+	old := time.Now().Add(-time.Hour)
+	must(t, os.Chtimes(tmp, old, old))
+	unlock, err := s.lock(ctx)
+	must(t, err)
+	defer unlock()
+
+	if _, err := Open(s.dir, "me"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(tmp); err != nil {
+		t.Errorf("a writer's temp file was removed: %v", err)
+	}
+}
+
+func TestLockGivesUpWhenTheContextIsCancelled(t *testing.T) {
+	s := newStore(t)
+	unlock, err := s.lock(ctx)
+	must(t, err)
+	defer unlock()
+
+	cctx, cancel := context.WithCancel(ctx)
+	time.AfterFunc(20*time.Millisecond, cancel)
+	err = s.EditTitle(cctx, 1, "x")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if !strings.Contains(err.Error(), filepath.Join(s.dir, lockFile)) {
+		t.Errorf("err = %v, want it to name the lock file", err)
+	}
+}
+
+func TestLockTimesOutNamingTheLockFile(t *testing.T) {
+	s := newStore(t)
+	unlock, err := s.lock(ctx)
+	must(t, err)
+
+	s.lockTimeout = 30 * time.Millisecond
+	start := time.Now()
+	_, err = s.CreateIssue(ctx, "x", "", nil)
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(s.dir, lockFile)) || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %v, want a timeout naming the lock file", err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Errorf("gave up after %v", took)
+	}
+
+	// Nothing was written, and the store works again once the holder lets go.
+	unlock()
+	s.lockTimeout = 0
+	if _, err := s.CreateIssue(ctx, "x", "", nil); err != nil {
+		t.Errorf("after release: %v", err)
+	}
+}
+
+func TestLockRefusesACancelledContextEvenWhenFree(t *testing.T) {
+	s := newStore(t)
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := s.EditTitle(cctx, 1, "x"); !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+// Init writes issues.jsonl without the lock, so a young temp file may belong to
+// a writer the lock cannot see.
+func TestOpenLeavesYoungTempFilesEvenWhenTheLockIsFree(t *testing.T) {
+	s := newStore(t)
+	tmp := filepath.Join(s.dir, issuesFile+".tmp-young")
+	must(t, os.WriteFile(tmp, []byte("being written"), 0o644))
+	if _, err := Open(s.dir, "me"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(tmp); err != nil {
+		t.Errorf("a just-created temp file was removed: %v", err)
+	}
+}
+
+func TestUnknownFieldsInCommentsSurviveARewrite(t *testing.T) {
+	s := newStore(t)
+	must(t, os.WriteFile(s.path(), []byte(testMeta+
+		`{"number":1,"title":"t","state":"OPEN","created_at":"2026-07-01T00:00:00Z","comments":[{"author":"a","created_at":"2026-07-01T00:00:00Z","body":"hi <!-- x -->","reaction":"+1"}]}`+"\n"), 0o644))
+	must(t, s.EditTitle(ctx, 1, "renamed"))
+	got := readFile(t, s.path())
+	for _, want := range []string{`"reaction":"+1"`, `"body":"hi <!-- x -->"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("rewritten file lost %s:\n%s", want, got)
+		}
+	}
+}
+
+// A record type this build has never heard of most likely comes from a newer
+// hew; telling the user to remove its line would destroy good data.
+func TestUnknownRecordTypeIsNotOfferedARepair(t *testing.T) {
+	path := filepath.Join(t.TempDir(), issuesFile)
+	must(t, os.WriteFile(path, []byte(testMeta+`{"_type":"milestone","name":"v2"}`+"\n"), 0o644))
+	_, err := readData(path)
+	if err == nil || !strings.Contains(err.Error(), `"milestone"`) || !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("err = %v, want an unknown-type error naming the type and line 2", err)
+	}
+	if strings.Contains(err.Error(), "restore") || strings.Contains(err.Error(), "remove") {
+		t.Errorf("err = %v, offers to remove a record that is probably fine", err)
+	}
+}
+
+func TestDuplicateMetaAndLabelRecordsKeepEveryUnknownField(t *testing.T) {
+	s := newStore(t)
+	must(t, os.WriteFile(s.path(), []byte(
+		`{"_type":"meta","version":1,"first":1}`+"\n"+
+			`{"_type":"meta","version":1,"second":2}`+"\n"+
+			`{"_type":"label","name":"x","a":1}`+"\n"+
+			`{"_type":"label","name":"x","b":2}`+"\n"), 0o644))
+	d, err := s.load()
+	must(t, err)
+	out, err := d.encode()
+	must(t, err)
+	for _, want := range []string{`"first":1`, `"second":2`, `"a":1`, `"b":2`} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("encode lost %s:\n%s", want, out)
+		}
+	}
+}
+
+func TestMarshalWithExtrasHandlesAnEmptyBase(t *testing.T) {
+	type empty struct {
+		A int `json:"a,omitempty"`
+	}
+	got, err := marshalWithExtras(empty{}, extras{"k": json.RawMessage(`1`)})
+	must(t, err)
+	if string(got) != `{"k":1}` {
+		t.Errorf("got %s, want {\"k\":1}", got)
+	}
+}
+
+// Freeze keeps the lock for a whole migration, so a writer that times out
+// behind it must not be told the holder is hung.
+func TestLockTimeoutDoesNotAccuseTheHolderOfHanging(t *testing.T) {
+	s := newStore(t)
+	fr, err := Freeze(ctx, s.dir)
+	must(t, err)
+	defer fr.Release()
+
+	s.lockTimeout = 20 * time.Millisecond
+	err = s.EditTitle(ctx, 1, "x")
+	if err == nil || !strings.Contains(err.Error(), "migrate") {
+		t.Fatalf("err = %v, want a timeout that names a running migration as a possible holder", err)
+	}
+	if strings.Contains(err.Error(), "hung") || strings.Contains(err.Error(), "stop it") {
+		t.Errorf("err = %v, tells the user to kill a holder that may be healthy", err)
 	}
 }

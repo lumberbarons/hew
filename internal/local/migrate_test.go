@@ -78,7 +78,7 @@ func TestSnapshotRefusesATrackerThatIsNotLocal(t *testing.T) {
 	must(t, WriteConfig(s.dir, Config{Backend: BackendGitHub}))
 	for name, open := range map[string]func() error{
 		"ReadSnapshot": func() error { _, err := ReadSnapshot(s.dir); return err },
-		"Freeze":       func() error { _, err := Freeze(s.dir); return err },
+		"Freeze":       func() error { _, err := Freeze(ctx, s.dir); return err },
 	} {
 		if err := open(); err == nil || !strings.Contains(err.Error(), "not locally") {
 			t.Errorf("%s err = %v, want a refusal naming the backend", name, err)
@@ -90,7 +90,7 @@ func TestSealRecordsTheMappingAndFlipsTheBackend(t *testing.T) {
 	s := newStore(t)
 	a := mustCreate(t, s, "A", "")
 	b := mustCreate(t, s, "B", "")
-	fr, err := Freeze(s.dir)
+	fr, err := Freeze(ctx, s.dir)
 	must(t, err)
 	must(t, fr.Seal("o/r", map[int]int{a: 41, b: 57}))
 	fr.Release()
@@ -122,7 +122,7 @@ func TestSealRecordsTheMappingAndFlipsTheBackend(t *testing.T) {
 func TestWritesAfterMigrationAreRefused(t *testing.T) {
 	s := newStore(t)
 	n := mustCreate(t, s, "A", "")
-	fr, err := Freeze(s.dir)
+	fr, err := Freeze(ctx, s.dir)
 	must(t, err)
 	must(t, fr.Seal("o/r", map[int]int{n: 1}))
 	fr.Release()
@@ -152,7 +152,7 @@ func TestWritesAfterMigrationAreRefused(t *testing.T) {
 func TestFreezeHoldsWritersUntilReleaseThenRefusesThem(t *testing.T) {
 	s := newStore(t)
 	n := mustCreate(t, s, "A", "")
-	fr, err := Freeze(s.dir)
+	fr, err := Freeze(ctx, s.dir)
 	must(t, err)
 
 	var wg sync.WaitGroup
@@ -181,7 +181,7 @@ func TestFreezeHoldsWritersUntilReleaseThenRefusesThem(t *testing.T) {
 func TestFreezeReleaseLeavesAnUnsealedTrackerWritable(t *testing.T) {
 	s := newStore(t)
 	n := mustCreate(t, s, "A", "")
-	fr, err := Freeze(s.dir)
+	fr, err := Freeze(ctx, s.dir)
 	must(t, err)
 	fr.Release() // a failed migration gives the tracker back
 	must(t, s.Comment(ctx, n, "still local"))

@@ -95,7 +95,7 @@ func containsAll(haystack string, words []string) bool {
 
 func (s *Store) CreateIssue(ctx context.Context, title, body string, labels []string) (model.Issue, error) {
 	var created model.Issue
-	err := s.update(func(d *data) error {
+	err := s.update(ctx, func(d *data) error {
 		next := 1
 		if n := len(d.issues); n > 0 {
 			// Issues are kept sorted and never removed, so numbers are never reused.
@@ -114,15 +114,15 @@ func (s *Store) CreateIssue(ctx context.Context, title, body string, labels []st
 }
 
 func (s *Store) EditTitle(ctx context.Context, number int, title string) error {
-	return s.edit(number, func(_ *data, r *issueRec) error { r.Title = title; return nil })
+	return s.edit(ctx, number, func(_ *data, r *issueRec) error { r.Title = title; return nil })
 }
 
 func (s *Store) EditBody(ctx context.Context, number int, body string) error {
-	return s.edit(number, func(_ *data, r *issueRec) error { r.Body = body; return nil })
+	return s.edit(ctx, number, func(_ *data, r *issueRec) error { r.Body = body; return nil })
 }
 
 func (s *Store) AddLabels(ctx context.Context, number int, labels []string) error {
-	return s.edit(number, func(d *data, r *issueRec) error {
+	return s.edit(ctx, number, func(d *data, r *issueRec) error {
 		for _, l := range labels {
 			r.Labels = appendUniqueFold(r.Labels, d.labelName(l, r.Labels))
 		}
@@ -133,7 +133,7 @@ func (s *Store) AddLabels(ctx context.Context, number int, labels []string) erro
 // RemoveLabel treats an absent label as success, as the GitHub client does.
 // Label names are case-insensitive, so the removal matches the same way.
 func (s *Store) RemoveLabel(ctx context.Context, number int, label string) error {
-	return s.edit(number, func(_ *data, r *issueRec) error {
+	return s.edit(ctx, number, func(_ *data, r *issueRec) error {
 		r.Labels = slices.DeleteFunc(r.Labels, func(l string) bool { return strings.EqualFold(l, label) })
 		return nil
 	})
@@ -144,7 +144,7 @@ func (s *Store) RemoveLabel(ctx context.Context, number int, label string) error
 // two concurrent starts cannot both succeed. It is the Claimer capability
 // Start uses instead of check-then-act.
 func (s *Store) ClaimIssue(ctx context.Context, number int, login string, force bool) error {
-	return s.edit(number, func(d *data, r *issueRec) error {
+	return s.edit(ctx, number, func(d *data, r *issueRec) error {
 		if r.State != string(gh.StateOpen) {
 			return fmt.Errorf("#%d is closed", number)
 		}
@@ -164,28 +164,28 @@ func (s *Store) ClaimIssue(ctx context.Context, number int, login string, force 
 }
 
 func (s *Store) AddAssignee(ctx context.Context, number int, login string) error {
-	return s.edit(number, func(_ *data, r *issueRec) error {
+	return s.edit(ctx, number, func(_ *data, r *issueRec) error {
 		r.Assignees = appendUnique(r.Assignees, login)
 		return nil
 	})
 }
 
 func (s *Store) RemoveAssignees(ctx context.Context, number int, logins []string) error {
-	return s.edit(number, func(_ *data, r *issueRec) error {
+	return s.edit(ctx, number, func(_ *data, r *issueRec) error {
 		r.Assignees = slices.DeleteFunc(r.Assignees, func(l string) bool { return slices.Contains(logins, l) })
 		return nil
 	})
 }
 
 func (s *Store) Comment(ctx context.Context, number int, body string) error {
-	return s.edit(number, func(_ *data, r *issueRec) error {
+	return s.edit(ctx, number, func(_ *data, r *issueRec) error {
 		r.Comments = append(r.Comments, commentRec{Author: s.viewer, CreatedAt: s.now(), Body: body})
 		return nil
 	})
 }
 
 func (s *Store) CloseIssue(ctx context.Context, number int, reason gh.CloseReason) error {
-	return s.edit(number, func(_ *data, r *issueRec) error {
+	return s.edit(ctx, number, func(_ *data, r *issueRec) error {
 		r.State, r.StateReason = string(gh.StateClosed), string(reason)
 		return nil
 	})
@@ -194,7 +194,7 @@ func (s *Store) CloseIssue(ctx context.Context, number int, reason gh.CloseReaso
 // ReopenIssue records REOPENED as the state reason rather than clearing the
 // close reason, which is what GitHub does.
 func (s *Store) ReopenIssue(ctx context.Context, number int) error {
-	return s.edit(number, func(_ *data, r *issueRec) error {
+	return s.edit(ctx, number, func(_ *data, r *issueRec) error {
 		r.State, r.StateReason = string(gh.StateOpen), "REOPENED"
 		return nil
 	})
@@ -204,7 +204,7 @@ func (s *Store) ReopenIssue(ctx context.Context, number int) error {
 // GitHub's API refuses. Longer cycles are accepted here too: the commands run
 // the transitive check before they write, and the read path reports cycles.
 func (s *Store) AddBlockedBy(ctx context.Context, number, blockingNumber int) error {
-	return s.edit(number, func(d *data, r *issueRec) error {
+	return s.edit(ctx, number, func(d *data, r *issueRec) error {
 		blocker, err := d.find(blockingNumber)
 		if err != nil {
 			return err
@@ -223,7 +223,7 @@ func (s *Store) AddBlockedBy(ctx context.Context, number, blockingNumber int) er
 }
 
 func (s *Store) RemoveBlockedBy(ctx context.Context, number, blockingNumber int) error {
-	return s.edit(number, func(d *data, r *issueRec) error {
+	return s.edit(ctx, number, func(d *data, r *issueRec) error {
 		if _, err := d.find(blockingNumber); err != nil {
 			return err
 		}
@@ -237,7 +237,7 @@ func (s *Store) RemoveBlockedBy(ctx context.Context, number, blockingNumber int)
 // parent that is the child or one of its descendants is refused: epics are
 // trees.
 func (s *Store) AddSubIssue(ctx context.Context, parentNumber, childNumber int, replaceParent bool) error {
-	return s.edit(childNumber, func(d *data, child *issueRec) error {
+	return s.edit(ctx, childNumber, func(d *data, child *issueRec) error {
 		parent, err := d.find(parentNumber)
 		if err != nil {
 			return err
@@ -262,7 +262,7 @@ func (s *Store) AddSubIssue(ctx context.Context, parentNumber, childNumber int, 
 }
 
 func (s *Store) RemoveSubIssue(ctx context.Context, parentNumber, childNumber int) error {
-	return s.edit(childNumber, func(d *data, child *issueRec) error {
+	return s.edit(ctx, childNumber, func(d *data, child *issueRec) error {
 		if _, err := d.find(parentNumber); err != nil {
 			return err
 		}
@@ -296,7 +296,7 @@ func (s *Store) ListLabels(ctx context.Context) ([]gh.Label, error) {
 // no-op rather than an error, so bootstrapping is safe to repeat; label names
 // are case-insensitive, so an existing spelling wins.
 func (s *Store) CreateLabel(ctx context.Context, label gh.Label) error {
-	return s.update(func(d *data) error {
+	return s.update(ctx, func(d *data) error {
 		if !slices.ContainsFunc(d.labels, func(l gh.Label) bool { return strings.EqualFold(l.Name, label.Name) }) {
 			d.labels = append(d.labels, label)
 		}
@@ -306,8 +306,8 @@ func (s *Store) CreateLabel(ctx context.Context, label gh.Label) error {
 
 // edit is update for the common case: find one issue, change it. A missing
 // issue fails before anything is written.
-func (s *Store) edit(number int, fn func(d *data, r *issueRec) error) error {
-	return s.update(func(d *data) error {
+func (s *Store) edit(ctx context.Context, number int, fn func(d *data, r *issueRec) error) error {
+	return s.update(ctx, func(d *data) error {
 		rec, err := d.find(number)
 		if err != nil {
 			return err
