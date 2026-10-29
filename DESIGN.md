@@ -268,9 +268,9 @@ obvious from a flag name.
   beside the lock, and a writer still waiting after half a second reports the
   migration on stderr and, past its bounded wait, fails naming it rather than
   hanging. The marker is advisory and is believed only while the lock is held, so
-  one left by a killed run is cleared by the next writer. Only when every step finished does it write
-  `.hew/migrated.json` (local → GitHub number map) and flip `config.json` to
-  `github`; the local file stays as an archive and refuses writes, including from a
+  one left by a killed run is cleared by the next writer to take the lock. Only
+  when every step finished does it write `.hew/migrated.json` (local → GitHub
+  number map) and flip `config.json` to `github`; the local file stays as an archive and refuses writes, including from a
   store opened before the flip. A run with unfinished steps leaves the tracker
   local so a rerun can finish, resuming from a checkpoint bound like the other
   batch writers' — which means local issues cannot change between a failed run and

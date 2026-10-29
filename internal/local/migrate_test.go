@@ -294,4 +294,7 @@ func TestGarbledMigrationMarkerStillExplainsTheWait(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "migration is in progress") {
 		t.Errorf("err = %v, want the migration named even when its marker is unreadable", err)
 	}
+	if err != nil && strings.Contains(err.Error(), "pid") {
+		t.Errorf("err = %v, invents a pid the unreadable marker never gave", err)
+	}
 }

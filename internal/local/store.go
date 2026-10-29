@@ -272,6 +272,9 @@ const (
 	// holder is a migration. An ordinary holder lets go within milliseconds, so
 	// a writer that is still waiting this long is behind something slower.
 	defaultNoticeAfter = 500 * time.Millisecond
+
+	// markerRecheck is how often a waiter that found no migration looks again.
+	markerRecheck = time.Second
 )
 
 // lock takes the exclusive lock on the store, waiting until it is free, ctx is
@@ -302,6 +305,7 @@ func (s *Store) lock(ctx context.Context) (unlock func(), err error) {
 	defer cancel()
 	waitStart := time.Now()
 	noticed := false
+	var lastCheck time.Time
 	for {
 		if err := waitCtx.Err(); err != nil {
 			_ = f.Close()
@@ -322,14 +326,15 @@ func (s *Store) lock(ctx context.Context) (unlock func(), err error) {
 			removeMigrationMarker(s.dir)
 			return func() { _ = f.Close() }, nil
 		}
-		if !noticed && time.Since(waitStart) >= noticeAfter {
+		if !noticed && time.Since(waitStart) >= noticeAfter && time.Since(lastCheck) >= markerRecheck {
+			lastCheck = time.Now()
 			if m, ok := readMigrationMarker(s.dir); ok {
 				noticed = true
 				w := s.notice
 				if w == nil {
 					w = os.Stderr
 				}
-				_, _ = fmt.Fprintf(w, "hew: %s; waiting up to %s for it to finish\n", m.describe(), timeout)
+				_, _ = fmt.Fprintf(w, "hew: %s; waiting up to %s more for it to finish\n", m.describe(), (timeout - time.Since(waitStart)).Round(time.Millisecond))
 			}
 		}
 		select {

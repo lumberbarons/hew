@@ -138,13 +138,16 @@ type migrationMarker struct {
 }
 
 func (m migrationMarker) describe() string {
+	if m.PID == 0 {
+		return "a `hew migrate local` migration is in progress and holds this tracker until it finishes"
+	}
 	return fmt.Sprintf("a `hew migrate local` migration is in progress (pid %d, started %s) and holds this tracker until it finishes",
 		m.PID, m.StartedAt.Format(time.RFC3339))
 }
 
 // readMigrationMarker reports the migration the marker names. A marker that is
 // there but garbled still means a migration was under way, so it is described
-// with whatever fields survived rather than ignored.
+// without the detail it lost rather than ignored.
 func readMigrationMarker(dir string) (migrationMarker, bool) {
 	raw, err := os.ReadFile(filepath.Join(dir, migratingFile))
 	if err != nil {
@@ -156,13 +159,16 @@ func readMigrationMarker(dir string) (migrationMarker, bool) {
 }
 
 // writeMigrationMarker is best effort: the marker only explains a wait, so a
-// tracker that cannot record it is still migrated correctly.
+// tracker that cannot record it is still migrated correctly. It is written in
+// place rather than by rename: a torn marker reads as garbled and still
+// explains the wait, whereas a rename's temp file would outlive a crash with
+// nothing sweeping it.
 func writeMigrationMarker(dir string) {
 	raw, err := marshalLine(migrationMarker{PID: os.Getpid(), StartedAt: time.Now().UTC()})
 	if err != nil {
 		return
 	}
-	_ = writeFileAtomic(filepath.Join(dir, migratingFile), raw)
+	_ = os.WriteFile(filepath.Join(dir, migratingFile), raw, 0o644)
 }
 
 func removeMigrationMarker(dir string) { _ = os.Remove(filepath.Join(dir, migratingFile)) }
