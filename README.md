@@ -40,7 +40,7 @@ No GitHub tracker? A repo can track issues locally instead — see [Local mode](
 ```sh
 hew init          # bootstrap the label set in a repo; prints a CLAUDE.md snippet
 hew init --local  # or track issues in a local .hew directory instead of GitHub
-hew hooks install <claude|codex|cursor|opencode> # agent session-start hook running `hew prime`
+hew hooks install claude # agent session-start hook running `hew prime`; also codex, cursor, opencode
 hew prime         # session-start context: conventions + ready work + live state
 hew ready         # what should I work on? (priority-sorted, zero open blockers)
 hew start 42 --show  # claim it and read it: assign @me + in-progress, then the issue's
@@ -167,7 +167,7 @@ hew set <n> [--priority ..] [--type ..] [--add-area X] [--remove-area X]
            [--closed]             # set/block/unblock refuse a closed target — an
                                   # edit landing on one is almost always stale
                                   # state; this is the override
-hew pr [--for N ...] [--title "..."]
+hew pr [--for N ...] [--title "..."] [--amend]
           [--what "..."] [--why "..."] [--testing "..."] [--risk "..."]
                                   # draft PR for the claimed issue: body composed from
                                   # the issue (What/Why default to its Fix/Approach and
@@ -180,10 +180,13 @@ hew pr [--for N ...] [--title "..."]
                                   # (bug → "fix: ..."); --title is passed through.
                                   # Every section flag repeats: several values
                                   # become a bullet list, one value stays a paragraph.
-                                  # Push the branch first.
+                                  # Push the branch first. --amend revises the open
+                                  # PR instead: omitted sections and the title are
+                                  # preserved, an explicitly empty flag removes its
+                                  # section.
           [--body-file F]         # long-form escape hatch (missing Fixes/Part of
                                   # trailers are appended, never duplicated)
-          [--base BRANCH] [--ready]
+          [--base BRANCH] [--ready]  # creation-only: --amend refuses both
 hew close <n> --reason "..." [--completed | --duplicate-of M]
 hew reopen <n> --reason "..."          # comment + reopen; releases a stale claim,
                                        # no-op on an open issue
@@ -445,8 +448,8 @@ See [DESIGN.md](DESIGN.md) for the conventions the tool enforces, the read-path
 normalization rules, and the API strategy.
 
 The token-lean claim is measured, not asserted: `hew ready` and `hew list` cost
-17–25 tokens per open issue against 77–84 for the leanest equivalent GraphQL query
-and 113–141 for `gh issue list --json`, which cannot answer readiness at all.
-[DESIGN.md](DESIGN.md#token-efficiency-measured-2026-09-17) has the full table,
+16–25 tokens per open issue against 75–84 for the leanest equivalent GraphQL query
+and 104–141 for `gh issue list --json`, which cannot answer readiness at all.
+The "Token efficiency" section of [DESIGN.md](DESIGN.md) has the full table,
 including the one command where the tool currently loses (`list --json`, filed
 as #62); [evals/](evals/) is the harness that produced it.
