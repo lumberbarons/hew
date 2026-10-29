@@ -3,9 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
-	"os"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -40,6 +41,32 @@ func TestUnknownCommandExitsUsage(t *testing.T) {
 		})
 	}
 }
+
+func TestExitCodeMapping(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"start's claim refusal keeps 3", &appcli.ExitError{Code: appcli.ExitClaimed}, appcli.ExitClaimed},
+		{"start's own-claim refusal keeps 5", &appcli.ExitError{Code: appcli.ExitClaimedByYou}, appcli.ExitClaimedByYou},
+		{"start's blocked refusal keeps 6", &appcli.ExitError{Code: appcli.ExitBlocked}, appcli.ExitBlocked},
+		{"framework exit 3 reads as usage", ucli.Exit("No help topic", 3), appcli.ExitUsage},
+		{"framework exit 1 reads as usage", ucli.Exit("bad", 1), appcli.ExitUsage},
+		{"plain error stays generic", errTest("boom"), appcli.ExitGeneric},
+		{"no error", nil, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := exitCode(tc.err); got != tc.want {
+				t.Fatalf("exitCode = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+type errTest string
+
+func (e errTest) Error() string { return string(e) }
 
 func TestUnknownCommandPointsAtHelp(t *testing.T) {
 	code, _, stderr := runHew(t, "epic", "bogus")
@@ -121,6 +148,10 @@ func commandPaths(cmd *ucli.Command, prefix []string) [][]string {
 // "pick the next ready item" or "resume". No other path may produce them, so
 // every command takes a battery of bad invocations and none may land on them.
 func TestOnlyStartProducesClaimExitCodes(t *testing.T) {
+	// Some of these invocations are valid for some commands (`hooks install
+	// bogus` reaches the filesystem), so run them where nothing real is at stake.
+	t.Chdir(t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 	reserved := map[int]bool{appcli.ExitClaimed: true, appcli.ExitClaimedByYou: true, appcli.ExitBlocked: true}
 	paths := commandPaths(root(), nil)
 	if len(paths) == 0 {
@@ -140,24 +171,49 @@ func TestOnlyStartProducesClaimExitCodes(t *testing.T) {
 	}
 }
 
-// The command layer's only constructors of the reserved codes sit in the
-// start claim guard; a stray one anywhere else would surface as a claim.
+// startGuardFuncs are the only functions allowed to name the reserved codes:
+// the refusals `start` returns from its claim and blocker checks.
+var startGuardFuncs = map[string]bool{"claimRefusal": true, "blockerRefusal": true}
+
+// The command layer's only constructors of the reserved codes sit in start's
+// refusal helpers; a stray one anywhere else would surface as a claim. This
+// checks every non-test file, write.go included, by enclosing function.
 func TestReservedExitCodesAreConstructedOnlyByStartGuard(t *testing.T) {
 	files, err := filepath.Glob("../../internal/cli/*.go")
 	if err != nil || len(files) == 0 {
 		t.Fatalf("glob: %v (%d files)", err, len(files))
 	}
-	use := regexp.MustCompile(`\bExit(Claimed|ClaimedByYou|Blocked)\b`)
+	reserved := map[string]bool{"ExitClaimed": true, "ExitClaimedByYou": true, "ExitBlocked": true}
+	fset := token.NewFileSet()
 	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") || filepath.Base(f) == "app.go" || filepath.Base(f) == "write.go" {
+		if strings.HasSuffix(f, "_test.go") || filepath.Base(f) == "app.go" {
 			continue
 		}
-		src, err := os.ReadFile(f)
+		file, err := parser.ParseFile(fset, f, nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if m := use.Find(src); m != nil {
-			t.Errorf("%s references %s; only write.go's start guard may produce it", f, m)
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || startGuardFuncs[fn.Name.Name] {
+				continue
+			}
+			ast.Inspect(fn, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.Ident:
+					if reserved[n.Name] {
+						t.Errorf("%s: %s references %s; only start's refusal helpers may produce it", fset.Position(n.Pos()), fn.Name.Name, n.Name)
+					}
+				case *ast.KeyValueExpr:
+					// A literal exit code, e.g. &ExitError{Code: 3}, dodges the constants.
+					if key, ok := n.Key.(*ast.Ident); ok && key.Name == "Code" {
+						if lit, ok := n.Value.(*ast.BasicLit); ok {
+							t.Errorf("%s: %s sets Code to the literal %s; use the named exit constants", fset.Position(n.Pos()), fn.Name.Name, lit.Value)
+						}
+					}
+				}
+				return true
+			})
 		}
 	}
 }

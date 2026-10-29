@@ -58,8 +58,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 // command-line mistake, and 3 is `start`'s "claimed by someone else" — it must
 // read as usage (2) instead.
 func exitCode(err error) int {
+	// hew's own codes (start's 3, 5 and 6 among them) win over the framework
+	// mapping, even if an ExitError ever grows an ExitCode method.
+	var own *appcli.ExitError
 	var coder ucli.ExitCoder
-	if errors.As(err, &coder) {
+	if !errors.As(err, &own) && errors.As(err, &coder) {
 		return appcli.ExitUsage
 	}
 	return appcli.ExitCode(err)
@@ -90,7 +93,9 @@ func groupAction(_ context.Context, cmd *ucli.Command) error {
 		return appcli.UsageError("unknown command %q; see `%s --help`", cmd.Args().First(), cmd.FullName())
 	}
 	if cmd.Root() == cmd {
-		return ucli.ShowRootCommandHelp(cmd)
+		// As the framework default does: a help-render failure is not a command failure.
+		_ = ucli.ShowRootCommandHelp(cmd)
+		return nil
 	}
 	return ucli.ShowSubcommandHelp(cmd)
 }
