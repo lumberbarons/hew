@@ -509,7 +509,10 @@ object is neither the text primer nor the data schema.
   with `already claimed`; `start` on an issue you already claimed exits 5, because
   the response is to resume that work rather than to pick a different item; auth
   failure exits 4; `start` on an issue with open blockers exits 6; etc.). The exit code is the signal agents branch on — a
-  distinction worth acting on gets a code, not a `--json`-only field.
+  distinction worth acting on gets a code, not a `--json`-only field. Exits 3, 5 and 6
+  belong to `start` alone: an unknown command, an unknown or unparsable flag, and a missing
+  required flag all exit 2 with one line and a pointer to `--help`, never the framework's
+  defaults (an unknown command exits 3 and a flag error exits 1 with the full help dump).
 
 ## Checkpoint binding
 
