@@ -137,8 +137,19 @@ func TestOpenRefusesWhatIsNotALocalTracker(t *testing.T) {
 	dir = filepath.Join(t.TempDir(), DirName)
 	must(t, Init(dir))
 	must(t, os.Remove(filepath.Join(dir, issuesFile)))
-	if _, err := Open(dir, "me"); err == nil {
-		t.Error("a tracker with no issues file opened")
+	_, err := Open(dir, "me")
+	if err == nil {
+		t.Fatal("a tracker with no issues file opened")
+	}
+	// Config present, issues gone: the message names the file and both ways out
+	// instead of a bare stat error.
+	for _, want := range []string{filepath.Join(dir, issuesFile), "backup", "hew init --local"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
+	}
+	if strings.HasPrefix(err.Error(), "stat ") {
+		t.Errorf("err = %v, still the bare stat error", err)
 	}
 }
 
@@ -153,6 +164,81 @@ func TestReadConfigRejectsBadFiles(t *testing.T) {
 		if _, err := ReadConfig(dir); err == nil {
 			t.Errorf("%s: no error", name)
 		}
+	}
+}
+
+// A damaged config.json is reported by path with the way out, not as the Go
+// decoder's text. An empty file is the common case (a crash mid-write elsewhere,
+// a truncating editor), and "unexpected end of JSON input" names nothing.
+func TestReadConfigSaysWhatToDoAboutADamagedFile(t *testing.T) {
+	for name, content := range map[string]string{
+		"empty":           "",
+		"whitespace only": " \n",
+		"not json":        "nope",
+		"wrong shape":     `["local"]`,
+		"wrong field":     `{"backend":"local","version":"one"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, configFile)
+			must(t, os.WriteFile(path, []byte(content), 0o644))
+			_, err := ReadConfig(dir)
+			if err == nil {
+				t.Fatal("no error")
+			}
+			for _, want := range []string{path, "backup", "hew init --local"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err = %v, want it to mention %q", err, want)
+				}
+			}
+			for _, raw := range []string{"invalid character", "unexpected end of JSON", "cannot unmarshal"} {
+				if strings.Contains(err.Error(), raw) {
+					t.Errorf("err = %v, leaks decoder text %q", err, raw)
+				}
+			}
+			if errors.Is(err, fs.ErrNotExist) {
+				t.Error("a damaged config reads as a missing one, which Locate treats as not local")
+			}
+		})
+	}
+}
+
+// A config that exists but is not a regular readable file is not "missing":
+// the recovery text must not pretend the file is merely damaged JSON.
+func TestReadConfigKeepsOtherReadFailuresDistinct(t *testing.T) {
+	dir := t.TempDir()
+	must(t, os.Mkdir(filepath.Join(dir, configFile), 0o755))
+	_, err := ReadConfig(dir)
+	if err == nil || errors.Is(err, fs.ErrNotExist) || strings.Contains(err.Error(), "hew init --local") {
+		t.Errorf("err = %v, want the plain read failure", err)
+	}
+}
+
+// The file can vanish after Open too (a sibling agent's cleanup, a moved
+// worktree's tracker); the commands that read it then say the same thing.
+func TestStoreSaysWhatToDoWhenTheIssuesFileVanishesAfterOpen(t *testing.T) {
+	s := newStore(t)
+	must(t, os.Remove(s.path()))
+	_, err := s.load()
+	if err == nil {
+		t.Fatal("no error")
+	}
+	for _, want := range []string{s.path(), "backup", "hew init --local"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
+	}
+}
+
+func TestIssuesMissingReportsOnlyAbsence(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), DirName)
+	must(t, Init(dir))
+	if IssuesMissing(dir) {
+		t.Error("a fresh tracker reads as having lost its issues")
+	}
+	must(t, os.Remove(filepath.Join(dir, issuesFile)))
+	if !IssuesMissing(dir) {
+		t.Error("a tracker without issues.jsonl does not read as missing it")
 	}
 }
 

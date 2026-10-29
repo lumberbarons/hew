@@ -15,6 +15,7 @@
 package local
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -110,7 +111,7 @@ func ReadConfig(dir string) (Config, error) {
 		Version int `json:"version"`
 	}
 	if err := json.Unmarshal(raw, &head); err != nil {
-		return cfg, fmt.Errorf("%s: %w", path, err)
+		return cfg, damagedConfigError(path, raw)
 	}
 	if head.Version > formatVersion {
 		cfg.Version = head.Version
@@ -118,9 +119,37 @@ func ReadConfig(dir string) (Config, error) {
 			path, head.Version, formatVersion)
 	}
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return cfg, fmt.Errorf("%s: %w", path, err)
+		return cfg, damagedConfigError(path, raw)
 	}
 	return cfg, nil
+}
+
+// damagedConfigError says what a config that will not decode is and how to get
+// out, in place of the decoder's text, which names neither the file nor a fix.
+// It deliberately does not satisfy fs.ErrNotExist: a damaged config is not a
+// missing one, and Locate must not read it as "this repo is not local".
+func damagedConfigError(path string, raw []byte) error {
+	what := "is not a valid hew config"
+	if len(bytes.TrimSpace(raw)) == 0 {
+		what = "is empty"
+	}
+	return fmt.Errorf("%s %s; to recover, restore it from a backup, or delete it and run `hew init --local`, which rewrites the config and keeps the issues (the tracker gets a new id, so resume checkpoints for `apply` and `migrate` start over)",
+		path, what)
+}
+
+// missingIssuesError is the answer for a config that says local beside an
+// issues.jsonl that is gone: the issues were lost, and creating an empty file
+// behind the caller's back would hide it.
+func missingIssuesError(path string) error {
+	return fmt.Errorf("%s is missing although the tracker's config exists, so its issues were lost; to recover, restore it from a backup, or run `hew init --local` to start with an empty one", path)
+}
+
+// IssuesMissing reports whether dir's issues.jsonl is absent. It says nothing
+// about whether the tracker was ever created, so callers pair it with a config
+// they have already read.
+func IssuesMissing(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, issuesFile))
+	return errors.Is(err, fs.ErrNotExist)
 }
 
 // newID returns a fresh tracker identity: random bytes, hex, so it names one
@@ -286,6 +315,9 @@ func Open(dir, viewer string) (*Store, error) {
 		return nil, err
 	}
 	if _, err := os.Stat(filepath.Join(dir, issuesFile)); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, missingIssuesError(filepath.Join(dir, issuesFile))
+		}
 		return nil, err
 	}
 	if viewer == "" {

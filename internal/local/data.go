@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"reflect"
@@ -199,6 +200,9 @@ type data struct {
 
 func readData(path string) (*data, error) {
 	f, err := os.Open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, missingIssuesError(path)
+	}
 	if err != nil {
 		return nil, err
 	}

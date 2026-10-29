@@ -193,6 +193,67 @@ func TestInitLocalWarnsOnceThatADeletedTrackerFallsBackToGitHub(t *testing.T) {
 	}
 }
 
+// Config present but issues.jsonl gone is data loss, not a fresh start. init
+// still recreates the file (it is the documented way out), but says so, so the
+// empty tracker is not mistaken for a working one.
+func TestInitLocalWarnsWhenItRecreatesAMissingIssuesFile(t *testing.T) {
+	main, _ := gitRepoWithWorktree(t)
+	tracker := filepath.Join(main, local.DirName)
+	app, _, _ := newApp(newFake())
+	if err := app.InitLocal(main); err != nil {
+		t.Fatal(err)
+	}
+	issues := filepath.Join(tracker, "issues.jsonl")
+	if err := os.Remove(issues); err != nil {
+		t.Fatal(err)
+	}
+
+	again, out, errOut := newApp(newFake())
+	if err := again.InitLocal(main); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{issues, "empty", "backup"} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("stderr missing %q:\n%s", want, errOut.String())
+		}
+	}
+	if strings.Contains(out.String(), "backup") {
+		t.Errorf("the warning leaked into stdout:\n%s", out.String())
+	}
+	if _, err := os.Stat(issues); err != nil {
+		t.Errorf("issues.jsonl was not recreated: %v", err)
+	}
+
+	quiet, _, quietErr := newApp(newFake())
+	if err := quiet.InitLocal(main); err != nil {
+		t.Fatal(err)
+	}
+	if quietErr.Len() != 0 {
+		t.Errorf("a rerun over an intact tracker warned:\n%s", quietErr.String())
+	}
+}
+
+// A config that cannot be read is refused with the path and the way out, and
+// nothing is written over it.
+func TestInitLocalRefusesACorruptConfigWithARecoveryHint(t *testing.T) {
+	main, _ := gitRepoWithWorktree(t)
+	tracker := filepath.Join(main, local.DirName)
+	app, _, _ := newApp(newFake())
+	if err := app.InitLocal(main); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(tracker, "config.json")
+	if err := os.WriteFile(cfgPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	again, _, _ := newApp(newFake())
+	err := again.InitLocal(main)
+	if err == nil || !strings.Contains(err.Error(), cfgPath) || strings.Contains(err.Error(), "unexpected end of JSON") {
+		t.Errorf("err = %v, want the path and no decoder text", err)
+	}
+}
+
 // The recovery the refusals promise: init --local on a .hew that lost its
 // config restores it, keeps the issues, and selection works again.
 func TestInitLocalRecoversATrackerThatLostItsConfig(t *testing.T) {
