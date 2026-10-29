@@ -3,7 +3,9 @@ package local
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -191,5 +193,108 @@ func TestReadMigratedOfAnUnmigratedTracker(t *testing.T) {
 	s := newStore(t)
 	if _, err := ReadMigrated(s.dir); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("err = %v, want a missing-file error", err)
+	}
+}
+
+func TestWriterBlockedByAMigrationSaysSoWithinTheBoundedWait(t *testing.T) {
+	s := newStore(t)
+	fr, err := Freeze(ctx, s.dir)
+	must(t, err)
+	defer fr.Release()
+
+	var notice strings.Builder
+	s.notice = &notice
+	s.noticeAfter = 10 * time.Millisecond
+	s.lockTimeout = 200 * time.Millisecond
+	start := time.Now()
+	_, err = s.CreateIssue(ctx, "x", "", nil)
+	if took := time.Since(start); took > 5*time.Second {
+		t.Errorf("gave up after %v, want the bounded wait", took)
+	}
+
+	if !strings.Contains(notice.String(), "migration is in progress") || !strings.Contains(notice.String(), fmt.Sprintf("pid %d", os.Getpid())) {
+		t.Errorf("stderr notice = %q, want it to say a migration is in progress and name it", notice.String())
+	}
+	if err == nil || !strings.Contains(err.Error(), "migration is in progress") || strings.Contains(err.Error(), "lsof") {
+		t.Errorf("err = %v, want a timeout that names the migration rather than telling the user to hunt for a holder", err)
+	}
+}
+
+func TestPlainLockContentionGetsNoMigrationNotice(t *testing.T) {
+	s := newStore(t)
+	unlock, err := s.lock(ctx)
+	must(t, err)
+	defer unlock()
+
+	var notice strings.Builder
+	s.notice = &notice
+	s.noticeAfter = 10 * time.Millisecond
+	s.lockTimeout = 100 * time.Millisecond
+	if _, err := s.CreateIssue(ctx, "x", "", nil); err == nil || strings.Contains(err.Error(), "migration is in progress") {
+		t.Errorf("err = %v, want the generic timeout", err)
+	}
+	if notice.Len() != 0 {
+		t.Errorf("stderr notice = %q, want none when no migration holds the lock", notice.String())
+	}
+}
+
+func TestMigrationMarkerIsGoneAfterReleaseSealedOrNot(t *testing.T) {
+	for name, seal := range map[string]bool{"failed": false, "sealed": true} {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			n := mustCreate(t, s, "A", "")
+			fr, err := Freeze(ctx, s.dir)
+			must(t, err)
+			marker := filepath.Join(s.dir, migratingFile)
+			if _, err := os.Stat(marker); err != nil {
+				t.Fatalf("no marker while frozen: %v", err)
+			}
+			if seal {
+				must(t, fr.Seal("o/r", map[int]int{n: 1}))
+			}
+			fr.Release()
+			fr.Release() // idempotent
+			if _, err := os.Stat(marker); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("marker after Release: err = %v, want it removed", err)
+			}
+		})
+	}
+}
+
+// A migration killed mid-run frees the lock but cannot remove its marker. The
+// marker must neither stall writers nor survive the next one.
+func TestCrashedMigrationsMarkerDoesNotBlockWriters(t *testing.T) {
+	s := newStore(t)
+	marker := filepath.Join(s.dir, migratingFile)
+	must(t, os.WriteFile(marker, []byte(`{"pid":999999,"started_at":"2026-07-01T11:00:00Z"}`), 0o644))
+
+	var notice strings.Builder
+	s.notice = &notice
+	s.noticeAfter = time.Millisecond
+	s.lockTimeout = time.Second
+	mustCreate(t, s, "after the crash", "")
+
+	if notice.Len() != 0 {
+		t.Errorf("stderr notice = %q, want none: the lock was free", notice.String())
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("stale marker survived a writer: err = %v", err)
+	}
+}
+
+func TestGarbledMigrationMarkerStillExplainsTheWait(t *testing.T) {
+	s := newStore(t)
+	unlock, err := s.lock(ctx)
+	must(t, err)
+	defer unlock()
+	must(t, os.WriteFile(filepath.Join(s.dir, migratingFile), []byte("not json"), 0o644))
+
+	s.lockTimeout = 30 * time.Millisecond
+	_, err = s.CreateIssue(ctx, "x", "", nil)
+	if err == nil || !strings.Contains(err.Error(), "migration is in progress") {
+		t.Errorf("err = %v, want the migration named even when its marker is unreadable", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "pid") {
+		t.Errorf("err = %v, invents a pid the unreadable marker never gave", err)
 	}
 }

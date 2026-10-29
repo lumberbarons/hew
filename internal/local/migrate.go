@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -126,8 +127,55 @@ type Frozen struct {
 	unlock func()
 }
 
-// Freeze takes the tracker's exclusive lock and snapshots it. Release it when
-// the migration ends, sealed or not.
+// migratingFile is the marker a frozen tracker keeps beside its lock, naming
+// the migration that holds it. It is advisory: writers read it only to explain
+// a wait, never to decide whether they may write.
+const migratingFile = "migrating"
+
+type migrationMarker struct {
+	PID       int       `json:"pid"`
+	StartedAt time.Time `json:"started_at"`
+}
+
+func (m migrationMarker) describe() string {
+	if m.PID == 0 {
+		return "a `hew migrate local` migration is in progress and holds this tracker until it finishes"
+	}
+	return fmt.Sprintf("a `hew migrate local` migration is in progress (pid %d, started %s) and holds this tracker until it finishes",
+		m.PID, m.StartedAt.Format(time.RFC3339))
+}
+
+// readMigrationMarker reports the migration the marker names. A marker that is
+// there but garbled still means a migration was under way, so it is described
+// without the detail it lost rather than ignored.
+func readMigrationMarker(dir string) (migrationMarker, bool) {
+	raw, err := os.ReadFile(filepath.Join(dir, migratingFile))
+	if err != nil {
+		return migrationMarker{}, false
+	}
+	var m migrationMarker
+	_ = json.Unmarshal(raw, &m)
+	return m, true
+}
+
+// writeMigrationMarker is best effort: the marker only explains a wait, so a
+// tracker that cannot record it is still migrated correctly. It is written in
+// place rather than by rename: a torn marker reads as garbled and still
+// explains the wait, whereas a rename's temp file would outlive a crash with
+// nothing sweeping it.
+func writeMigrationMarker(dir string) {
+	raw, err := marshalLine(migrationMarker{PID: os.Getpid(), StartedAt: time.Now().UTC()})
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(dir, migratingFile), raw, 0o644)
+}
+
+func removeMigrationMarker(dir string) { _ = os.Remove(filepath.Join(dir, migratingFile)) }
+
+// Freeze takes the tracker's exclusive lock and snapshots it, leaving a marker
+// that tells waiting writers a migration holds it. Release it when the
+// migration ends, sealed or not.
 func Freeze(ctx context.Context, dir string) (*Frozen, error) {
 	if err := requireLocal(dir); err != nil {
 		return nil, err
@@ -148,6 +196,7 @@ func Freeze(ctx context.Context, dir string) (*Frozen, error) {
 		unlock()
 		return nil, err
 	}
+	writeMigrationMarker(dir)
 	return &Frozen{Snapshot: snap, dir: dir, unlock: unlock}, nil
 }
 
@@ -169,6 +218,7 @@ func (f *Frozen) Seal(repo string, mapping map[int]int) error {
 // Release lets writers back in. Safe to call more than once.
 func (f *Frozen) Release() {
 	if f.unlock != nil {
+		removeMigrationMarker(f.dir)
 		f.unlock()
 		f.unlock = nil
 	}
