@@ -1321,7 +1321,7 @@ func TestReopenReleasesLabelOnlyClaim(t *testing.T) {
 
 // The reopen has landed by the time the claim release runs, so a failure
 // there must say the issue is open but still claimed — a retry is a no-op
-// reopen and will not clear it; start --force is the remedy.
+// reopen and will not clear it; release --force is the remedy.
 func TestReopenReportsClaimLeftWhenReleaseFails(t *testing.T) {
 	closed := issue(1, "Work", "P2", "bug", model.InProgressLabel)
 	closed.State = "CLOSED"
@@ -1333,7 +1333,7 @@ func TestReopenReportsClaimLeftWhenReleaseFails(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "reopened #1 but releasing its stale claim failed") {
 		t.Fatalf("err = %v", err)
 	}
-	if !strings.Contains(err.Error(), "still claimed") || !strings.Contains(err.Error(), "start --force") {
+	if !strings.Contains(err.Error(), "still claimed") || !strings.Contains(err.Error(), "release 1 --force") {
 		t.Errorf("err = %v", err)
 	}
 	if !strings.Contains(err.Error(), "boom") {

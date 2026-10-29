@@ -400,6 +400,37 @@ func (a *App) Start(ctx context.Context, number int, opts StartOpts) error {
 	return a.emitMutation(after, "started #%d: %s\n", number, render.SanitizeInline(issue.Title))
 }
 
+// Release gives up a claim without assigning it to another owner.
+func (a *App) Release(ctx context.Context, number int, force bool) error {
+	issue, err := a.Client.GetIssue(ctx, number)
+	if err != nil {
+		return err
+	}
+	if !issue.Claimed() {
+		return genericErr("#%d is not claimed", number)
+	}
+	var viewer string
+	if !force {
+		viewer, err = a.Client.Viewer(ctx)
+		if err != nil {
+			return err
+		}
+		if len(issue.Assignees) != 1 || issue.Assignees[0] != viewer {
+			return genericErr("#%d is not claimed solely by you; pass --force to release it", number)
+		}
+	}
+	if releaser, ok := a.Client.(gh.ClaimReleaser); ok {
+		// Recheck ownership and clear both halves under one lock. A concurrent
+		// forced start must not have its new claim cleared by this stale read.
+		if err := releaser.ReleaseIssueClaim(ctx, number, viewer, force); err != nil {
+			return err
+		}
+	} else if _, err := a.releaseClaim(ctx, issue); err != nil {
+		return fmt.Errorf("releasing #%d failed (its claim may be partially cleared; inspect with hew show %d before retrying): %w", number, number, err)
+	}
+	return a.reportMutation(ctx, number, "released #%d\n", number)
+}
+
 // SetOpts are the retriage/edit inputs; zero values mean "leave alone".
 type SetOpts struct {
 	Priority    string
@@ -802,7 +833,7 @@ func (a *App) Reopen(ctx context.Context, number int, reason string) error {
 	if err != nil {
 		// The reopen landed; only the release failed. A retry is a no-op
 		// reopen and will not clear it, so name the remedy.
-		return fmt.Errorf("reopened #%d but releasing its stale claim failed (it is open and still claimed; hew start --force takes it): %w", number, err)
+		return fmt.Errorf("reopened #%d but releasing its stale claim failed (it is open and still claimed; hew release %d --force clears it): %w", number, number, err)
 	}
 	if released == "" {
 		return a.reportMutation(ctx, number, "reopened #%d\n", number)

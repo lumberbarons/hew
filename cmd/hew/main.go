@@ -245,7 +245,7 @@ func root() *ucli.Command {
 		Action:  groupAction,
 		Commands: []*ucli.Command{
 			primeCmd(), readyCmd(), listCmd(), showCmd(), searchCmd(),
-			createCmd(), draftCmd(), startCmd(), triageCmd(), setCmd(), prCmd(), closeCmd(),
+			createCmd(), draftCmd(), startCmd(), releaseCmd(), triageCmd(), setCmd(), prCmd(), closeCmd(),
 			reopenCmd(), blockCmd(), unblockCmd(), epicCmd(), applyCmd(), initCmd(),
 			hooksCmd(), migrateCmd(),
 		},
@@ -496,6 +496,29 @@ func startCmd() *ucli.Command {
 				Force:    cmd.Bool("force"),
 				Show:     cmd.Bool("show"),
 			})
+		},
+	}
+}
+
+func releaseCmd() *ucli.Command {
+	return &ucli.Command{
+		Name:      "release",
+		Usage:     "give up your claim; --force releases any owner's claim (including a removed worktree's)",
+		ArgsUsage: "<n>",
+		Flags: []ucli.Flag{
+			&ucli.BoolFlag{Name: "force", Usage: "release a claim held by another owner or with no identifiable owner"},
+		},
+		Before: fixedArgs(1, 1),
+		Action: func(ctx context.Context, cmd *ucli.Command) error {
+			n, err := numberArg(cmd, "hew release <n> [--force]")
+			if err != nil {
+				return err
+			}
+			app, err := buildApp(cmd)
+			if err != nil {
+				return err
+			}
+			return app.Release(ctx, n, cmd.Bool("force"))
 		},
 	}
 }

@@ -167,6 +167,21 @@ func (s *Store) ClaimIssue(ctx context.Context, number int, login string, force 
 	})
 }
 
+// ReleaseIssueClaim clears a claim under the store lock.
+func (s *Store) ReleaseIssueClaim(ctx context.Context, number int, login string, force bool) error {
+	return s.edit(ctx, number, func(_ *data, r *issueRec) error {
+		if len(r.Assignees) == 0 && !slices.ContainsFunc(r.Labels, model.IsInProgressLabel) {
+			return fmt.Errorf("#%d is not claimed", number)
+		}
+		if !force && (len(r.Assignees) != 1 || r.Assignees[0] != login) {
+			return fmt.Errorf("#%d is not claimed solely by you; pass --force to release it", number)
+		}
+		r.Labels = slices.DeleteFunc(r.Labels, model.IsInProgressLabel)
+		r.Assignees = nil
+		return nil
+	})
+}
+
 func (s *Store) AddAssignee(ctx context.Context, number int, login string) error {
 	return s.edit(ctx, number, func(_ *data, r *issueRec) error {
 		r.Assignees = appendUnique(r.Assignees, login)

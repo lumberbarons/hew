@@ -158,6 +158,15 @@ type Claimer interface {
 	ClaimIssue(ctx context.Context, number int, login string, force bool) error
 }
 
+// ClaimReleaser is an optional atomic release capability. GitHub uses
+// check-then-act; local stores can guard ownership and clear the claim together.
+type ClaimReleaser interface {
+	// ReleaseIssueClaim removes all assignees and in-progress labels. Without
+	// force, login must be the sole assignee at the time of the write. An
+	// unclaimed issue is an error, including with force. A refusal changes nothing.
+	ReleaseIssueClaim(ctx context.Context, number int, login string, force bool) error
+}
+
 // PullRequests is the pull-request half of the API, used only by `pr`.
 type PullRequests interface {
 	// PullRequestContext fetches the default branch and any open pull

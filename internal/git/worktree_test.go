@@ -151,6 +151,15 @@ func TestMainCheckoutFromALinkedWorktreeFindsTheMainCheckout(t *testing.T) {
 			t.Errorf("%s: LinkedWorktree = %q, %v; want %q", name, got, err, wantName)
 		}
 	}
+	// Recovery from a removed claimant must still locate the shared tracker
+	// and identify the surviving main checkout as its bare-login identity.
+	git(main, "worktree", "remove", wt)
+	if got, err := MainCheckout(main); err != nil || got != main {
+		t.Fatalf("main after removal = %q, %v; want %q", got, err, main)
+	}
+	if got, err := LinkedWorktree(main); err != nil || got != "" {
+		t.Fatalf("identity after removal = %q, %v; want main checkout", got, err)
+	}
 }
 
 func TestIsNotRepoSeparatesNoCheckoutFromOtherGitFailures(t *testing.T) {

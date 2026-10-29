@@ -6,7 +6,7 @@ The commands themselves, written against the `gh.IssueStore` interface (and `gh.
 |---|---|---|
 | `app.go` | The `App` struct every command hangs off: client, repo, output writers, and the `emit*` helpers that pick text vs `--json` | Adding a command, or changing how output is emitted |
 | `read.go` | The read commands: `ready`, `list`, `show`, `search`, `triage`, `prime`, `epic status` — one query, filtered client-side | Changing what a read command returns or how it filters |
-| `write.go` | The mutating commands: `create`, `start`, `set`, `close`, `reopen`, `block`, `unblock`, `epic create`, `init`; label swaps never stack, and `start` uses a backend's atomic claim when it has one, re-reading after the check-then-act path otherwise | Changing a mutation or the claim guard |
+| `write.go` | The mutating commands: `create`, `start`, `release`, `set`, `close`, `reopen`, `block`, `unblock`, `epic create`, `init`; label swaps never stack, and `start` uses a backend's atomic claim when it has one, re-reading after the check-then-act path otherwise; `release` uses the optional atomic release on local stores | Changing a mutation or the claim guard |
 | `draft.go` | `draft`: composes an issue body from the section flags, or revalidates a draft file, with no `gh.IssueStore` use — the local counterpart to `create --body-file` | Changing the local body preflight |
 | `pr.go` | `pr`: infers the claimed issue, composes the body from it, enforces exactly one `Fixes #n`, derives the title from the issue type | Changing PR composition or issue inference |
 | `apply.go` | `apply`: walks a parsed `internal/plan` plan, looking up every existing-issue reference before the first write, creating issues, then wiring dependency edges (an edge that fails to wire exits non-zero) | Changing `apply` execution (schema and validation live in `internal/plan`) |
@@ -27,12 +27,13 @@ Checkpoint state is trusted local scratch, never a portable input. A state file 
 | `read_test.go` | Covers `read.go` except search: filtering, sorting, empty states, and the cycle and truncated-connection warnings | Changing a read command |
 | `search_test.go` | Covers `search` in `read.go`: title and body matching, closed issues, best-match order | Changing search behavior |
 | `write_test.go` | Covers `write.go`: label swaps, the claim guard, cycle rejection, body composition | Changing a mutation |
+| `release_test.go` | Covers `release`: owner and forced release, unclaimed/ambiguous ownership refusal, JSON output, and backend failures | Changing claim release |
 | `draft_test.go` | Covers `draft.go`: parity with `create`, file round trips, zero GitHub calls | Changing the local body preflight |
 | `pr_test.go` | Covers `pr.go`: body composition, `Fixes #n` handling, branch and claim inference | Changing the `pr` command |
 | `apply_test.go` | Covers `apply.go` and its half of `batch.go`: plan execution, resume, dependency wiring | Changing `apply` |
 | `migrate_test.go` | Covers `migrate.go` and its half of `batch.go`: beads mapping, resume, and the engine on its own | Changing the beads migration or the engine |
 | `migrate_local_test.go` | Covers `migrate_local.go` against a real `internal/local` tracker and the fake GitHub: close reasons, comments, reference rewriting, sealing, dry run, resume after an injected failure | Changing the local migration |
-| `local_claim_test.go` | Covers `start` against a real `internal/local` store: worktrees told apart as claimants, a lost atomic-claim race mapped to exit 3 and 5, and the claim released when the priority swap fails | Changing the claim guard or local claim identity |
+| `local_claim_test.go` | Covers `start` against a real `internal/local` store: worktrees told apart as claimants, a lost atomic-claim race mapped to exit 3 and 5, the claim released when the priority swap fails, and release recovery after worktree removal with ownership checked under the lock | Changing the claim guard or local claim identity |
 | `local_init_test.go` | Covers `init --local` and the local primer: tracker creation at the main checkout, idempotence, refusing a migrated repo, and the primer and snippet that drop the pull-request step | Changing `init --local` or the local primer |
 | `hooks_test.go` | Covers `hooks.go`: settings merge, idempotent install, removal, opencode plugin install/remove/prune | Changing the session-start hook |
 | `exit_test.go` | Covers `exit.go`: the error-to-exit-code mapping and the argument parsers | Changing an exit code |

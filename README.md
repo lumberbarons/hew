@@ -172,6 +172,8 @@ hew draft --check F                   # revalidate a draft; neither touches GitH
 hew start <n> [--priority P0..P4] [--force] [--show]
                                    # --show appends the issue's detail (as show would);
                                    # --json includes the body too (without text-findings annotations)
+hew release <n> [--force]       # remove assignees + in-progress; --force releases
+                                   # another owner's claim or a label-only claim
 hew triage [--search <terms>]  # issues missing priority/type labels; --search runs
                                    # the same search over untriaged titles and bodies
                                    # (open+closed) — the untriaged half of dedup
@@ -237,6 +239,13 @@ hew migrate local [--state F] [--dry-run] [--throttle D]
                                  # an archive. Resumable; default --state
                                  # .hew/migration-state.json
 ```
+
+`hew release <n>` gives up your claim without assigning it to anyone else.
+An unclaimed issue is refused. Use `hew release <n> --force` to clear another
+owner's claim, including a local claim stranded by `git worktree remove` or
+`git worktree move`. From a surviving checkout, find the issue with `hew list`,
+release it with `--force`, then use `hew start <n>` when ready to claim it.
+A label-only claim or a claim with several assignees also requires `--force`.
 
 Output is one compact line per issue, annotated with whatever keeps it from
 being plain ready work (`[blocked by #120]`, `[epic 2/6]`, `[in progress @you]`);
@@ -469,8 +478,8 @@ See [DESIGN.md](DESIGN.md) for the conventions the tool enforces, the read-path
 normalization rules, and the API strategy.
 
 The token-lean claim is measured, not asserted: `hew ready` and `hew list` cost
-16–25 tokens per open issue against 75–84 for the leanest equivalent GraphQL query
-and 104–141 for `gh issue list --json`, which cannot answer readiness at all.
+18–25 tokens per open issue against 75–84 for the leanest equivalent GraphQL query
+and 106–141 for `gh issue list --json`, which cannot answer readiness at all.
 The "Token efficiency" section of [DESIGN.md](DESIGN.md) has the full table,
 including the one command where the tool currently loses (`list --json`, filed
 as #62); [evals/](evals/) is the harness that produced it.
