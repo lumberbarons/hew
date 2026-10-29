@@ -755,8 +755,8 @@ Findings, including the ones that don't flatter the tool:
   cost is a real regression against the tool's own claim, filed as #62.
 - **`prime` measures 1101–1110 tokens against its ~1200 target, restated in
   #63.** The ~600 target came from the mock, not from output: the static
-  conventions half alone measures ~890 tokens under o200k_base, and the live
-  sections add ~150–165 on the fixtures. Every command and flag of the cheatsheet
+  conventions half alone measures ~920 tokens under o200k_base, and the live
+  sections add ~180–190 on the fixtures. Every command and flag of the cheatsheet
   is documented by design (`TestPrimerMatchesCommandSurface` pins that
   surface), so the original target was unreachable without gutting the tool's
   core teaching — the budget moved to the measured number instead, and the
