@@ -372,9 +372,11 @@ dry-run it, apply it. One JSON object per line:
 take either a local `id` — a string, resolved to the created issue's number,
 so entries can reference each other before numbers exist — or an existing
 issue number. `discovered-from` adds the same origin link the create flag
-does. Bodies come from the same section fields the create flags use —
-`where`, `problem` or `goal`, `fix` or `approach`, `done-when` (a list, one
-checklist item each) — composed into the body template; `body` carries raw
+does, and must name an existing issue (closed is fine; a pull request number is
+not an issue): `apply` refuses a plan with a missing one before any write,
+`--dry-run` included. Bodies come from the same section fields the create
+flags use — `where`, `problem` or `goal`, `fix` or `approach`, `done-when`
+(a list, one checklist item each) — composed into the body template; `body` carries raw
 long-form text instead (mutually exclusive with the section fields).
 
 Creation and dependency wiring are both checkpointed to the `--state` file as

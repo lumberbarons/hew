@@ -11,24 +11,32 @@ import (
 	"testing"
 
 	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 // applyFixture covers the plan shapes: an epic with a body, a child by
 // local-id parent, and an id-less entry referencing both a local id and an
-// existing issue number, with a discovered-from link.
+// existing issue number.
 const applyFixture = `{"id":"epic1","title":"Voltgo support","type":"epic","priority":"P1","body":"### Goal\n\nstuff"}
 {"id":"scaffold","title":"Scaffold","type":"task","parent":"epic1","areas":["ble"]}
-{"title":"Collector","type":"enhancement","priority":"P3","parent":"epic1","blocked-by":["scaffold",42],"discovered-from":7}
+{"title":"Collector","type":"enhancement","priority":"P3","parent":"epic1","blocked-by":["scaffold",42]}
 `
 
 func applySetup(t *testing.T, fixture string) (*fakeClient, *App, ApplyOpts) {
+	t.Helper()
+	return applySetupWith(t, fixture)
+}
+
+// applySetupWith is applySetup plus extra existing issues, for plans that
+// reference one beyond the shared #42.
+func applySetupWith(t *testing.T, fixture string, extra ...*model.Issue) (*fakeClient, *App, ApplyOpts) {
 	t.Helper()
 	dir := t.TempDir()
 	file := filepath.Join(dir, "plan.jsonl")
 	if err := os.WriteFile(file, []byte(fixture), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	f := newFake(issue(42, "Existing dep", "P2", "task"))
+	f := newFake(append([]*model.Issue{issue(42, "Existing dep", "P2", "task")}, extra...)...)
 	app, _, _ := newApp(f)
 	return f, app, ApplyOpts{File: file, StatePath: filepath.Join(dir, "state.json")}
 }
@@ -81,9 +89,6 @@ func TestApplyCreatesAndWires(t *testing.T) {
 	}
 	if !slices.Contains(blockers, 102) || !slices.Contains(blockers, 42) {
 		t.Errorf("collector blockedBy = %v", blockers)
-	}
-	if !strings.Contains(collector.Body, "Discovered while working on #7") {
-		t.Errorf("collector body = %q", collector.Body)
 	}
 	// The id-less entry is checkpointed under its line key.
 	state := readState(t, opts.StatePath).Mapping
@@ -685,5 +690,58 @@ func TestApplyJSON(t *testing.T) {
 	// Wired: two parent edges plus two blockers.
 	if got.Created != 3 || got.Wired != 4 || len(got.Mapping) != 3 {
 		t.Errorf("summary = %+v", got)
+	}
+}
+
+// TestApplyRefusesAMissingDiscoveredFrom covers #213 on the batch path: the
+// check runs before any write, on the dry run as well as the real one, so a
+// typo is found while fixing the plan is still free.
+func TestApplyRefusesAMissingDiscoveredFrom(t *testing.T) {
+	const missing = `{"title":"First","type":"task"}
+{"title":"Second","type":"bug","discovered-from":7}
+{"title":"Third","type":"bug","discovered-from":99}
+`
+	for _, dryRun := range []bool{true, false} {
+		t.Run(fmt.Sprintf("dry-run=%t", dryRun), func(t *testing.T) {
+			f, app, opts := applySetupWith(t, missing, issue(7, "Source", "P2", "task"))
+			opts.DryRun = dryRun
+			err := app.Apply(ctx, opts)
+			if err == nil || !strings.Contains(err.Error(), "--discovered-from") || !strings.Contains(err.Error(), "#99") {
+				t.Fatalf("err = %v, want a --discovered-from refusal naming #99", err)
+			}
+			assertOnlyReads(t, f)
+			if _, statErr := os.Stat(opts.StatePath); statErr == nil {
+				t.Error("a refused plan still wrote a checkpoint")
+			}
+		})
+	}
+}
+
+func TestApplyWritesTheDiscoveredFromLink(t *testing.T) {
+	f, app, opts := applySetupWith(t, `{"title":"Follow-up","type":"bug","discovered-from":7}
+`, issue(7, "Source", "P2", "task"))
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	if body := f.byNumber(101).Body; !strings.Contains(body, "Discovered while working on #7") {
+		t.Errorf("body = %q", body)
+	}
+}
+
+// A resumed run must not re-gate entries it already filed: their source was
+// checked when they were created, and if it has since gone, refusing here
+// would strand the rest of the plan (editing it invalidates the checkpoint).
+func TestApplyResumeSkipsCreatedEntriesDiscoveredFrom(t *testing.T) {
+	f, app, opts := applySetupWith(t, `{"title":"First","type":"bug","discovered-from":7}
+{"title":"Second","type":"task"}
+`, issue(7, "Source", "P2", "task"))
+	f.failAfter["CreateIssue"] = failPoint{calls: 1, err: errors.New("boom")}
+	if err := app.Apply(ctx, opts); err == nil {
+		t.Fatal("first run was meant to fail partway")
+	}
+	delete(f.failAfter, "CreateIssue")
+	f.issues = slices.DeleteFunc(f.issues, func(i *model.Issue) bool { return i.Number == 7 })
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatalf("resume refused over a source its created entry no longer needs: %v", err)
 	}
 }

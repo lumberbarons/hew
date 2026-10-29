@@ -90,6 +90,12 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 		return err
 	}
 
+	// Same reasoning: a dangling provenance link is a typo, and finding it
+	// after half the plan is filed leaves those issues behind to clean up.
+	if err := a.requireDiscoveredFrom(ctx, entries, state.Mapping); err != nil {
+		return err
+	}
+
 	if opts.DryRun {
 		return a.applyPlan(entries, state)
 	}
@@ -270,6 +276,24 @@ func (a *App) applyWire(ctx context.Context, entries []plan.Entry, state *batchS
 		}
 	}
 	return wired, warnings
+}
+
+// requireDiscoveredFrom checks every distinct discovered-from source in the
+// plan exists, reads only, naming the entry that carries a bad one. Entries
+// an earlier run already created are skipped: their source was checked then,
+// and refusing a resume over one that has since gone would strand the rest.
+func (a *App) requireDiscoveredFrom(ctx context.Context, entries []plan.Entry, created map[string]int) error {
+	checked := map[int]bool{}
+	for _, e := range entries {
+		if _, done := created[e.Key()]; done || e.DiscoveredFrom <= 0 || checked[e.DiscoveredFrom] {
+			continue
+		}
+		checked[e.DiscoveredFrom] = true
+		if _, err := a.requireIssue(ctx, e.DiscoveredFrom, "--discovered-from"); err != nil {
+			return fmt.Errorf("%s: %w", e.Key(), err)
+		}
+	}
+	return nil
 }
 
 // applyTitle prefixes epic entries the same way epic create does.
