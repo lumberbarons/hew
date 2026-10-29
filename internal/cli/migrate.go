@@ -96,6 +96,10 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 		})
 	}
 
+	for _, b := range selected {
+		a.warnCommaLabels(b.Labels)
+	}
+
 	digest := fileDigest(data)
 	state, err := loadBatchState(opts.StatePath, a.stateRepo(), digest, "snapshot")
 	if err != nil {
@@ -319,16 +323,34 @@ func beadBody(b beads.Bead) string {
 }
 
 // areaLabels filters bead labels that would collide with the convention
-// labels (priority, type, in-progress) — those are derived, not copied.
+// labels (priority, type, in-progress) — those are derived, not copied. A comma
+// in a name becomes a hyphen (see migratedLabel).
 func areaLabels(labels []string) []string {
 	var out []string
 	for _, l := range labels {
 		if _, isPriority := model.ParsePriority(l); isPriority || model.IsType(l) || l == model.InProgressLabel {
 			continue
 		}
-		out = append(out, l)
+		out = append(out, migratedLabel(l))
 	}
 	return out
+}
+
+// migratedLabel is the name a source label takes on GitHub. The write path
+// refuses a comma in an area because areas are split and rendered on commas,
+// so an imported "x,y" would read as the two areas "x" and "y"; it becomes
+// "x-y" instead of being dropped.
+func migratedLabel(name string) string { return strings.ReplaceAll(name, ",", "-") }
+
+// warnCommaLabels names each source label that migratedLabel renames, once.
+func (a *App) warnCommaLabels(labels []string) {
+	seen := map[string]bool{}
+	for _, l := range labels {
+		if renamed := migratedLabel(l); renamed != l && !seen[l] {
+			seen[l] = true
+			a.warnf("label %q contains a comma; migrating as %q", l, renamed)
+		}
+	}
 }
 
 func clampPriority(p int) int {

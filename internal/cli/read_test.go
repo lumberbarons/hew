@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/model"
 )
 
@@ -322,6 +323,29 @@ func TestListFilters(t *testing.T) {
 	if !strings.Contains(out.String(), "#11") || strings.Contains(out.String(), "#1 ") {
 		t.Errorf("epic filter output:\n%s", out.String())
 	}
+}
+
+// GitHub treats label names case-insensitively, and the write path already
+// de-duplicates areas that way, so the read filter must agree on both backends.
+func TestListLabelFilterIgnoresCase(t *testing.T) {
+	eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+		upper, err := store.CreateIssue(ctx, "Upper area", "body", []string{"P2", "bug", "UPPER"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.CreateIssue(ctx, "Other area", "body", []string{"P2", "bug", "other"}); err != nil {
+			t.Fatal(err)
+		}
+		for _, label := range []string{"upper", "UPPER", "Upper"} {
+			app, out, _ := newLocalApp(store)
+			if err := app.List(ctx, ListOpts{Label: label}); err != nil {
+				t.Fatal(err)
+			}
+			if got := out.String(); !strings.Contains(got, fmt.Sprintf("#%d ", upper.Number)) || strings.Contains(got, "Other area") {
+				t.Errorf("list --label %s:\n%s", label, got)
+			}
+		}
+	})
 }
 
 // Epic listing defaults to both states — progress means seeing what is done

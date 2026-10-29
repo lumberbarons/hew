@@ -288,6 +288,34 @@ func TestMigrateBeadsCreatesLabels(t *testing.T) {
 	}
 }
 
+// A comma in a bead label would make the imported area read as two on GitHub,
+// so it is migrated with a hyphen and the rename is announced.
+func TestMigrateBeadsRenamesCommaLabels(t *testing.T) {
+	fixture := `{"_type":"issue","id":"sc-1","title":"Scaffold","status":"open","priority":2,"issue_type":"task","labels":["front,back"],"created_at":"2026-05-02T00:00:00Z"}
+`
+	f := newFake()
+	app, _, errOut := newApp(f)
+	dir := t.TempDir()
+	file := filepath.Join(dir, "issues.jsonl")
+	if err := os.WriteFile(file, []byte(fixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.MigrateBeads(ctx, MigrateOpts{File: file, StatePath: filepath.Join(dir, "state.json")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.byNumber(101).Labels; !slices.Contains(got, "front-back") || slices.Contains(got, "front,back") {
+		t.Errorf("labels = %v, want front-back", got)
+	}
+	for _, l := range f.labels {
+		if strings.Contains(l.Name, ",") {
+			t.Errorf("label %q with a comma was created", l.Name)
+		}
+	}
+	if !strings.Contains(errOut.String(), `"front,back"`) || !strings.Contains(errOut.String(), `"front-back"`) {
+		t.Errorf("no rename warning: %q", errOut.String())
+	}
+}
+
 func TestMigrateBeadsMissingFile(t *testing.T) {
 	_, app, opts := migrateSetup(t, migrationFixture)
 	opts.File = "/nonexistent.jsonl"

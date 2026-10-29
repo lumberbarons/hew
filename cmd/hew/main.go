@@ -219,7 +219,7 @@ func listCmd() *ucli.Command {
 		Name:  "list",
 		Usage: "list issues (open by default)",
 		Flags: []ucli.Flag{
-			&ucli.StringFlag{Name: "label", Usage: "only issues with this label"},
+			&ucli.StringFlag{Name: "label", Usage: "only issues with this label (case-insensitive)"},
 			&ucli.IntFlag{Name: "epic", Usage: "only children of epic `N`"},
 			&ucli.StringFlag{Name: "state", Usage: "issue state: `open`, closed, or all"},
 			&ucli.BoolFlag{Name: "closed", Usage: "alias for --state closed"},
@@ -320,7 +320,7 @@ func createCmd() *ucli.Command {
 			&ucli.StringFlag{Name: "title", Usage: "issue title (required)"},
 			&ucli.StringFlag{Name: "type", Usage: "bug|enhancement|task (required)"},
 			&ucli.StringFlag{Name: "priority", Usage: "P0..P4 (default P2)"},
-			&ucli.StringSliceFlag{Name: "area", Usage: "area label (repeatable)"},
+			&ucli.StringSliceFlag{Name: "area", Usage: "area label (repeatable; commas separate areas)"},
 			&ucli.IntSliceFlag{Name: "blocked-by", Usage: "blocking issue `N` (repeatable)"},
 			&ucli.IntFlag{Name: "parent", Usage: "attach as sub-issue of epic `N`"},
 			&ucli.IntFlag{Name: "discovered-from", Usage: "link back to existing issue `N` this was discovered under (closed is fine)"},
@@ -446,8 +446,8 @@ func setCmd() *ucli.Command {
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{Name: "priority", Usage: "P0..P4"},
 			&ucli.StringFlag{Name: "type", Usage: "bug|enhancement|task"},
-			&ucli.StringSliceFlag{Name: "add-area", Usage: "add area label (repeatable)"},
-			&ucli.StringSliceFlag{Name: "remove-area", Usage: "remove area label (repeatable)"},
+			&ucli.StringSliceFlag{Name: "add-area", Usage: "add area label (repeatable; commas separate areas)"},
+			&ucli.StringSliceFlag{Name: "remove-area", Usage: "remove area label (repeatable; commas separate areas)"},
 			&ucli.IntFlag{Name: "parent", Usage: "move under epic `N`"},
 			&ucli.BoolFlag{Name: "no-parent", Usage: "detach from its epic"},
 			&ucli.StringFlag{Name: "title", Usage: "new title"},

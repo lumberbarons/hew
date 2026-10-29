@@ -133,6 +133,16 @@ primer so agents know what they're looking at:
   plus a warning.
 - Epic-ness = *has sub-issues*; the `Epic: ` title prefix is cosmetic. `ready`
   excludes any issue with sub-issues.
+- Label matching is case-insensitive, as it is on GitHub: `list --label upper`
+  finds an issue labelled `UPPER` on both backends, agreeing with the write path,
+  which already de-duplicates areas that way.
+- Areas are listed comma-separated, so `(x,y)` means two areas. `--area x,y` splits
+  into two; `apply` plans and direct callers that supply a name verbatim are refused
+  a comma in it. `migrate` turns a comma in a source label into a hyphen, with a
+  warning. A label created on GitHub with a comma in its name is shown as it is, and
+  is the one case that still reads ambiguously. In `list`-shaped text the meta column
+  is capped at a fixed width in characters; a row whose areas overflow it goes
+  unaligned rather than padding every other row.
 - Bodies render as-is. The template is scaffolding for `create`, never retrofitted
   onto issues written by others.
 - Untriaged issues are excluded from every list-shaped read except `triage`

@@ -141,7 +141,7 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 		if i.Untriaged() {
 			continue
 		}
-		if opts.Label != "" && !slices.Contains(i.Labels, opts.Label) {
+		if opts.Label != "" && !i.HasLabel(opts.Label) {
 			continue
 		}
 		if opts.Epic > 0 && (i.Parent == nil || i.Parent.Number != opts.Epic) {

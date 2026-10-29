@@ -1904,6 +1904,7 @@ func TestWriteFieldValidation(t *testing.T) {
 		{name: "prefixed title overflow", title: "Epic: " + strings.Repeat("a", 251), message: "256"},
 		{name: "long ASCII area", area: strings.Repeat("a", 51), message: "50"},
 		{name: "long Unicode area", area: strings.Repeat("界", 51), message: "50"},
+		{name: "comma area", area: "x,y", message: "comma"},
 		{name: "claim label", area: "in-progress", message: "convention"},
 		{name: "mixed case claim label", area: "IN-Progress", message: "convention"},
 		{name: "ASCII boundaries", title: strings.Repeat("a", 256), area: strings.Repeat("a", 50)},

@@ -85,6 +85,9 @@ func (a *App) MigrateLocal(ctx context.Context, opts MigrateLocalOpts) error {
 		return err
 	}
 
+	for _, i := range snap.Issues {
+		a.warnCommaLabels(i.Labels)
+	}
 	items := localItems(snap)
 	if opts.DryRun {
 		return a.localMigrationPlan(items, state.Mapping)
@@ -167,7 +170,7 @@ func localItems(snap *local.Snapshot) []migrationItem {
 			if closed && l == model.InProgressLabel {
 				continue
 			}
-			labels = append(labels, l)
+			labels = append(labels, migratedLabel(l))
 		}
 		item := migrationItem{
 			Key: localKey(i.Number), Title: i.Title, Body: localBody(i), Labels: labels,
@@ -234,6 +237,7 @@ func localLabels(snap *local.Snapshot) []gh.Label {
 	var out []gh.Label
 	seen := map[string]bool{}
 	add := func(name string) {
+		name = migratedLabel(name)
 		key := strings.ToLower(name)
 		if seen[key] || conventional[key] {
 			return
