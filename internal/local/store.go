@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -193,6 +194,12 @@ type Store struct {
 	// lockTimeout overrides how long a writer waits for the lock; zero means
 	// defaultLockTimeout.
 	lockTimeout time.Duration
+
+	// notice receives the one-line report that a migration is holding the lock;
+	// nil means stderr. noticeAfter is how long a writer waits before looking
+	// for one; zero means defaultNoticeAfter.
+	notice      io.Writer
+	noticeAfter time.Duration
 }
 
 var (
@@ -260,12 +267,23 @@ func (s *Store) update(ctx context.Context, fn func(d *data) error) error {
 const (
 	defaultLockTimeout = 15 * time.Second
 	lockPollInterval   = 5 * time.Millisecond
+
+	// defaultNoticeAfter is how long a writer waits before it checks whether the
+	// holder is a migration. An ordinary holder lets go within milliseconds, so
+	// a writer that is still waiting this long is behind something slower.
+	defaultNoticeAfter = 500 * time.Millisecond
 )
 
 // lock takes the exclusive lock on the store, waiting until it is free, ctx is
 // done or the timeout passes. flock is per open file description, so it
 // serialises goroutines in one process as well as separate processes; closing
 // the file releases it, including if the process dies.
+//
+// A writer that has waited noticeAfter and finds a migration marker says so on
+// stderr, once, so a hung-looking command explains itself. The marker is only
+// believed while the lock is held by someone else: a migration that died took
+// its lock with it but could not remove the marker, so whoever next gets the
+// lock clears it.
 func (s *Store) lock(ctx context.Context) (unlock func(), err error) {
 	path := filepath.Join(s.dir, lockFile)
 	f, err := openLockFile(path)
@@ -276,12 +294,21 @@ func (s *Store) lock(ctx context.Context) (unlock func(), err error) {
 	if timeout <= 0 {
 		timeout = defaultLockTimeout
 	}
+	noticeAfter := s.noticeAfter
+	if noticeAfter <= 0 {
+		noticeAfter = defaultNoticeAfter
+	}
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	waitStart := time.Now()
+	noticed := false
 	for {
 		if err := waitCtx.Err(); err != nil {
 			_ = f.Close()
 			if ctx.Err() == nil {
+				if m, ok := readMigrationMarker(s.dir); ok {
+					return nil, fmt.Errorf("timed out after %s waiting for the lock %s: %s; retry once it finishes", timeout, path, m.describe())
+				}
 				return nil, fmt.Errorf("timed out after %s waiting for the lock %s: another hew process is holding it (a `hew migrate local` holds it for the whole migration; if none is running, `lsof %s` names the holder)", timeout, path, path)
 			}
 			return nil, fmt.Errorf("waiting for the lock %s: %w", path, err)
@@ -292,7 +319,18 @@ func (s *Store) lock(ctx context.Context) (unlock func(), err error) {
 			return nil, fmt.Errorf("locking %s: %w", path, err)
 		}
 		if held {
+			removeMigrationMarker(s.dir)
 			return func() { _ = f.Close() }, nil
+		}
+		if !noticed && time.Since(waitStart) >= noticeAfter {
+			if m, ok := readMigrationMarker(s.dir); ok {
+				noticed = true
+				w := s.notice
+				if w == nil {
+					w = os.Stderr
+				}
+				_, _ = fmt.Fprintf(w, "hew: %s; waiting up to %s for it to finish\n", m.describe(), timeout)
+			}
 		}
 		select {
 		case <-waitCtx.Done():
