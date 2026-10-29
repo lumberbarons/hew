@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/local"
 	"github.com/lumberbarons/hew/internal/model"
 )
 
@@ -833,7 +835,7 @@ func TestCloseCompleted(t *testing.T) {
 }
 
 func TestCloseDuplicate(t *testing.T) {
-	f := newFake(issue(1, "Work", "P2", "bug"))
+	f := newFake(issue(1, "Work", "P2", "bug"), issue(5, "Original", "P2", "bug"))
 	app, _, _ := newApp(f)
 	if err := app.Close(ctx, 1, "", false, 5); err != nil {
 		t.Fatal(err)
@@ -1627,5 +1629,111 @@ func TestCreateWarnsAboutUnmarkedCodeTextInABodyFile(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "internal/gh/client.go") {
 		t.Errorf("no warning for a --body-file body: %q", errOut.String())
+	}
+}
+
+// closeDuplicateBackends runs the same scenario against the fake and the local
+// store: Close is written against gh.IssueStore, so the two must agree on what
+// a duplicate target has to be.
+func closeDuplicateBackends(t *testing.T, run func(t *testing.T, store gh.IssueStore)) {
+	t.Helper()
+	t.Run("fake", func(t *testing.T) { run(t, newFake()) })
+	t.Run("local", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), local.DirName)
+		if err := local.Init(dir); err != nil {
+			t.Fatal(err)
+		}
+		store, err := local.Open(dir, "agent-a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		run(t, store)
+	})
+}
+
+// TestCloseDuplicateOfRefusesBadTargets covers #212: a duplicate of itself or
+// of an issue that does not exist is a typo, and closing on it would leave a
+// closed issue pointing nowhere.
+func TestCloseDuplicateOfRefusesBadTargets(t *testing.T) {
+	cases := []struct {
+		name   string
+		target func(n int) int
+	}{
+		{"itself", func(n int) int { return n }},
+		{"a nonexistent issue", func(int) int { return 99 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			closeDuplicateBackends(t, func(t *testing.T, store gh.IssueStore) {
+				work, err := store.CreateIssue(ctx, "Work", "", []string{"P2", "bug"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				app, _, _ := newLocalApp(store)
+				err = app.Close(ctx, work.Number, "", false, tc.target(work.Number))
+				if err == nil {
+					t.Fatal("close accepted a bad --duplicate-of target")
+				}
+				if got := ExitCode(err); got == 0 {
+					t.Errorf("exit code = %d, want non-zero", got)
+				}
+				after, err := store.GetIssue(ctx, work.Number)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !after.IsOpen() {
+					t.Errorf("#%d was closed despite the refusal", work.Number)
+				}
+				if after.CommentsTotal != 0 || len(after.Comments) != 0 {
+					t.Errorf("refused close still commented: %v", after.Comments)
+				}
+			})
+		})
+	}
+}
+
+// TestCloseDuplicateOfNamesTheTarget: --reason is free text, so a custom one
+// that omits the original would leave the closed duplicate pointing at
+// nothing a reader can follow.
+func TestCloseDuplicateOfNamesTheTarget(t *testing.T) {
+	cases := []struct {
+		name   string
+		reason string
+		want   string
+	}{
+		{"custom reason without the reference", "same root cause", "same root cause\n\nDuplicate of #{n}"},
+		{"custom reason already naming it", "dup of #{n}, fixed there", "dup of #{n}, fixed there"},
+		{"a longer number is not the reference", "see #{n}3", "see #{n}3\n\nDuplicate of #{n}"},
+		{"no reason", "", "Duplicate of #{n}"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			closeDuplicateBackends(t, func(t *testing.T, store gh.IssueStore) {
+				dup, err := store.CreateIssue(ctx, "Dup", "", []string{"P2", "bug"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				original, err := store.CreateIssue(ctx, "Original", "", []string{"P2", "bug"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				n := strconv.Itoa(original.Number)
+				reason, want := strings.ReplaceAll(tc.reason, "{n}", n), strings.ReplaceAll(tc.want, "{n}", n)
+				app, _, _ := newLocalApp(store)
+				if err := app.Close(ctx, dup.Number, reason, false, original.Number); err != nil {
+					t.Fatal(err)
+				}
+				after, err := store.GetIssue(ctx, dup.Number)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(after.Comments) != 1 || after.Comments[0].Body != want {
+					t.Errorf("comments = %v, want one reading %q", after.Comments, want)
+				}
+				if after.IsOpen() || after.StateReason != "DUPLICATE" {
+					t.Errorf("state = %s/%s, want closed as DUPLICATE", after.State, after.StateReason)
+				}
+			})
+		})
 	}
 }
