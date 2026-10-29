@@ -32,5 +32,7 @@ Checkpoint state is trusted local scratch, never a portable input. A state file 
 | `apply_test.go` | Covers `apply.go` and its half of `batch.go`: plan execution, resume, dependency wiring | Changing `apply` |
 | `migrate_test.go` | Covers `migrate.go` and its half of `batch.go`: beads mapping, resume, and the engine on its own | Changing the beads migration or the engine |
 | `migrate_local_test.go` | Covers `migrate_local.go` against a real `internal/local` tracker and the fake GitHub: close reasons, comments, reference rewriting, sealing, dry run, resume after an injected failure | Changing the local migration |
+| `local_claim_test.go` | Covers `start` against a real `internal/local` store: worktrees told apart as claimants, a lost atomic-claim race mapped to exit 3 and 5, and the claim released when the priority swap fails | Changing the claim guard or local claim identity |
+| `local_init_test.go` | Covers `init --local` and the local primer: tracker creation at the main checkout, idempotence, refusing a migrated repo, and the primer and snippet that drop the pull-request step | Changing `init --local` or the local primer |
 | `hooks_test.go` | Covers `hooks.go`: settings merge, idempotent install, removal, opencode plugin install/remove/prune | Changing the session-start hook |
 | `exit_test.go` | Covers `exit.go`: the error-to-exit-code mapping and the argument parsers | Changing an exit code |

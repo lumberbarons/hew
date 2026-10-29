@@ -33,10 +33,7 @@ Authentication comes from the [`gh` CLI](https://cli.github.com/) — run
 `gh auth login` once and `hew` reuses its stored credentials. The target
 repository is detected from the git remote (`--repo owner/name` overrides).
 
-A repo with a `.hew/config.json` that says `local` tracks issues in `.hew` at its
-main checkout instead — shared by every linked worktree, no GitHub involved, and
-no `hew pr`: the primer finishes work with `hew close <n> --completed`. `--repo`
-always targets GitHub. `hew init --local` creates the tracker.
+No GitHub tracker? A repo can track issues locally instead — see [Local mode](#local-mode).
 
 ## Quickstart
 
@@ -102,6 +99,40 @@ into a dotfiles repo, edit the file the link resolves to directly.
 ```
 
 If any command exits `4`, authenticate first with `gh auth login`.
+
+## Local mode
+
+For a project that has no GitHub tracker yet, or an agent that cannot reach one,
+`hew` can keep the issues in the repo's own checkout. Everything else works the
+same — the conventions, `ready`, `start`, epics, dependencies, `--json`.
+
+```sh
+hew init --local          # creates .hew/ at the main checkout and selects the local backend
+hew prime                 # the local primer: same workflow, no pull-request step
+hew create --type task --title "..." --goal "..." --done-when "..."
+hew ready
+hew start 1 --show
+hew close 1 --completed --reason "..."   # finishing work: there is no `hew pr`
+```
+
+- **One tracker per repository.** It lives in `.hew/` at the *main* checkout, so
+  every linked worktree shares it. `.hew/` ignores itself, so it never shows in
+  `git status` — and it is untracked, so `git clean -fdx` at the main checkout
+  deletes the only copy of your issues. Back it up if it matters.
+- **Parallel agents are safe.** Writes are serialized under a lock and replaced
+  atomically, and `start` has exactly one winner. Agents are told apart per
+  worktree; set `HEW_USER` to a unique value per agent when sessions share one
+  checkout.
+- **No pull requests.** `hew pr` refuses on a local tracker. `--repo owner/name`
+  always targets GitHub instead.
+- **Moving to GitHub.** `hew migrate local` creates every issue — closed ones
+  too, with close reasons and comments — wires parents and blockers, and rewrites
+  `#n` references to the new numbers. Add `--dry-run` to see the plan first. Once
+  every step has finished it records the local → GitHub number map in
+  `.hew/migrated.json` and switches the repo to GitHub; `issues.jsonl` stays as a
+  read-only archive. A failed run leaves the tracker local, and rerunning resumes
+  it — so don't edit local issues between the two. The target is the git remote's
+  repository, or `--repo`.
 
 ## Commands
 
