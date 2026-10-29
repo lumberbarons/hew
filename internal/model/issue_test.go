@@ -379,3 +379,57 @@ func TestRelatedGroups(t *testing.T) {
 		})
 	}
 }
+
+// Label names are case-insensitive on GitHub, so a stray-case convention label
+// is the convention label: it must not leak into Areas, and it must count
+// toward priority, type and claim.
+func TestConventionLabelsAgreeOnCase(t *testing.T) {
+	i := Issue{Labels: []string{"p1", "Bug", "In-Progress", "tests"}}
+	if p, multi := i.Priority(); p != P1 || multi {
+		t.Errorf("Priority() = %v, %v; want P1, false", p, multi)
+	}
+	if typ, multi := i.Type(); typ != "bug" || multi {
+		t.Errorf("Type() = %q, %v; want bug, false", typ, multi)
+	}
+	if !i.InProgress() || !i.Claimed() {
+		t.Error("In-Progress label not read as a claim")
+	}
+	if got := i.Areas(); !reflect.DeepEqual(got, []string{"tests"}) {
+		t.Errorf("Areas() = %v, want only tests", got)
+	}
+	if i.Untriaged() {
+		t.Error("issue with p1 and Bug read as untriaged")
+	}
+}
+
+func TestMixedCaseDuplicatesAreMulti(t *testing.T) {
+	i := Issue{Labels: []string{"P3", "p0", "task", "BUG"}}
+	if p, multi := i.Priority(); p != P0 || !multi {
+		t.Errorf("Priority() = %v, %v; want P0, true", p, multi)
+	}
+	if typ, multi := i.Type(); typ != "bug" || !multi {
+		t.Errorf("Type() = %q, %v; want bug, true", typ, multi)
+	}
+}
+
+func TestLabelRecognizers(t *testing.T) {
+	if _, ok := LabelPriority("p5"); ok {
+		t.Error("p5 recognized as a priority")
+	}
+	if typ, ok := LabelType("TASK"); !ok || typ != "task" {
+		t.Errorf("LabelType(TASK) = %q, %v", typ, ok)
+	}
+	if _, ok := LabelType("tasks"); ok {
+		t.Error("tasks recognized as a type")
+	}
+	if !IsConventionLabel("IN-PROGRESS") || IsConventionLabel("web-ui") {
+		t.Error("IsConventionLabel misjudged in-progress or an area")
+	}
+	// Flag values are not label names: the parsers stay exact.
+	if _, ok := ParsePriority("p0"); ok {
+		t.Error("ParsePriority accepted p0")
+	}
+	if IsType("Bug") {
+		t.Error("IsType accepted Bug")
+	}
+}

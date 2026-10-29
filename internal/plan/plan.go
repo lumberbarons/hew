@@ -224,7 +224,7 @@ func parseLine(raw []byte) (Entry, error) {
 		priority = p
 	}
 	for _, area := range re.Areas {
-		if _, ok := model.ParsePriority(area); ok || model.IsType(area) || area == model.InProgressLabel {
+		if model.IsConventionLabel(area) {
 			return Entry{}, fmt.Errorf("area %q collides with a convention label", area)
 		}
 	}

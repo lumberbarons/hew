@@ -136,6 +136,12 @@ primer so agents know what they're looking at:
 - Label matching is case-insensitive, as it is on GitHub: `list --label upper`
   finds an issue labelled `UPPER` on both backends, agreeing with the write path,
   which already de-duplicates areas that way.
+- Convention labels (priority, type, `in-progress`) are recognized in any case, as
+  GitHub treats them as the same label: `p0`, `Bug` and `In-Progress` count as `P0`,
+  `bug` and `in-progress` for priority, type, claim and `Areas()`, and a pair like
+  `P3` + `p0` is a multiple-priority contradiction. The write path refuses them as
+  areas in any case, for the same reason. Flag values (`--type`, `--priority`) are not
+  label names and stay exact.
 - Areas are listed comma-separated, so `(x,y)` means two areas. `--area x,y` splits
   into two; `apply` plans and direct callers that supply a name verbatim are refused
   a comma in it. `migrate` turns a comma in a source label into a hyphen, with a

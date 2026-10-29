@@ -328,7 +328,7 @@ func beadBody(b beads.Bead) string {
 func areaLabels(labels []string) []string {
 	var out []string
 	for _, l := range labels {
-		if _, isPriority := model.ParsePriority(l); isPriority || model.IsType(l) || l == model.InProgressLabel {
+		if model.IsConventionLabel(l) {
 			continue
 		}
 		out = append(out, migratedLabel(l))

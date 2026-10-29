@@ -182,7 +182,7 @@ func localItems(snap *local.Snapshot) []migrationItem {
 		closed := i.State == string(gh.StateClosed)
 		labels := make([]string, 0, len(i.Labels))
 		for _, l := range i.Labels {
-			if closed && l == model.InProgressLabel {
+			if closed && model.IsInProgressLabel(l) {
 				continue
 			}
 			labels = append(labels, migratedLabel(l))

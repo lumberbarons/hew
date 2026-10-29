@@ -582,13 +582,13 @@ func validateAreas(flag string, areas []string) error {
 
 func validateAreaLabels(flag string, areas []string) error {
 	for _, area := range areas {
-		if _, ok := model.ParsePriority(area); ok {
+		if _, ok := model.LabelPriority(area); ok {
 			return usageErr("%s %q is a priority label; use --priority", flag, area)
 		}
-		if model.IsType(area) {
+		if _, ok := model.LabelType(area); ok {
 			return usageErr("%s %q is a type label; use --type", flag, area)
 		}
-		if strings.EqualFold(area, model.InProgressLabel) {
+		if model.IsInProgressLabel(area) {
 			return usageErr("%s %q is a reserved convention label; use hew start to claim an issue", flag, area)
 		}
 	}
@@ -599,13 +599,13 @@ func validateAreaLabels(flag string, areas []string) error {
 // target if absent.
 func (a *App) swapType(ctx context.Context, issue model.Issue, typ string) error {
 	for _, l := range issue.Labels {
-		if model.IsType(l) && l != typ {
+		if _, ok := model.LabelType(l); ok && !strings.EqualFold(l, typ) {
 			if err := a.Client.RemoveLabel(ctx, issue.Number, l); err != nil {
 				return err
 			}
 		}
 	}
-	if !slices.Contains(issue.Labels, typ) {
+	if !issue.HasLabel(typ) {
 		return a.Client.AddLabels(ctx, issue.Number, []string{typ})
 	}
 	return nil
@@ -1072,13 +1072,13 @@ func (a *App) undoClaim(ctx context.Context, issue model.Issue, viewer string, f
 func (a *App) swapPriority(ctx context.Context, issue model.Issue, p model.Priority) error {
 	target := p.String()
 	for _, l := range issue.Labels {
-		if _, ok := model.ParsePriority(l); ok && l != target {
+		if _, ok := model.LabelPriority(l); ok && !strings.EqualFold(l, target) {
 			if err := a.Client.RemoveLabel(ctx, issue.Number, l); err != nil {
 				return err
 			}
 		}
 	}
-	if !slices.Contains(issue.Labels, target) {
+	if !issue.HasLabel(target) {
 		return a.Client.AddLabels(ctx, issue.Number, []string{target})
 	}
 	return nil
