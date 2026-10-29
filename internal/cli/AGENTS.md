@@ -5,6 +5,7 @@ The commands themselves, written against the `gh.IssueStore` interface (and `gh.
 | File | What | When to read |
 |---|---|---|
 | `app.go` | The `App` struct every command hangs off: client, repo, output writers, and the `emit*` helpers that pick text vs `--json` | Adding a command, or changing how output is emitted |
+| `config.go` | `config`: renders the read-only backend report (`backend`, `repo`, `path`, `id`); resolving the target and opening any store or client is the caller's job | Changing what the config query reports |
 | `read.go` | The read commands: `ready`, `list`, `show`, `search`, `triage`, `prime`, `epic status` — one query, filtered client-side | Changing what a read command returns or how it filters |
 | `write.go` | The mutating commands: `create`, `start`, `release`, `set`, `close`, `reopen`, `block`, `unblock`, `epic create`, `init`; label swaps never stack, and `start` uses a backend's atomic claim when it has one, re-reading after the check-then-act path otherwise; `release` uses the optional atomic release on local stores | Changing a mutation or the claim guard |
 | `draft.go` | `draft`: composes an issue body from the section flags, or revalidates a draft file, with no `gh.IssueStore` use — the local counterpart to `create --body-file` | Changing the local body preflight |
@@ -22,6 +23,7 @@ Checkpoint state is trusted local scratch, never a portable input. A state file 
 
 | File | What | When to read |
 |---|---|---|
+| `config_test.go` | Covers `config`: one flat JSON shape on both backends and text that omits fields the backend does not have | Changing config output |
 | `fake_test.go` | `fakeClient`, a stateful in-memory `gh.IssueStore` and `gh.PullRequests` where mutations really mutate, so guarded flows (claim, re-read after claim) behave like the real API | Writing a test that needs a new client behavior |
 | `conformance_test.go` | Runs the shared `internal/conformance` suite against `fakeClient`, so the fake and the local store cannot disagree about what a backend does | Changing `fakeClient` behavior |
 | `read_test.go` | Covers `read.go` except search: filtering, sorting, empty states, and the cycle and truncated-connection warnings | Changing a read command |

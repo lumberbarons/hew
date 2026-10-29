@@ -112,41 +112,66 @@ func globalFlags() []ucli.Flag {
 	}
 }
 
-// buildApp picks the backend. --repo always means GitHub. Otherwise a
-// `.hew/config.json` at the main checkout that says local selects the local
-// store, and a missing `.hew` or a config naming github is GitHub exactly as
-// before. A `.hew` that looks like a local tracker without a usable config is
-// an error from Locate, never GitHub.
-func buildApp(cmd *ucli.Command) (*appcli.App, error) {
-	if cmd.String("repo") == "" {
-		tracker, isLocal, err := local.Locate("")
-		if err != nil {
-			return nil, err
-		}
-		if isLocal {
-			return buildLocalApp(cmd, tracker)
-		}
-	}
-	return buildGitHubApp(cmd, true)
+// backendTarget is where a command would read and write. A non-empty tracker
+// means the local backend; otherwise Repo is the GitHub repository. Resolving
+// it touches the filesystem and git only: no store is opened and no client is
+// built, so `hew config` can ask without credentials or side effects.
+type backendTarget struct {
+	tracker string
+	repo    gh.Repo
 }
 
-// buildGitHubApp talks to GitHub whatever the checkout's config says: the
-// repository is --repo, or the git remote's.
-func buildGitHubApp(cmd *ucli.Command, offerLocal bool) (*appcli.App, error) {
-	var repo gh.Repo
-	if spec := cmd.String("repo"); spec != "" {
-		parsed, err := appcli.ParseRepoSpec(spec)
-		if err != nil {
-			return nil, err
-		}
-		repo = parsed
-	} else {
-		current, err := repository.Current()
-		if err != nil {
-			return nil, appcli.RepoDetectError(err, offerLocal)
-		}
-		repo.Owner, repo.Name = current.Owner, current.Name
+func (t backendTarget) local() bool { return t.tracker != "" }
+
+// resolveTarget picks the backend exactly as every command does: --repo always
+// means GitHub; otherwise a `.hew/config.json` at the main checkout that says
+// local selects the local store; a missing `.hew` or a config naming github is
+// GitHub. A `.hew` that looks like a local tracker without a usable config is
+// an error from Locate, never GitHub. offerLocal only changes the wording when
+// the git remote cannot be found (see RepoDetectError).
+func resolveTarget(cmd *ucli.Command, offerLocal bool) (backendTarget, error) {
+	if cmd.String("repo") != "" {
+		repo, err := resolveGitHubRepo(cmd, offerLocal)
+		return backendTarget{repo: repo}, err
 	}
+	tracker, isLocal, err := local.Locate("")
+	if err != nil {
+		return backendTarget{}, err
+	}
+	if isLocal {
+		return backendTarget{tracker: tracker}, nil
+	}
+	repo, err := resolveGitHubRepo(cmd, offerLocal)
+	return backendTarget{repo: repo}, err
+}
+
+// resolveGitHubRepo is the GitHub half of the selection: --repo, or the git
+// remote's repository. It never consults the local tracker, which is what lets
+// `migrate local` target GitHub from a checkout that is still local.
+func resolveGitHubRepo(cmd *ucli.Command, offerLocal bool) (gh.Repo, error) {
+	if spec := cmd.String("repo"); spec != "" {
+		return appcli.ParseRepoSpec(spec)
+	}
+	current, err := repository.Current()
+	if err != nil {
+		return gh.Repo{}, appcli.RepoDetectError(err, offerLocal)
+	}
+	return gh.Repo{Owner: current.Owner, Name: current.Name}, nil
+}
+
+func buildApp(cmd *ucli.Command) (*appcli.App, error) {
+	target, err := resolveTarget(cmd, true)
+	if err != nil {
+		return nil, err
+	}
+	if target.local() {
+		return buildLocalApp(cmd, target.tracker)
+	}
+	return buildGitHubApp(cmd, target.repo)
+}
+
+// buildGitHubApp talks to GitHub for the resolved repository.
+func buildGitHubApp(cmd *ucli.Command, repo gh.Repo) (*appcli.App, error) {
 	client, err := gh.New(repo)
 	if err != nil {
 		return nil, err
@@ -158,17 +183,20 @@ func buildGitHubApp(cmd *ucli.Command, offerLocal bool) (*appcli.App, error) {
 	return app, nil
 }
 
-// buildMigrateLocalApp is buildGitHubApp, except that a dry run with no target
-// — no --repo and no git remote — gets an app with no client: the plan comes
-// from issues.jsonl alone, and MigrateLocal refuses the one case that would
-// need GitHub, a checkpoint to verify.
+// buildMigrateLocalApp always targets GitHub, whatever the checkout's config
+// says, except that a dry run with no target — no --repo and no git remote —
+// gets an app with no client: the plan comes from issues.jsonl alone, and
+// MigrateLocal refuses the one case that would need GitHub, a checkpoint to
+// verify.
 func buildMigrateLocalApp(cmd *ucli.Command) (*appcli.App, error) {
-	if cmd.Bool("dry-run") && cmd.String("repo") == "" {
-		if _, err := repository.Current(); err != nil {
-			return newApp(cmd), nil
-		}
+	repo, err := resolveGitHubRepo(cmd, false)
+	if err != nil && cmd.Bool("dry-run") && cmd.String("repo") == "" {
+		return newApp(cmd), nil
 	}
-	return buildGitHubApp(cmd, false)
+	if err != nil {
+		return nil, err
+	}
+	return buildGitHubApp(cmd, repo)
 }
 
 // buildLocalApp opens the local store at tracker. There are no pull requests
@@ -246,8 +274,8 @@ func root() *ucli.Command {
 		Commands: []*ucli.Command{
 			primeCmd(), readyCmd(), listCmd(), showCmd(), searchCmd(),
 			createCmd(), draftCmd(), startCmd(), releaseCmd(), triageCmd(), setCmd(), prCmd(), closeCmd(),
-			reopenCmd(), blockCmd(), unblockCmd(), epicCmd(), applyCmd(), initCmd(),
-			hooksCmd(), migrateCmd(),
+			reopenCmd(), blockCmd(), unblockCmd(), epicCmd(), applyCmd(), configCmd(),
+			initCmd(), hooksCmd(), migrateCmd(),
 		},
 	}
 	wireUsageErrors(cmd)
@@ -1015,6 +1043,33 @@ of issues.jsonl, so changing local issues between runs is refused.`,
 					})
 				},
 			},
+		},
+	}
+}
+
+func configCmd() *ucli.Command {
+	return &ucli.Command{
+		Name:  "config",
+		Usage: "print the active backend and its configuration (read-only)",
+		Description: "Resolves the backend the other commands would use: --repo forces\n" +
+			"GitHub, a local .hew tracker selects local, otherwise the git remote's\n" +
+			"repository. It reads only: no store is opened, no client is built, and\n" +
+			"nothing is bootstrapped.",
+		Before: fixedArgs(0, 0),
+		Action: func(ctx context.Context, cmd *ucli.Command) error {
+			target, err := resolveTarget(cmd, true)
+			if err != nil {
+				return err
+			}
+			cfg := appcli.BackendConfig{Backend: local.BackendGitHub, Repo: target.repo.String()}
+			if target.local() {
+				trackerCfg, err := local.ReadConfig(target.tracker)
+				if err != nil {
+					return err
+				}
+				cfg = appcli.BackendConfig{Backend: local.BackendLocal, Path: target.tracker, ID: trackerCfg.ID}
+			}
+			return newApp(cmd).Config(cfg)
 		},
 	}
 }
