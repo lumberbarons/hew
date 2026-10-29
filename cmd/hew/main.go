@@ -118,36 +118,38 @@ func globalFlags() []ucli.Flag {
 // built, so `hew config` can ask without credentials or side effects.
 type backendTarget struct {
 	tracker string
+	cfg     local.Config
 	repo    gh.Repo
 }
 
 func (t backendTarget) local() bool { return t.tracker != "" }
 
-// resolveTarget picks the backend exactly as every command does: --repo always
+// resolveTarget picks the backend every ordinary command uses: --repo always
 // means GitHub; otherwise a `.hew/config.json` at the main checkout that says
 // local selects the local store; a missing `.hew` or a config naming github is
 // GitHub. A `.hew` that looks like a local tracker without a usable config is
-// an error from Locate, never GitHub. offerLocal only changes the wording when
-// the git remote cannot be found (see RepoDetectError).
-func resolveTarget(cmd *ucli.Command, offerLocal bool) (backendTarget, error) {
+// an error from LocateConfig, never GitHub.
+func resolveTarget(cmd *ucli.Command) (backendTarget, error) {
 	if cmd.String("repo") != "" {
-		repo, err := resolveGitHubRepo(cmd, offerLocal)
+		repo, err := resolveGitHubRepo(cmd, true)
 		return backendTarget{repo: repo}, err
 	}
-	tracker, isLocal, err := local.Locate("")
+	tracker, cfg, isLocal, err := local.LocateConfig("")
 	if err != nil {
 		return backendTarget{}, err
 	}
 	if isLocal {
-		return backendTarget{tracker: tracker}, nil
+		return backendTarget{tracker: tracker, cfg: cfg}, nil
 	}
-	repo, err := resolveGitHubRepo(cmd, offerLocal)
+	repo, err := resolveGitHubRepo(cmd, true)
 	return backendTarget{repo: repo}, err
 }
 
-// resolveGitHubRepo is the GitHub half of the selection: --repo, or the git
-// remote's repository. It never consults the local tracker, which is what lets
-// `migrate local` target GitHub from a checkout that is still local.
+// resolveGitHubRepo is the GitHub-only half of the selection: --repo, or the
+// git remote's repository. It never consults the local tracker, which is what
+// lets `migrate local` target GitHub from a checkout that is still local;
+// every other command reaches GitHub through resolveTarget, which consults the
+// tracker first. offerLocal only changes the wording when no remote is found.
 func resolveGitHubRepo(cmd *ucli.Command, offerLocal bool) (gh.Repo, error) {
 	if spec := cmd.String("repo"); spec != "" {
 		return appcli.ParseRepoSpec(spec)
@@ -160,7 +162,7 @@ func resolveGitHubRepo(cmd *ucli.Command, offerLocal bool) (gh.Repo, error) {
 }
 
 func buildApp(cmd *ucli.Command) (*appcli.App, error) {
-	target, err := resolveTarget(cmd, true)
+	target, err := resolveTarget(cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -1057,19 +1059,15 @@ func configCmd() *ucli.Command {
 			"nothing is bootstrapped.",
 		Before: fixedArgs(0, 0),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
-			target, err := resolveTarget(cmd, true)
+			target, err := resolveTarget(cmd)
 			if err != nil {
 				return err
 			}
-			cfg := appcli.BackendConfig{Backend: local.BackendGitHub, Repo: target.repo.String()}
-			if target.local() {
-				trackerCfg, err := local.ReadConfig(target.tracker)
-				if err != nil {
-					return err
-				}
-				cfg = appcli.BackendConfig{Backend: local.BackendLocal, Path: target.tracker, ID: trackerCfg.ID}
-			}
-			return newApp(cmd).Config(cfg)
+			return newApp(cmd).Config(appcli.ConfigTarget{
+				Repo:    target.repo,
+				Tracker: target.tracker,
+				Local:   target.cfg,
+			})
 		},
 	}
 }

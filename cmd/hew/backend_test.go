@@ -458,6 +458,22 @@ func TestConfigReportsTheLocalBackendWithoutOpeningTheStore(t *testing.T) {
 	}
 }
 
+// A config written before ids existed is still a valid selection. config
+// reports the absence honestly rather than inventing the id Open backfills.
+func TestConfigReportsALocalTrackerWithoutAnID(t *testing.T) {
+	main, wt := localRepo(t)
+	tracker := filepath.Join(main, local.DirName)
+	if err := local.WriteConfig(tracker, local.Config{Backend: local.BackendLocal}); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(wt)
+
+	got := configOf(t, "config", "--json")
+	if got.Backend != local.BackendLocal || got.Path != tracker || got.ID != "" {
+		t.Errorf("config = %+v, want backend local, path %s and no id", got, tracker)
+	}
+}
+
 // A GitHub checkout answers from the git remote alone. With every credential
 // source removed, a command that built a client would fail before printing.
 func TestConfigReportsGitHubWithoutCredentials(t *testing.T) {
