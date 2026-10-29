@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -548,7 +547,7 @@ func (a *App) Close(ctx context.Context, number int, reason string, completed bo
 		// A custom reason is free text; the original must stay findable from
 		// the closed duplicate, which stores it nowhere but the comment.
 		if !mentionsIssue(reason, duplicateOf) {
-			reason += fmt.Sprintf("\n\nDuplicate of #%d", duplicateOf)
+			reason = strings.TrimRight(reason, " \t\r\n") + fmt.Sprintf("\n\nDuplicate of #%d", duplicateOf)
 		}
 	}
 	if err := a.Client.Comment(ctx, number, reason); err != nil {
@@ -574,10 +573,30 @@ func (a *App) requireIssue(ctx context.Context, number int, flag string) (model.
 	return issue, nil
 }
 
-// mentionsIssue reports whether text already names #number, not a longer
-// number that merely starts with it.
+// mentionsIssue reports whether text already names #number as a reference of
+// this repository: not a longer number that merely starts with it, and not
+// the tail of another repository's owner/repo#number.
 func mentionsIssue(text string, number int) bool {
-	return regexp.MustCompile(fmt.Sprintf(`#%d\b`, number)).MatchString(text)
+	ref := fmt.Sprintf("#%d", number)
+	for from := 0; ; {
+		i := strings.Index(text[from:], ref)
+		if i < 0 {
+			return false
+		}
+		start, end := from+i, from+i+len(ref)
+		from = end
+		if start > 0 && (text[start-1] == '/' || isWordByte(text[start-1])) {
+			continue
+		}
+		if end < len(text) && isWordByte(text[end]) {
+			continue
+		}
+		return true
+	}
+}
+
+func isWordByte(b byte) bool {
+	return b == '_' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }
 
 // Reopen is close's inverse: comment the reason, reopen the issue. Closing

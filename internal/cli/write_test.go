@@ -1655,12 +1655,15 @@ func closeDuplicateBackends(t *testing.T, run func(t *testing.T, store gh.IssueS
 // of an issue that does not exist is a typo, and closing on it would leave a
 // closed issue pointing nowhere.
 func TestCloseDuplicateOfRefusesBadTargets(t *testing.T) {
+	// A missing issue exits like --parent and --blocked-by naming one: plain
+	// failure. Only the self-reference is a usage error.
 	cases := []struct {
 		name   string
 		target func(n int) int
+		code   int
 	}{
-		{"itself", func(n int) int { return n }},
-		{"a nonexistent issue", func(int) int { return 99 }},
+		{"itself", func(n int) int { return n }, ExitUsage},
+		{"a nonexistent issue", func(int) int { return 99 }, ExitGeneric},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1674,8 +1677,8 @@ func TestCloseDuplicateOfRefusesBadTargets(t *testing.T) {
 				if err == nil {
 					t.Fatal("close accepted a bad --duplicate-of target")
 				}
-				if got := ExitCode(err); got == 0 {
-					t.Errorf("exit code = %d, want non-zero", got)
+				if got := ExitCode(err); got != tc.code {
+					t.Errorf("exit code = %d, want %d", got, tc.code)
 				}
 				after, err := store.GetIssue(ctx, work.Number)
 				if err != nil {
@@ -1704,6 +1707,9 @@ func TestCloseDuplicateOfNamesTheTarget(t *testing.T) {
 		{"custom reason without the reference", "same root cause", "same root cause\n\nDuplicate of #{n}"},
 		{"custom reason already naming it", "dup of #{n}, fixed there", "dup of #{n}, fixed there"},
 		{"a longer number is not the reference", "see #{n}3", "see #{n}3\n\nDuplicate of #{n}"},
+		{"another repository's reference is not this one", "same as other/repo#{n}", "same as other/repo#{n}\n\nDuplicate of #{n}"},
+		{"a reference at the start of the reason", "#{n} covers it", "#{n} covers it"},
+		{"a reason ending in a newline", "same root cause\n", "same root cause\n\nDuplicate of #{n}"},
 		{"no reason", "", "Duplicate of #{n}"},
 	}
 	for _, tc := range cases {
