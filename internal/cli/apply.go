@@ -92,7 +92,7 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 
 	// Same reasoning: a dangling provenance link is a typo, and finding it
 	// after half the plan is filed leaves those issues behind to clean up.
-	if err := a.requireDiscoveredFrom(ctx, entries); err != nil {
+	if err := a.requireDiscoveredFrom(ctx, entries, state.Mapping); err != nil {
 		return err
 	}
 
@@ -279,11 +279,13 @@ func (a *App) applyWire(ctx context.Context, entries []plan.Entry, state *batchS
 }
 
 // requireDiscoveredFrom checks every distinct discovered-from source in the
-// plan exists, reads only, naming the entry that carries a bad one.
-func (a *App) requireDiscoveredFrom(ctx context.Context, entries []plan.Entry) error {
+// plan exists, reads only, naming the entry that carries a bad one. Entries
+// an earlier run already created are skipped: their source was checked then,
+// and refusing a resume over one that has since gone would strand the rest.
+func (a *App) requireDiscoveredFrom(ctx context.Context, entries []plan.Entry, created map[string]int) error {
 	checked := map[int]bool{}
 	for _, e := range entries {
-		if e.DiscoveredFrom <= 0 || checked[e.DiscoveredFrom] {
+		if _, done := created[e.Key()]; done || e.DiscoveredFrom <= 0 || checked[e.DiscoveredFrom] {
 			continue
 		}
 		checked[e.DiscoveredFrom] = true

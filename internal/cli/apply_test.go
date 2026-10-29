@@ -11,24 +11,32 @@ import (
 	"testing"
 
 	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 // applyFixture covers the plan shapes: an epic with a body, a child by
 // local-id parent, and an id-less entry referencing both a local id and an
-// existing issue number, with a discovered-from link.
+// existing issue number.
 const applyFixture = `{"id":"epic1","title":"Voltgo support","type":"epic","priority":"P1","body":"### Goal\n\nstuff"}
 {"id":"scaffold","title":"Scaffold","type":"task","parent":"epic1","areas":["ble"]}
-{"title":"Collector","type":"enhancement","priority":"P3","parent":"epic1","blocked-by":["scaffold",42],"discovered-from":7}
+{"title":"Collector","type":"enhancement","priority":"P3","parent":"epic1","blocked-by":["scaffold",42]}
 `
 
 func applySetup(t *testing.T, fixture string) (*fakeClient, *App, ApplyOpts) {
+	t.Helper()
+	return applySetupWith(t, fixture)
+}
+
+// applySetupWith is applySetup plus extra existing issues, for plans that
+// reference one beyond the shared #42.
+func applySetupWith(t *testing.T, fixture string, extra ...*model.Issue) (*fakeClient, *App, ApplyOpts) {
 	t.Helper()
 	dir := t.TempDir()
 	file := filepath.Join(dir, "plan.jsonl")
 	if err := os.WriteFile(file, []byte(fixture), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	f := newFake(issue(42, "Existing dep", "P2", "task"), issue(7, "Source", "P2", "task"))
+	f := newFake(append([]*model.Issue{issue(42, "Existing dep", "P2", "task")}, extra...)...)
 	app, _, _ := newApp(f)
 	return f, app, ApplyOpts{File: file, StatePath: filepath.Join(dir, "state.json")}
 }
@@ -82,9 +90,6 @@ func TestApplyCreatesAndWires(t *testing.T) {
 	if !slices.Contains(blockers, 102) || !slices.Contains(blockers, 42) {
 		t.Errorf("collector blockedBy = %v", blockers)
 	}
-	if !strings.Contains(collector.Body, "Discovered while working on #7") {
-		t.Errorf("collector body = %q", collector.Body)
-	}
 	// The id-less entry is checkpointed under its line key.
 	state := readState(t, opts.StatePath).Mapping
 	if state["epic1"] != 101 || state["scaffold"] != 102 || state["line:3"] != 103 {
@@ -111,9 +116,9 @@ func TestApplyDryRun(t *testing.T) {
 	if err := app.Apply(ctx, opts); err != nil {
 		t.Fatal(err)
 	}
-	// Reads only: the dry run checks each discovered-from source exists, so
-	// it cannot vouch for a plan the real run would refuse.
-	assertOnlyReads(t, f)
+	if len(f.calls) != 0 {
+		t.Errorf("dry run made API calls: %v", f.calls)
+	}
 	if _, err := os.Stat(opts.StatePath); !os.IsNotExist(err) {
 		t.Error("dry run wrote state")
 	}
@@ -212,7 +217,7 @@ func TestApplyResumesAfterCreateFailure(t *testing.T) {
 	if err := app.Apply(ctx, opts); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.issues) != 5 { // #42 and #7 plus the three plan entries
+	if len(f.issues) != 4 { // #42 plus the three plan entries
 		t.Errorf("resume duplicated issues: %d total", len(f.issues))
 	}
 	state = readState(t, opts.StatePath).Mapping
@@ -698,7 +703,7 @@ func TestApplyRefusesAMissingDiscoveredFrom(t *testing.T) {
 `
 	for _, dryRun := range []bool{true, false} {
 		t.Run(fmt.Sprintf("dry-run=%t", dryRun), func(t *testing.T) {
-			f, app, opts := applySetup(t, missing)
+			f, app, opts := applySetupWith(t, missing, issue(7, "Source", "P2", "task"))
 			opts.DryRun = dryRun
 			err := app.Apply(ctx, opts)
 			if err == nil || !strings.Contains(err.Error(), "--discovered-from") || !strings.Contains(err.Error(), "#99") {
@@ -709,5 +714,34 @@ func TestApplyRefusesAMissingDiscoveredFrom(t *testing.T) {
 				t.Error("a refused plan still wrote a checkpoint")
 			}
 		})
+	}
+}
+
+func TestApplyWritesTheDiscoveredFromLink(t *testing.T) {
+	f, app, opts := applySetupWith(t, `{"title":"Follow-up","type":"bug","discovered-from":7}
+`, issue(7, "Source", "P2", "task"))
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	if body := f.byNumber(101).Body; !strings.Contains(body, "Discovered while working on #7") {
+		t.Errorf("body = %q", body)
+	}
+}
+
+// A resumed run must not re-gate entries it already filed: their source was
+// checked when they were created, and if it has since gone, refusing here
+// would strand the rest of the plan (editing it invalidates the checkpoint).
+func TestApplyResumeSkipsCreatedEntriesDiscoveredFrom(t *testing.T) {
+	f, app, opts := applySetupWith(t, `{"title":"First","type":"bug","discovered-from":7}
+{"title":"Second","type":"task"}
+`, issue(7, "Source", "P2", "task"))
+	f.failAfter["CreateIssue"] = failPoint{calls: 1, err: errors.New("boom")}
+	if err := app.Apply(ctx, opts); err == nil {
+		t.Fatal("first run was meant to fail partway")
+	}
+	delete(f.failAfter, "CreateIssue")
+	f.issues = slices.DeleteFunc(f.issues, func(i *model.Issue) bool { return i.Number == 7 })
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatalf("resume refused over a source its created entry no longer needs: %v", err)
 	}
 }

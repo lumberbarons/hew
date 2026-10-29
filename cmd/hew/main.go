@@ -318,7 +318,7 @@ func createCmd() *ucli.Command {
 			&ucli.StringSliceFlag{Name: "area", Usage: "area label (repeatable)"},
 			&ucli.IntSliceFlag{Name: "blocked-by", Usage: "blocking issue `N` (repeatable)"},
 			&ucli.IntFlag{Name: "parent", Usage: "attach as sub-issue of epic `N`"},
-			&ucli.IntFlag{Name: "discovered-from", Usage: "link back to issue `N` this was discovered under"},
+			&ucli.IntFlag{Name: "discovered-from", Usage: "link back to existing issue `N` this was discovered under (closed is fine)"},
 		}, bodyFlags()...),
 		Before: fixedArgs(0, 0),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
