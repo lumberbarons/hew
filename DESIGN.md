@@ -150,7 +150,11 @@ primer so agents know what they're looking at:
   enforces the label, the read path never repairs its absence, `epic` is
   reserved from areas like the other convention labels, and the one cost is
   that a repo already using an `epic` label for something else has those issues
-  read as epics.
+  read as epics. Two upgrade edges follow from "never repaired": a childless epic
+  filed before the label existed stays hidden until it gets a child (or someone
+  adds the label on GitHub), and a repo bootstrapped earlier gets the label
+  auto-created grey and undescribed by the first `epic create` until `hew init`
+  is re-run to create it with the convention's colour and description.
 - Label matching is case-insensitive, as it is on GitHub: `list --label upper`
   finds an issue labelled `UPPER` on both backends, agreeing with the write path,
   which already de-duplicates areas that way.
