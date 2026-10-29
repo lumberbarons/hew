@@ -563,9 +563,9 @@ func closeCmd() *ucli.Command {
 		Usage:     "comment + close (not-planned unless --completed or --duplicate-of)",
 		ArgsUsage: "<n>",
 		Flags: []ucli.Flag{
-			&ucli.StringFlag{Name: "reason", Usage: "closing comment (required unless --duplicate-of)"},
+			&ucli.StringFlag{Name: "reason", Usage: "closing comment (required unless --duplicate-of, which appends \"Duplicate of #N\" if the reason does not name it)"},
 			&ucli.BoolFlag{Name: "completed", Usage: "close as completed"},
-			&ucli.IntFlag{Name: "duplicate-of", Usage: "close as duplicate of issue `N`"},
+			&ucli.IntFlag{Name: "duplicate-of", Usage: "close as duplicate of existing issue `N` (not the issue itself)"},
 		},
 		Before: fixedArgs(1, 1),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {

@@ -512,6 +512,9 @@ func (a *App) Close(ctx context.Context, number int, reason string, completed bo
 	if completed && duplicateOf > 0 {
 		return usageErr("--completed and --duplicate-of are mutually exclusive")
 	}
+	if duplicateOf == number {
+		return usageErr("--duplicate-of #%d is the issue being closed", number)
+	}
 	stateReason := gh.CloseNotPlanned
 	switch {
 	case completed:
@@ -536,6 +539,17 @@ func (a *App) Close(ctx context.Context, number int, reason string, completed bo
 		// if this call was a mistake.
 		return genericErr("#%d is already closed%s", number, closeState(issue))
 	}
+	if duplicateOf > 0 {
+		// Before the comment, so a typo leaves the issue open and untouched.
+		if _, err := a.requireIssue(ctx, duplicateOf, "--duplicate-of"); err != nil {
+			return err
+		}
+		// A custom reason is free text; the original must stay findable from
+		// the closed duplicate, which stores it nowhere but the comment.
+		if !mentionsIssue(reason, duplicateOf) {
+			reason = strings.TrimRight(reason, " \t\r\n") + fmt.Sprintf("\n\nDuplicate of #%d", duplicateOf)
+		}
+	}
 	if err := a.Client.Comment(ctx, number, reason); err != nil {
 		return err
 	}
@@ -545,6 +559,44 @@ func (a *App) Close(ctx context.Context, number int, reason string, completed bo
 		return fmt.Errorf("posted the reason comment on #%d but closing it failed (a retry will comment again): %w", number, err)
 	}
 	return a.reportMutation(ctx, number, "closed #%d (%s)\n", number, formatStateReason(string(stateReason)))
+}
+
+// requireIssue resolves an issue number the caller names from another issue's
+// text or state, so a typo fails before anything is written rather than
+// leaving a reference that points nowhere. The error keeps its chain, so an
+// auth failure still maps to its exit code.
+func (a *App) requireIssue(ctx context.Context, number int, flag string) (model.Issue, error) {
+	issue, err := a.Client.GetIssue(ctx, number)
+	if err != nil {
+		return model.Issue{}, fmt.Errorf("%s: %w", flag, err)
+	}
+	return issue, nil
+}
+
+// mentionsIssue reports whether text already names #number as a reference of
+// this repository: not a longer number that merely starts with it, and not
+// the tail of another repository's owner/repo#number.
+func mentionsIssue(text string, number int) bool {
+	ref := fmt.Sprintf("#%d", number)
+	for from := 0; ; {
+		i := strings.Index(text[from:], ref)
+		if i < 0 {
+			return false
+		}
+		start, end := from+i, from+i+len(ref)
+		from = end
+		if start > 0 && (text[start-1] == '/' || isWordByte(text[start-1])) {
+			continue
+		}
+		if end < len(text) && isWordByte(text[end]) {
+			continue
+		}
+		return true
+	}
+}
+
+func isWordByte(b byte) bool {
+	return b == '_' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }
 
 // Reopen is close's inverse: comment the reason, reopen the issue. Closing
