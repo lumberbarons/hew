@@ -349,24 +349,25 @@ func rewriteLocalRefs(text string, mapping map[int]int) string {
 			}
 			continue
 		}
-		for {
+		for !isThematicBreak(body) {
 			c, after, ok := containerStart(body)
 			if !ok {
 				break
 			}
 			stack, body, para = append(stack, c), after, false
 		}
+		opened, blank := opensFence(body), strings.TrimSpace(body) == ""
 		switch {
-		case opensFence(body) != "":
+		case opened != "":
 			flush()
-			fence, para = opensFence(body), false
+			fence, para = opened, false
 			out.WriteString(line)
-		case !para && strings.TrimSpace(body) != "" && indentColumns(body) >= 4:
+		case !para && !blank && indentColumns(body) >= 4:
 			flush()
 			out.WriteString(line)
 		default:
 			chunk.WriteString(line)
-			para = strings.TrimSpace(body) != "" && !isHeading(body)
+			para = !blank && !endsParagraph(body)
 		}
 	}
 	flush()
@@ -430,11 +431,55 @@ func containerStart(s string) (c container, after string, ok bool) {
 	if tail != "" && !strings.ContainsRune(" \t\r\n", rune(tail[0])) {
 		return container{}, "", false
 	}
-	gap := len(tail) - len(strings.TrimLeft(tail, " \t"))
-	if gap == 0 || gap > 4 || strings.TrimSpace(tail) == "" {
+	gap := markerGap(tail, lead+marker)
+	if gap > 4 || strings.TrimSpace(tail) == "" {
 		gap = min(gap, 1)
 	}
-	return container{indent: lead + marker + max(gap, 1)}, tail[gap:], true
+	return container{indent: lead + marker + max(gap, 1)}, dropColumns(tail, gap), true
+}
+
+// endsParagraph reports whether body is a line that is not paragraph text and
+// so leaves an indented line after it as code: an ATX heading, a thematic
+// break, or a setext underline.
+func endsParagraph(body string) bool {
+	trimmed := strings.TrimSpace(body)
+	return isHeading(body) || isThematicBreak(body) || (trimmed != "" && strings.Trim(trimmed, "=") == "")
+}
+
+// isThematicBreak reports whether body is three or more -, * or _ alone on the
+// line, spaces allowed between them. It takes precedence over a list marker.
+func isThematicBreak(body string) bool {
+	trimmed := strings.TrimLeft(body, " ")
+	if len(body)-len(trimmed) > 3 || trimmed == "" || !strings.ContainsRune("-*_", rune(trimmed[0])) {
+		return false
+	}
+	count := 0
+	for _, r := range trimmed {
+		switch {
+		case r == rune(trimmed[0]):
+			count++
+		case !strings.ContainsRune(" \t\r\n", r):
+			return false
+		}
+	}
+	return count >= 3
+}
+
+// markerGap is how many columns of whitespace start tail, which begins at
+// column col; a tab reaches the next multiple of four.
+func markerGap(tail string, col int) int {
+	gap := 0
+	for _, r := range tail {
+		switch r {
+		case ' ':
+			gap++
+		case '\t':
+			gap += 4 - (col+gap)%4
+		default:
+			return gap
+		}
+	}
+	return gap
 }
 
 // isHeading reports whether body is an ATX heading, which ends a paragraph.
