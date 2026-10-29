@@ -148,3 +148,37 @@ func TestParseNumericRefsNoCycle(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// ExistingRefs is what the cli layer checks against the store before the
+// first write: every numeric reference, with the line and field it came from.
+// Local ids are not in it — they resolve inside the plan.
+func TestExistingRefs(t *testing.T) {
+	entries, err := Parse(strings.NewReader(`{"id":"a","title":"A","type":"task"}
+{"title":"B","type":"task","parent":9999,"blocked-by":["a",42,43],"discovered-from":7}
+{"title":"C","type":"task","parent":"a"}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := entries[0].ExistingRefs(); len(got) != 0 {
+		t.Errorf("entry with no numeric references = %v", got)
+	}
+	if got := entries[2].ExistingRefs(); len(got) != 0 {
+		t.Errorf("local-id parent reported as existing: %v", got)
+	}
+	want := []ExistingRef{
+		{Line: 2, Field: "parent", Number: 9999},
+		{Line: 2, Field: "blocked-by", Number: 42},
+		{Line: 2, Field: "blocked-by", Number: 43},
+		{Line: 2, Field: "discovered-from", Number: 7},
+	}
+	got := entries[1].ExistingRefs()
+	if len(got) != len(want) {
+		t.Fatalf("ExistingRefs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("ExistingRefs[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+}

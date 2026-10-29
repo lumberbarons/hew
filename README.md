@@ -387,8 +387,9 @@ take either a local `id` — a string, resolved to the created issue's number,
 so entries can reference each other before numbers exist — or an existing
 issue number. `discovered-from` adds the same origin link the create flag
 does, and must name an existing issue (closed is fine; a pull request number is
-not an issue): `apply` refuses a plan with a missing one before any write,
-`--dry-run` included. Bodies come from the same section fields the create
+not an issue). Every existing issue a plan names — `parent`, `blocked-by` and
+`discovered-from` — is looked up first: `apply` refuses a plan with a missing
+one before any write, naming the line and number, `--dry-run` included. Bodies come from the same section fields the create
 flags use — `where`, `problem` or `goal`, `fix` or `approach`, `done-when`
 (a list, one checklist item each) — composed into the body template; `body` carries raw
 long-form text instead (mutually exclusive with the section fields).
@@ -397,7 +398,8 @@ Creation and dependency wiring are both checkpointed to the `--state` file as
 they happen, so a failed run resumes without creating duplicates or
 re-attempting edges that already landed; unknown fields, dangling
 references, and dependency cycles between entries are all rejected before
-anything is written.
+anything is written. An edge that still fails to wire after the issues are
+created (a GitHub error) exits non-zero, so a script can tell; rerun to retry it.
 
 The state file is trusted local scratch, not an input you can hand around: it
 records the repository and a digest of the plan it was written for, and every

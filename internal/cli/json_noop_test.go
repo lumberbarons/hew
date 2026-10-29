@@ -173,9 +173,7 @@ func TestApplyDryRunIsJSON(t *testing.T) {
 	if blockers, _ := collector["blockedBy"].([]any); len(blockers) != 2 || blockers[0] != "scaffold" || blockers[1] != "#42" {
 		t.Errorf("collector blockedBy = %v", collector["blockedBy"])
 	}
-	if len(f.calls) != 0 {
-		t.Errorf("dry run made API calls: %v", f.calls)
-	}
+	assertOnlyReads(t, f)
 }
 
 func TestApplyEmptyPlanDryRunIsJSON(t *testing.T) {

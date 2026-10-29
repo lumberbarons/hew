@@ -104,9 +104,10 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 		}
 	}
 
-	// Same reasoning: a dangling provenance link is a typo, and finding it
-	// after half the plan is filed leaves those issues behind to clean up.
-	if err := a.requireDiscoveredFrom(ctx, entries, state.Mapping); err != nil {
+	// Same reasoning: a reference to an issue that does not exist is a typo,
+	// and finding it after half the plan is filed leaves those issues behind to
+	// clean up (#233).
+	if err := a.requireExistingRefs(ctx, entries, state.Mapping); err != nil {
 		return err
 	}
 
@@ -124,13 +125,22 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	}
 	wired, warned := a.applyWire(ctx, entries, state, opts)
 
-	return a.emitResult(map[string]any{
+	if err := a.emitResult(map[string]any{
 		"created": created, "wired": wired, "warnings": warned,
 		"mapping": state.Mapping,
 	}, func() {
 		a.printf("applied %s: %d created, %d dependencies wired\n", opts.File, created, wired)
 		a.printf("mapping saved to %s\n", opts.StatePath)
-	})
+	}); err != nil {
+		return err
+	}
+	// The issues exist and the result above says so, but an edge that did not
+	// land is a plan that was not applied: a script branches on the exit code,
+	// not on stderr (#233). The edge is not checkpointed, so a rerun retries it.
+	if len(warned) > 0 {
+		return genericErr("%d dependency edges were not wired (see warnings): fix the cause and rerun to retry them", len(warned))
+	}
+	return nil
 }
 
 // applyPlanEntry is one issue a dry run would create, in the shape both the
@@ -236,7 +246,7 @@ func (a *App) applyCreate(ctx context.Context, entries []plan.Entry, state *batc
 
 // applyWire connects parents and blockers, checkpointing each edge as it
 // lands so a resume skips it. Failures warn and continue, and are retried on
-// the next run — but a *successful* edge is never re-attempted, because
+// the next run — Apply turns them into a non-zero exit — but a *successful* edge is never re-attempted, because
 // GitHub rejects the duplicate and the warning it produces would drown the
 // ones that mean something. Local references need no cycle check here:
 // plan.Parse already rejected cycles, and existing issues cannot depend on
@@ -292,19 +302,28 @@ func (a *App) applyWire(ctx context.Context, entries []plan.Entry, state *batchS
 	return wired, warnings
 }
 
-// requireDiscoveredFrom checks every distinct discovered-from source in the
-// plan exists, reads only, naming the entry that carries a bad one. Entries
-// an earlier run already created are skipped: their source was checked then,
-// and refusing a resume over one that has since gone would strand the rest.
-func (a *App) requireDiscoveredFrom(ctx context.Context, entries []plan.Entry, created map[string]int) error {
+// requireExistingRefs checks every issue the plan references by number —
+// parent, blocked-by and discovered-from — exists, reads only, naming the line
+// and field that carries a bad one. Each number is looked up once, and the
+// first line to use it is the one reported. Entries an earlier run already
+// created are skipped: their references were checked then, and refusing a
+// resume over one that has since gone would strand the rest. A reference of
+// theirs that was never wired is retried and, if it still fails, exits
+// non-zero from the wire pass.
+func (a *App) requireExistingRefs(ctx context.Context, entries []plan.Entry, created map[string]int) error {
 	checked := map[int]bool{}
 	for _, e := range entries {
-		if _, done := created[e.Key()]; done || e.DiscoveredFrom <= 0 || checked[e.DiscoveredFrom] {
+		if _, done := created[e.Key()]; done {
 			continue
 		}
-		checked[e.DiscoveredFrom] = true
-		if _, err := a.requireIssue(ctx, e.DiscoveredFrom, "--discovered-from"); err != nil {
-			return fmt.Errorf("%s: %w", e.Key(), err)
+		for _, ref := range e.ExistingRefs() {
+			if checked[ref.Number] {
+				continue
+			}
+			checked[ref.Number] = true
+			if _, err := a.requireIssue(ctx, ref.Number, ref.Field); err != nil {
+				return fmt.Errorf("line %d: %w", ref.Line, err)
+			}
 		}
 	}
 	return nil
