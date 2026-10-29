@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -354,6 +355,49 @@ func TestApplyFailedEdgeStillReportsTheResult(t *testing.T) {
 	}
 	if got.Created != 1 || len(got.Warnings) != 1 || len(got.Mapping) != 1 {
 		t.Errorf("result = %+v", got)
+	}
+}
+
+// readOnlyAfterEdge makes the checkpoint directory unwritable once an edge has
+// landed, so the save that follows it fails.
+type readOnlyAfterEdge struct {
+	*fakeClient
+	t   *testing.T
+	dir string
+}
+
+func (c readOnlyAfterEdge) AddBlockedBy(ctx context.Context, issue, blocker int) error {
+	if err := c.fakeClient.AddBlockedBy(ctx, issue, blocker); err != nil {
+		return err
+	}
+	if err := os.Chmod(c.dir, 0o500); err != nil {
+		c.t.Fatal(err)
+	}
+	c.t.Cleanup(func() { _ = os.Chmod(c.dir, 0o700) })
+	return nil
+}
+
+// A checkpoint that cannot be saved is worth a warning, but the edge did land:
+// reporting it as unwired would send the user to rerun and re-attempt an edge
+// GitHub already has.
+func TestApplyCheckpointSaveFailureIsNotAnUnwiredEdge(t *testing.T) {
+	f, app, opts := applySetup(t, `{"title":"x","type":"task","blocked-by":[42]}`+"\n")
+	app.Client = readOnlyAfterEdge{fakeClient: f, t: t, dir: filepath.Dir(opts.StatePath)}
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatalf("an edge that landed exited non-zero: %v", err)
+	}
+	if errOut := app.ErrOut.(interface{ String() string }).String(); !strings.Contains(errOut, "saving checkpoint") {
+		t.Errorf("save failure not warned about: %q", errOut)
+	}
+}
+
+// One edge reads singular.
+func TestApplyUnwiredEdgeCountAgrees(t *testing.T) {
+	f, app, opts := applySetup(t, `{"title":"x","type":"task","blocked-by":[42]}`+"\n")
+	f.failOn["AddBlockedBy"] = errors.New("boom")
+	err := app.Apply(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "1 dependency edge was not wired") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

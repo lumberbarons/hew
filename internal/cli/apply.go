@@ -24,7 +24,9 @@ type ApplyOpts struct {
 	// from elsewhere is refused rather than trusted (#81). Empty means
 	// File + ".state.json".
 	StatePath string
-	// DryRun prints the plan without touching GitHub.
+	// DryRun prints the plan without creating anything. It still reads: the
+	// state file's issues and every existing issue the plan references are
+	// looked up, so it shows the refusal the real run would hit.
 	DryRun bool
 	// Throttle is slept between writes to stay under GitHub's secondary
 	// rate limits for content creation.
@@ -123,7 +125,7 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	if err != nil {
 		return err
 	}
-	wired, warned := a.applyWire(ctx, entries, state, opts)
+	wired, unwired, warned := a.applyWire(ctx, entries, state, opts)
 
 	if err := a.emitResult(map[string]any{
 		"created": created, "wired": wired, "warnings": warned,
@@ -137,8 +139,11 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	// The issues exist and the result above says so, but an edge that did not
 	// land is a plan that was not applied: a script branches on the exit code,
 	// not on stderr (#233). The edge is not checkpointed, so a rerun retries it.
-	if len(warned) > 0 {
-		return genericErr("%d dependency edges were not wired (see warnings): fix the cause and rerun to retry them", len(warned))
+	switch {
+	case unwired == 1:
+		return genericErr("1 dependency edge was not wired (see warnings): fix the cause and rerun to retry it")
+	case unwired > 1:
+		return genericErr("%d dependency edges were not wired (see warnings): fix the cause and rerun to retry them", unwired)
 	}
 	return nil
 }
@@ -246,12 +251,14 @@ func (a *App) applyCreate(ctx context.Context, entries []plan.Entry, state *batc
 
 // applyWire connects parents and blockers, checkpointing each edge as it
 // lands so a resume skips it. Failures warn and continue, and are retried on
-// the next run — Apply turns them into a non-zero exit — but a *successful* edge is never re-attempted, because
-// GitHub rejects the duplicate and the warning it produces would drown the
-// ones that mean something. Local references need no cycle check here:
+// the next run; they are counted in unwired so Apply can exit non-zero. A
+// warning about the checkpoint file is not counted, because that edge did land.
+// A *successful* edge is never re-attempted, because GitHub rejects the
+// duplicate and the warning it produces would drown the ones that mean
+// something. Local references need no cycle check here:
 // plan.Parse already rejected cycles, and existing issues cannot depend on
 // issues that didn't exist yet.
-func (a *App) applyWire(ctx context.Context, entries []plan.Entry, state *batchState, opts ApplyOpts) (wired int, warnings []string) {
+func (a *App) applyWire(ctx context.Context, entries []plan.Entry, state *batchState, opts ApplyOpts) (wired, unwired int, warnings []string) {
 	warn := func(format string, args ...any) {
 		msg := fmt.Sprintf(format, args...)
 		warnings = append(warnings, msg)
@@ -275,6 +282,7 @@ func (a *App) applyWire(ctx context.Context, entries []plan.Entry, state *batchS
 			to, ok := resolve(edge.To)
 			if !ok {
 				warn("%s %s of %s not created, edge dropped", edge.Kind, edge.To, e.Key())
+				unwired++
 				continue
 			}
 			key := edgeKey(edge.Kind, from, to)
@@ -289,17 +297,18 @@ func (a *App) applyWire(ctx context.Context, entries []plan.Entry, state *batchS
 			}
 			if err != nil {
 				warn("%s edge #%d→#%d: %v", edge.Kind, from, to, err)
+				unwired++
 				continue
 			}
 			state.Edges[key] = true
 			if err := saveBatchState(opts.StatePath, state); err != nil {
-				warn("%v", err)
+				warn("saving checkpoint: %v", err)
 			}
 			wired++
 			sleep(opts.Throttle)
 		}
 	}
-	return wired, warnings
+	return wired, unwired, warnings
 }
 
 // requireExistingRefs checks every issue the plan references by number —

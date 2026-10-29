@@ -389,9 +389,10 @@ issue number. `discovered-from` adds the same origin link the create flag
 does, and must name an existing issue (closed is fine; a pull request number is
 not an issue). Every existing issue a plan names — `parent`, `blocked-by` and
 `discovered-from` — is looked up first: `apply` refuses a plan with a missing
-one before any write, naming the line and number, `--dry-run` included. Bodies come from the same section fields the create
-flags use — `where`, `problem` or `goal`, `fix` or `approach`, `done-when`
-(a list, one checklist item each) — composed into the body template; `body` carries raw
+one before any write, naming the line and number, `--dry-run` included. Bodies come from the same
+section fields the create flags use — `where`, `problem` or `goal`, `fix` or
+`approach`, `done-when` (a list, one checklist item each) — composed into the
+body template; `body` carries raw
 long-form text instead (mutually exclusive with the section fields).
 
 Creation and dependency wiring are both checkpointed to the `--state` file as
