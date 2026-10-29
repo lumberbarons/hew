@@ -241,6 +241,24 @@ func (a *App) claimRefusal(ctx context.Context, issue model.Issue) error {
 	return &ExitError{Code: ExitClaimed, Message: fmt.Sprintf("#%d already claimed (%s); pick the next ready item or --force", issue.Number, who)}
 }
 
+// blockerRefusal keeps start in step with ready: an issue with an open
+// blocker is hidden from ready, so claiming it by id would take work whose
+// prerequisite is unfinished. A capped blocker list can hide an open blocker,
+// so that case warns rather than refusing on what it cannot see.
+func (a *App) blockerRefusal(issue model.Issue) error {
+	if open := issue.OpenBlockers(); len(open) > 0 {
+		refs := make([]string, len(open))
+		for i, n := range open {
+			refs[i] = fmt.Sprintf("#%d", n)
+		}
+		return &ExitError{Code: ExitBlocked, Message: fmt.Sprintf("#%d is blocked by open %s; pick the next ready item or --force", issue.Number, strings.Join(refs, ", "))}
+	}
+	if issue.BlockedByTotal > len(issue.BlockedBy) {
+		a.warnf("%s", render.FormatWarning(model.Warning{Kind: model.WarnBlockersCapped, Issue: issue.Number, Total: issue.BlockedByTotal, Fetched: len(issue.BlockedBy)}))
+	}
+	return nil
+}
+
 // StartOpts are the claim inputs; zero values mean the default behavior.
 type StartOpts struct {
 	// Priority is required when the issue is untriaged (claiming is triage).
@@ -257,7 +275,9 @@ type StartOpts struct {
 // Start claims an issue: assign @me plus the in-progress label. The guard
 // refuses issues that are already assigned or in-progress — exit 3 for
 // someone else's claim so an agent loop moves on to the next ready item,
-// exit 5 when the claim is already yours; --force steals. Claiming an
+// exit 5 when the claim is already yours; --force steals. It also refuses
+// an issue with open blockers (exit 6), which ready would have hidden;
+// --force overrides that too. Claiming an
 // untriaged issue requires --priority — claiming forces triage.
 func (a *App) Start(ctx context.Context, number int, opts StartOpts) error {
 	priorityFlag, force := opts.Priority, opts.Force
@@ -273,6 +293,11 @@ func (a *App) Start(ctx context.Context, number int, opts StartOpts) error {
 	}
 	if (len(issue.Assignees) > 0 || issue.InProgress()) && !force {
 		return a.claimRefusal(ctx, issue)
+	}
+	if !force {
+		if err := a.blockerRefusal(issue); err != nil {
+			return err
+		}
 	}
 	priority, _ := issue.Priority()
 	if priorityFlag != "" {

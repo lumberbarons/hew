@@ -93,7 +93,8 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
   `create --discovered-from <n>`.
 - **Claiming is guarded**: `start` refuses an issue that is already assigned or
   `in-progress` and exits with a distinct code, so an agent loop moves on to the
-  next ready item instead of doubling up. GitHub has no conditional writes, so its
+  next ready item instead of doubling up. It likewise refuses an issue with open
+  blockers (exit 6); `ready` is not the only blocker filter. GitHub has no conditional writes, so its
   guard is check-then-act with a re-read after claiming — a small race window
   remains (see open questions). The local backend holds an exclusive lock and
   implements the optional atomic claim (`gh.Claimer`), so simultaneous starts
@@ -222,7 +223,12 @@ obvious from a flag name.
   untriaged half of dedup.
 - **`start`** is a guarded claim. It refuses an issue that is assigned or
   in-progress: exit 3 means pick the next ready item, exit 5 means the claimant
-  is you and the response is to resume that work. `--force` steals. An untriaged
+  is you and the response is to resume that work. It also refuses an issue with
+  open blockers — the issues `ready` hides — with exit 6 naming them, so an id taken
+  from `list` or `show` cannot claim work whose prerequisite is unfinished; closed
+  blockers do not count, and a capped blocker list warns instead of refusing on
+  what it cannot see. `--force` steals a claim or overrides the blockers (the way
+  to take an issue stuck in a dependency cycle). An untriaged
   issue requires `--priority`, because claiming is triage. `--show` (or
   `--json`) returns the body from the post-claim read with no extra fetch, so a
   separate `show` after claiming is unnecessary; like every mutation it omits
@@ -474,7 +480,7 @@ object is neither the text primer nor the data schema.
   exits 0 with `no ready work`; `start` on an issue claimed by someone else exits 3
   with `already claimed`; `start` on an issue you already claimed exits 5, because
   the response is to resume that work rather than to pick a different item; auth
-  failure exits 4; etc.). The exit code is the signal agents branch on — a
+  failure exits 4; `start` on an issue with open blockers exits 6; etc.). The exit code is the signal agents branch on — a
   distinction worth acting on gets a code, not a `--json`-only field.
 
 ## Checkpoint binding

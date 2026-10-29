@@ -44,7 +44,7 @@ hew hooks install claude # agent session-start hook running `hew prime`; also co
 hew prime         # session-start context: conventions + ready work + live state
 hew ready         # what should I work on? (priority-sorted, zero open blockers)
 hew start 42 --show  # claim it and read it: assign @me + in-progress, then the issue's
-                  #   detail (refuses claimed work: exit 3, or exit 5 when already yours)
+                  #   detail (refuses claimed work: exit 3, or exit 5 when already yours; open blockers: exit 6)
 # ...branch (feat/|fix/|chore/), commit, push...
 hew pr            # draft PR for the claimed issue, body composed, "Fixes #42" enforced
 hew pr --amend    # revise the open PR's title/body; omitted sections are preserved

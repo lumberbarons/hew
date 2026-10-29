@@ -307,7 +307,7 @@ func TestStartShowRendersClaimedDetail(t *testing.T) {
 	i.Body = "### Goal\n\nDo the thing."
 	i.Comments = []model.Comment{{Author: "alice", Body: "context here"}}
 	i.CommentsTotal = 1
-	i.BlockedBy = []model.Ref{{Number: 9, State: "OPEN"}}
+	i.BlockedBy = []model.Ref{{Number: 9, State: "CLOSED"}}
 	f := newFake(i)
 	app, out, errOut := newApp(f)
 	if err := app.Start(ctx, 1, StartOpts{Show: true}); err != nil {
@@ -1795,4 +1795,72 @@ func TestCreateDiscoveredFromAcceptsAClosedIssue(t *testing.T) {
 			t.Errorf("open issues = %v, want one whose body contains %q", all, want)
 		}
 	})
+}
+
+// TestStartRefusesOpenBlockers: ready hides a blocked issue, so start must not
+// let an id taken from list or show claim it anyway. The refusal names every
+// open blocker, uses its own exit code, and mutates nothing.
+func TestStartRefusesOpenBlockers(t *testing.T) {
+	blocked := issue(3, "Blocked", "P2", "task")
+	blocked.BlockedBy = []model.Ref{{Number: 1, State: "OPEN"}, {Number: 2, State: "CLOSED"}, {Number: 4, State: "OPEN"}}
+	f := newFake(issue(1, "Open blocker", "P2", "task"), issue(4, "Another", "P2", "task"), blocked)
+	app, _, _ := newApp(f)
+	err := app.Start(ctx, 3, StartOpts{})
+	exitCode(t, err, ExitBlocked)
+	if !strings.Contains(err.Error(), "#1") || !strings.Contains(err.Error(), "#4") || strings.Contains(err.Error(), "#2") {
+		t.Errorf("message should name exactly the open blockers: %v", err)
+	}
+	got := f.byNumber(3)
+	if len(got.Assignees) != 0 || slices.Contains(got.Labels, "in-progress") {
+		t.Errorf("refused start mutated #3: labels=%v assignees=%v", got.Labels, got.Assignees)
+	}
+}
+
+func TestStartAllowsClosedBlockers(t *testing.T) {
+	done := issue(1, "Done", "P2", "task")
+	done.State = "CLOSED"
+	blocked := issue(2, "Unblocked", "P2", "task")
+	blocked.BlockedBy = []model.Ref{{Number: 1, State: "CLOSED"}}
+	f := newFake(done, blocked)
+	app, _, errOut := newApp(f)
+	if err := app.Start(ctx, 2, StartOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.byNumber(2).Assignees, "me") {
+		t.Errorf("claim not applied: %v", f.byNumber(2).Assignees)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("unexpected warnings: %q", errOut.String())
+	}
+}
+
+func TestStartForceOverridesOpenBlockers(t *testing.T) {
+	blocked := issue(2, "Blocked", "P2", "task")
+	blocked.BlockedBy = []model.Ref{{Number: 1, State: "OPEN"}}
+	f := newFake(issue(1, "Open blocker", "P2", "task"), blocked)
+	app, _, _ := newApp(f)
+	if err := app.Start(ctx, 2, StartOpts{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.byNumber(2).Assignees, "me") {
+		t.Errorf("--force did not claim: %v", f.byNumber(2).Assignees)
+	}
+}
+
+// A blocker list the API capped can hide an open blocker, so the check says
+// it cannot be sure rather than claiming the issue is clear.
+func TestStartWarnsWhenBlockersAreCapped(t *testing.T) {
+	blocked := issue(2, "Many blockers", "P2", "task")
+	blocked.BlockedBy = []model.Ref{{Number: 1, State: "CLOSED"}}
+	blocked.BlockedByTotal = 60
+	done := issue(1, "Done", "P2", "task")
+	done.State = "CLOSED"
+	f := newFake(done, blocked)
+	app, _, errOut := newApp(f)
+	if err := app.Start(ctx, 2, StartOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errOut.String(), "#2") {
+		t.Errorf("expected a capped-blockers warning naming #2, got %q", errOut.String())
+	}
 }
