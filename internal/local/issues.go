@@ -154,7 +154,7 @@ func (s *Store) ClaimIssue(ctx context.Context, number int, login string, force 
 		}
 		// The same test start's pre-read applies (model.Issue.Claimed), so the
 		// two sides cannot disagree about what counts as claimed.
-		claimed := len(r.Assignees) > 0 || slices.Contains(r.Labels, model.InProgressLabel)
+		claimed := len(r.Assignees) > 0 || slices.ContainsFunc(r.Labels, model.IsInProgressLabel)
 		if claimed && !force {
 			return fmt.Errorf("%w: #%d", gh.ErrClaimConflict, number)
 		}

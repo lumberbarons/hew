@@ -104,6 +104,81 @@ func TestAreaFlagsRejectConventionLabels(t *testing.T) {
 	}
 }
 
+// Label names are case-insensitive on GitHub, so "Bug" would attach the existing
+// bug label and leave a second type (or priority) on the issue.
+func TestAreaFlagsRejectConventionLabelsInAnyCase(t *testing.T) {
+	for _, area := range []string{"Bug", "ENHANCEMENT", "p0", "p4", "IN-Progress"} {
+		t.Run(area, func(t *testing.T) {
+			eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+				work, err := store.CreateIssue(ctx, "Existing", "body", []string{"P2", "task"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				app, out, _ := newLocalApp(store)
+				exitCode(t, app.Create(ctx, CreateOpts{Title: "T", Type: "task", Areas: []string{area}}), ExitUsage)
+				exitCode(t, app.Set(ctx, work.Number, SetOpts{AddAreas: []string{area}}), ExitUsage)
+				exitCode(t, app.Set(ctx, work.Number, SetOpts{RemoveAreas: []string{area}}), ExitUsage)
+
+				plan := filepath.Join(t.TempDir(), "plan.jsonl")
+				entry, err := json.Marshal(map[string]any{"title": "T", "type": "task", "areas": []string{area}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(plan, append(entry, '\n'), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				err = app.Apply(ctx, ApplyOpts{File: plan})
+				if err == nil || !strings.Contains(err.Error(), "collides with a convention label") {
+					t.Errorf("apply error = %v, want a convention-label collision", err)
+				}
+
+				if out.Len() != 0 {
+					t.Errorf("refused writes emitted output: %q", out.String())
+				}
+				got, err := store.GetIssue(ctx, work.Number)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(got.Labels, []string{"P2", "task"}) {
+					t.Errorf("labels mutated despite refusal: %v", got.Labels)
+				}
+				open, err := store.ListIssues(ctx, []gh.IssueState{gh.StateOpen})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(open) != 1 {
+					t.Errorf("%d open issues, want only the existing one", len(open))
+				}
+			})
+		})
+	}
+}
+
+// Re-asserting a convention label that exists in another case must neither lose
+// it (remove, then skip the add) nor stack a second one.
+func TestSetTypeAndPriorityTreatStrayCaseAsTheSameLabel(t *testing.T) {
+	eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+		work, err := store.CreateIssue(ctx, "Existing", "body", []string{"p2", "Bug", "task"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app, _, _ := newLocalApp(store)
+		if err := app.Set(ctx, work.Number, SetOpts{Type: "bug", Priority: "P2"}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := store.GetIssue(ctx, work.Number)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p, multi := got.Priority(); p != model.P2 || multi {
+			t.Errorf("priority = %v, %v from labels %v", p, multi, got.Labels)
+		}
+		if typ, multi := got.Type(); typ != "bug" || multi {
+			t.Errorf("type = %q, %v from labels %v", typ, multi, got.Labels)
+		}
+	})
+}
+
 func TestCreateDefaults(t *testing.T) {
 	f := newFake()
 	app, out, _ := newApp(f)
@@ -1095,6 +1170,24 @@ func TestReopenReleasesStaleClaim(t *testing.T) {
 	}
 }
 
+// A stray-case label is a claim, and the release removes it by the spelling the
+// issue carries rather than leaning on the backend to resolve case.
+func TestReopenReleasesStrayCaseClaimLabelByItsOwnName(t *testing.T) {
+	closed := issue(1, "Work", "P2", "bug", "In-Progress")
+	closed.State = "CLOSED"
+	f := newFake(closed)
+	app, _, _ := newApp(f)
+	if err := app.Reopen(ctx, 1, "r"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.calls, "RemoveLabel 1 In-Progress") {
+		t.Errorf("calls = %v, want RemoveLabel by the issue's own spelling", f.calls)
+	}
+	if f.byNumber(1).Claimed() {
+		t.Errorf("still claimed: %v", f.byNumber(1).Labels)
+	}
+}
+
 // The in-progress label alone is a claim too — start sets both, but the
 // label can outlive the assignee — and the output names what was released.
 func TestReopenReleasesLabelOnlyClaim(t *testing.T) {
@@ -2014,7 +2107,7 @@ func TestWriteFieldValidation(t *testing.T) {
 								t.Fatal("invalid input was accepted")
 							}
 							// The plan parser already refuses an exact convention-label collision.
-							if strings.HasPrefix(command, "apply") && tc.area == "in-progress" {
+							if strings.HasPrefix(command, "apply") && strings.EqualFold(tc.area, "in-progress") {
 								exitCode(t, err, ExitGeneric)
 							} else {
 								exitCode(t, err, ExitUsage)

@@ -691,19 +691,23 @@ func TestConcurrentClaimsHaveExactlyOneWinner(t *testing.T) {
 	}
 }
 
-// start's pre-read decides "claimed" with the model's exact-case test, so the
-// store's atomic claim must agree: a label differing only in case is not a
-// claim, and claiming reuses its spelling rather than adding a second label.
+// start's pre-read decides "claimed" with the model's case-insensitive test, so
+// the store's atomic claim must agree: a label differing only in case is a
+// claim and is refused like any other.
 func TestClaimIssueJudgesTheInProgressLabelLikeTheModel(t *testing.T) {
 	s := newStore(t)
 	n := mustCreate(t, s, "odd label", "", "P2", "bug")
 	must(t, s.AddLabels(ctx, n, []string{"In-Progress"}))
 	before, err := s.GetIssue(ctx, n)
 	must(t, err)
-	if before.Claimed() {
-		t.Fatalf("labels %v read as claimed; the premise of this test is that the model says no", before.Labels)
+	if !before.Claimed() {
+		t.Fatalf("labels %v not read as claimed; the premise of this test is that the model says yes", before.Labels)
 	}
-	must(t, s.ClaimIssue(ctx, n, "agent", false))
+	if err := s.ClaimIssue(ctx, n, "agent", false); !errors.Is(err, gh.ErrClaimConflict) {
+		t.Fatalf("claim of an In-Progress issue = %v, want a claim conflict", err)
+	}
+	// A forced claim reuses the existing spelling rather than adding a second label.
+	must(t, s.ClaimIssue(ctx, n, "agent", true))
 	got, err := s.GetIssue(ctx, n)
 	must(t, err)
 	inProgress := 0

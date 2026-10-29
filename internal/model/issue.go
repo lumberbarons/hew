@@ -35,10 +35,23 @@ func (p Priority) String() string {
 	return "P?"
 }
 
-// ParsePriority parses "P0".."P4" (exact match, as used in labels and flags).
+// ParsePriority parses a flag value, "P0".."P4", exactly. It is not the label
+// matcher: label names are case-insensitive, so labels go through LabelPriority.
 func ParsePriority(s string) (Priority, bool) {
 	for i, name := range priorityNames {
 		if s == name {
+			return Priority(i), true
+		}
+	}
+	return PriorityUnknown, false
+}
+
+// LabelPriority recognizes a priority label by name. Label names are
+// case-insensitive on GitHub, so "p0" is the P0 label; ParsePriority stays
+// exact because flag values are not label names.
+func LabelPriority(label string) (Priority, bool) {
+	for i, name := range priorityNames {
+		if strings.EqualFold(label, name) {
 			return Priority(i), true
 		}
 	}
@@ -49,9 +62,35 @@ func ParsePriority(s string) (Priority, bool) {
 // issue carries more than one, the first of these wins.
 var Types = []string{"bug", "enhancement", "task"}
 
-// IsType reports whether the label name is one of the type labels.
+// IsType reports whether a flag value is exactly one of the type names. Label
+// names go through LabelType, which ignores case.
 func IsType(label string) bool {
 	return slices.Contains(Types, label)
+}
+
+// LabelType recognizes a type label by name, case-insensitively, and returns
+// its canonical spelling.
+func LabelType(label string) (string, bool) {
+	for _, t := range Types {
+		if strings.EqualFold(label, t) {
+			return t, true
+		}
+	}
+	return "", false
+}
+
+// IsInProgressLabel reports whether the label name is the in-progress label,
+// case-insensitively.
+func IsInProgressLabel(label string) bool {
+	return strings.EqualFold(label, InProgressLabel)
+}
+
+// IsConventionLabel reports whether the label name is a priority, type or
+// in-progress label in any case — the names an area must not take.
+func IsConventionLabel(label string) bool {
+	_, isPriority := LabelPriority(label)
+	_, isType := LabelType(label)
+	return isPriority || isType || IsInProgressLabel(label)
 }
 
 // InProgressLabel marks claimed issues; the assignee is the claim, the label
@@ -135,7 +174,7 @@ func (i Issue) Priority() (p Priority, multi bool) {
 	p = PriorityUnknown
 	n := 0
 	for _, l := range i.Labels {
-		if v, ok := ParsePriority(l); ok {
+		if v, ok := LabelPriority(l); ok {
 			n++
 			if v < p {
 				p = v
@@ -150,27 +189,23 @@ func (i Issue) Priority() (p Priority, multi bool) {
 // true.
 func (i Issue) Type() (typ string, multi bool) {
 	n := 0
-	for _, t := range Types {
-		for _, l := range i.Labels {
-			if l == t {
-				n++
-				if typ == "" {
-					typ = t
-				}
+	for _, l := range i.Labels {
+		if t, ok := LabelType(l); ok {
+			n++
+			if typ == "" || slices.Index(Types, t) < slices.Index(Types, typ) {
+				typ = t
 			}
 		}
 	}
 	return typ, n > 1
 }
 
-// Areas returns all labels that are not priority, type, or in-progress.
+// Areas returns all labels that are not priority, type, or in-progress, in
+// any case.
 func (i Issue) Areas() []string {
 	var areas []string
 	for _, l := range i.Labels {
-		if _, ok := ParsePriority(l); ok {
-			continue
-		}
-		if IsType(l) || l == InProgressLabel {
+		if IsConventionLabel(l) {
 			continue
 		}
 		areas = append(areas, l)
@@ -192,7 +227,7 @@ func (i Issue) IsEpic() bool {
 
 // InProgress reports whether the issue carries the in-progress label.
 func (i Issue) InProgress() bool {
-	return slices.Contains(i.Labels, InProgressLabel)
+	return slices.ContainsFunc(i.Labels, IsInProgressLabel)
 }
 
 // IsOpen reports whether the issue is open.
