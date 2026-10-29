@@ -182,8 +182,8 @@ func locate(mainCheckout func(string) (string, error), dir string) (string, bool
 	case BackendGitHub:
 		return "", false, nil
 	default:
-		return "", false, fmt.Errorf("%s names the backend %q, which is neither %q nor %q; correct it, or run `hew init --local` after deleting the file to keep the issues in %s",
-			filepath.Join(tracker, configFile), cfg.Backend, BackendLocal, BackendGitHub, issuesFile)
+		return "", false, fmt.Errorf("%s names the backend %q, which is neither %q nor %q; a newer hew may have written it, so upgrade first, and if it is a typo correct it",
+			filepath.Join(tracker, configFile), cfg.Backend, BackendLocal, BackendGitHub)
 	}
 }
 
@@ -196,7 +196,7 @@ func refuseOrphanedTracker(tracker string) error {
 	for _, name := range []string{issuesFile, lockFile} {
 		path := filepath.Join(tracker, name)
 		if _, err := os.Lstat(path); err == nil {
-			return fmt.Errorf("%s exists but %s does not, so this looks like a local tracker that lost its config; refusing to fall back to GitHub. `hew init --local` rewrites the config and keeps the issues; if %s is a leftover to discard, delete the %s directory",
+			return fmt.Errorf("%s exists but %s does not, so this looks like a local tracker that lost its config; refusing to fall back to GitHub. `hew init --local` rewrites the config and keeps the issues (the tracker gets a new id, so resume checkpoints for `apply` and `migrate` start over); if %s is a leftover to discard, delete the %s directory",
 				path, filepath.Join(tracker, configFile), name, tracker)
 		}
 	}

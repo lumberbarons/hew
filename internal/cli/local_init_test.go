@@ -166,26 +166,70 @@ func TestInitLocalCreatesTheTrackerAtTheMainCheckout(t *testing.T) {
 }
 
 // A repo whose .hew is deleted looks exactly like one that never had a local
-// tracker, so hew falls back to GitHub; init is where that is said, once.
-func TestInitLocalWarnsThatADeletedTrackerFallsBackToGitHub(t *testing.T) {
+// tracker, so hew falls back to GitHub; init is where that is said, once, on
+// stderr so --json callers see it too.
+func TestInitLocalWarnsOnceThatADeletedTrackerFallsBackToGitHub(t *testing.T) {
 	main, _ := gitRepoWithWorktree(t)
-	app, out, _ := newApp(newFake())
+	app, out, errOut := newApp(newFake())
+	app.JSON = true
 	if err := app.InitLocal(main); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"git clean -fdx", "GitHub"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("output missing %q:\n%s", want, out.String())
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("stderr missing %q:\n%s", want, errOut.String())
 		}
 	}
+	if strings.Contains(out.String(), "git clean") {
+		t.Errorf("the warning leaked into stdout:\n%s", out.String())
+	}
 
-	jsonApp, jsonOut, _ := newApp(newFake())
-	jsonApp.JSON = true
-	if err := jsonApp.InitLocal(main); err != nil {
+	again, _, againErr := newApp(newFake())
+	if err := again.InitLocal(main); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(jsonOut.String(), "git clean") {
-		t.Errorf("the warning leaked into --json output:\n%s", jsonOut.String())
+	if againErr.Len() != 0 {
+		t.Errorf("a rerun repeated the warning:\n%s", againErr.String())
+	}
+}
+
+// The recovery the refusals promise: init --local on a .hew that lost its
+// config restores it, keeps the issues, and selection works again.
+func TestInitLocalRecoversATrackerThatLostItsConfig(t *testing.T) {
+	main, _ := gitRepoWithWorktree(t)
+	tracker := filepath.Join(main, local.DirName)
+	app, _, _ := newApp(newFake())
+	if err := app.InitLocal(main); err != nil {
+		t.Fatal(err)
+	}
+	store, err := local.Open(tracker, "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.CreateIssue(ctx, "survivor", "", []string{"P2", "task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Remove(filepath.Join(tracker, "config.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := local.Locate(main); err == nil {
+		t.Fatal("Locate accepted a tracker without a config")
+	}
+	recover, _, _ := newApp(newFake())
+	if err := recover.InitLocal(main); err != nil {
+		t.Fatalf("init --local on a tracker without a config: %v", err)
+	}
+	if _, ok, err := local.Locate(main); err != nil || !ok {
+		t.Fatalf("Locate after recovery = %v, %v; want the local tracker", ok, err)
+	}
+	reopened, err := local.Open(tracker, "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := reopened.GetIssue(ctx, created.Number); err != nil || got.Title != "survivor" {
+		t.Errorf("issue after recovery = %+v, %v; want the survivor", got, err)
 	}
 }
 

@@ -892,21 +892,27 @@ func (a *App) InitLocal(dir string) error {
 	}
 	// Read before writing: a repo that has moved to another backend must be
 	// refused without touching its archived tracker.
+	fresh := false
 	switch cfg, err := local.ReadConfig(tracker); {
 	case err == nil && cfg.Backend != local.BackendLocal:
 		return genericErr("%s already tracks issues in %q, not locally", tracker, cfg.Backend)
-	case err != nil && !errors.Is(err, fs.ErrNotExist):
+	case errors.Is(err, fs.ErrNotExist):
+		fresh = true
+	case err != nil:
 		return genericErr("%v", err)
 	}
 	if err := local.Init(tracker); err != nil {
 		return genericErr("creating %s: %v", tracker, err)
 	}
-	return a.emitResult(initResult{Backend: local.BackendLocal, Path: tracker, CreatedLabels: []string{}}, func() {
-		a.printf("local tracker ready in %s\n", tracker)
+	if fresh {
 		// Nothing outside .hew records that this repo is local, so a deleted
 		// .hew (git clean -fdx) is indistinguishable from a repo that never
-		// opted in, and hew then targets the git remote's GitHub issues.
-		a.printf("Warning: .hew is untracked and is the only marker that this repo is local. If it is deleted (for example by `git clean -fdx` at the main checkout), hew targets the git remote's GitHub issues instead of failing.\n")
+		// opted in, and hew then targets the git remote's GitHub issues. Said
+		// once, when the tracker is created, and on stderr so --json callers see it.
+		a.warnf("%s is untracked and is the only marker that this repo is local; if it is deleted (for example by `git clean -fdx` at the main checkout), hew falls back to the git remote's GitHub issues, if there is one", tracker)
+	}
+	return a.emitResult(initResult{Backend: local.BackendLocal, Path: tracker, CreatedLabels: []string{}}, func() {
+		a.printf("local tracker ready in %s\n", tracker)
 		a.printClaudeSnippet(conventions.ClaudeSnippetLocal)
 	})
 }
