@@ -149,24 +149,30 @@ func Init(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	for name, content := range map[string]func() ([]byte, error){
-		ignoreFile: func() ([]byte, error) { return []byte("*\n"), nil },
-		configFile: func() ([]byte, error) {
+	// A fixed order, config last: config.json is what selects the local backend,
+	// so a concurrent Locate that sees issues.jsonl without it reads a tracker
+	// still being created as one that lost its config.
+	for _, f := range []struct {
+		name    string
+		content func() ([]byte, error)
+	}{
+		{ignoreFile, func() ([]byte, error) { return []byte("*\n"), nil }},
+		{issuesFile, func() ([]byte, error) { return (&data{}).encode() }},
+		{configFile, func() ([]byte, error) {
 			id, err := newID()
 			if err != nil {
 				return nil, err
 			}
 			return marshalLine(Config{Backend: BackendLocal, Version: formatVersion, ID: id})
-		},
-		issuesFile: func() ([]byte, error) { return (&data{}).encode() },
+		}},
 	} {
-		path := filepath.Join(dir, name)
+		path := filepath.Join(dir, f.name)
 		if _, err := os.Stat(path); err == nil {
 			continue
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
-		raw, err := content()
+		raw, err := f.content()
 		if err != nil {
 			return err
 		}

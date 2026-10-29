@@ -118,7 +118,13 @@ hew close 1 --completed --reason "..."   # finishing work: there is no `hew pr`
 - **One tracker per repository.** It lives in `.hew/` at the *main* checkout, so
   every linked worktree shares it. `.hew/` ignores itself, so it never shows in
   `git status` — and it is untracked, so `git clean -fdx` at the main checkout
-  deletes the only copy of your issues. Back it up if it matters.
+  deletes the only copy of your issues. Back it up if it matters. Nothing
+  outside `.hew/` records that the repo is local, so once it is deleted hew can no
+  longer tell, and falls back to the git remote's GitHub issues — write commands
+  then act on the real repository. (A `.hew/` that survives with an
+  `issues.jsonl` but has lost its `config.json`, or names an unknown `backend`, is
+  refused with the file named instead; `hew init --local` restores the config and
+  keeps the issues.)
 - **Parallel agents are safe.** Writes are serialized under a lock and replaced
   atomically, and `start` has exactly one winner. Agents are told apart per
   worktree; set `HEW_USER` to a unique value per agent when sessions share one
