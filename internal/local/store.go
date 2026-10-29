@@ -197,9 +197,11 @@ type Store struct {
 
 	// notice receives the one-line report that a migration is holding the lock;
 	// nil means stderr. noticeAfter is how long a writer waits before looking
-	// for one; zero means defaultNoticeAfter.
-	notice      io.Writer
-	noticeAfter time.Duration
+	// for one; zero means defaultNoticeAfter. noticeRecheck is how often a
+	// waiter that found none looks again; zero means defaultNoticeRecheck.
+	notice        io.Writer
+	noticeAfter   time.Duration
+	noticeRecheck time.Duration
 }
 
 var (
@@ -273,8 +275,8 @@ const (
 	// a writer that is still waiting this long is behind something slower.
 	defaultNoticeAfter = 500 * time.Millisecond
 
-	// markerRecheck is how often a waiter that found no migration looks again.
-	markerRecheck = time.Second
+	// defaultNoticeRecheck is how often a waiter that found no migration looks again.
+	defaultNoticeRecheck = time.Second
 )
 
 // lock takes the exclusive lock on the store, waiting until it is free, ctx is
@@ -301,6 +303,10 @@ func (s *Store) lock(ctx context.Context) (unlock func(), err error) {
 	if noticeAfter <= 0 {
 		noticeAfter = defaultNoticeAfter
 	}
+	noticeRecheck := s.noticeRecheck
+	if noticeRecheck <= 0 {
+		noticeRecheck = defaultNoticeRecheck
+	}
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	waitStart := time.Now()
@@ -326,7 +332,7 @@ func (s *Store) lock(ctx context.Context) (unlock func(), err error) {
 			removeMigrationMarker(s.dir)
 			return func() { _ = f.Close() }, nil
 		}
-		if !noticed && time.Since(waitStart) >= noticeAfter && time.Since(lastCheck) >= markerRecheck {
+		if !noticed && time.Since(waitStart) >= noticeAfter && time.Since(lastCheck) >= noticeRecheck {
 			lastCheck = time.Now()
 			if m, ok := readMigrationMarker(s.dir); ok {
 				noticed = true

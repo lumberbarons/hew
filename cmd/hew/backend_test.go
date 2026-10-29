@@ -188,6 +188,70 @@ func TestMigratedTrackerFallsBackToGitHub(t *testing.T) {
 	}
 }
 
+// migrate local reads the tracker at the main checkout but always writes to
+// GitHub, whatever the checkout's config says. A checkpoint bound to another
+// repository is refused before GitHub is touched, and the refusal names the
+// repository the command resolved and the state file it found, which shows both
+// the target (--repo, not the local store) and the tracker directory (the main
+// checkout's .hew, not the worktree's).
+func TestMigrateLocalTargetsGitHubFromTheMainCheckoutsTracker(t *testing.T) {
+	main, wt := localRepo(t)
+	t.Chdir(wt)
+	t.Setenv("GH_TOKEN", "test-token")
+	state := filepath.Join(main, local.DirName, "migration-state.json")
+	foreign := `{"version":1,"repo":"someone/else","digest":"sha256:x","mapping":{"1":7}}`
+	if err := os.WriteFile(state, []byte(foreign), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, args := range map[string][]string{
+		"before subcommand": {"--repo", "octo/hello", "migrate", "local", "--dry-run"},
+		"after subcommand":  {"migrate", "local", "--dry-run", "--repo", "octo/hello"},
+		// Without --repo a local tracker would select the local store for any
+		// other command; migrate local must still resolve GitHub's repository.
+		"repository from the environment": {"migrate", "local", "--dry-run"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("GH_REPO", "octo/hello")
+			_, err := capture(t, args...)
+			if err == nil {
+				t.Fatal("a checkpoint for another repository was accepted")
+			}
+			for _, want := range []string{state, `belongs to repository "someone/else"`, `not "octo/hello"`} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err = %v, want it to mention %q", err, want)
+				}
+			}
+		})
+	}
+	if _, err := os.Stat(filepath.Join(wt, local.DirName)); !os.IsNotExist(err) {
+		t.Errorf("a tracker appeared inside the worktree: %v", err)
+	}
+}
+
+// --state redirects the checkpoint, and --dry-run reaches the migration: a
+// dry run against an empty checkpoint prints its plan and changes nothing.
+func TestMigrateLocalDryRunHonoursStateAndLeavesTheTrackerLocal(t *testing.T) {
+	main, wt := localRepo(t)
+	t.Chdir(wt)
+	t.Setenv("GH_TOKEN", "test-token")
+	state := filepath.Join(t.TempDir(), "elsewhere.json")
+
+	out, err := capture(t, "migrate", "local", "--dry-run", "--state", state, "--repo", "octo/hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "create: 1 as P1 task") || !strings.Contains(out, "dry run: 1 local issues would be migrated") {
+		t.Errorf("plan = %q", out)
+	}
+	if cfg, err := local.ReadConfig(filepath.Join(main, local.DirName)); err != nil || cfg.Backend != local.BackendLocal {
+		t.Errorf("config = %+v, %v; a dry run must leave the tracker local", cfg, err)
+	}
+	if _, err := os.Stat(state); !os.IsNotExist(err) {
+		t.Errorf("a dry run wrote the checkpoint: %v", err)
+	}
+}
+
 func TestInitLocalFromALinkedWorktree(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")

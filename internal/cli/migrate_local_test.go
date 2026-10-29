@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/local"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 // localTracker makes a local tracker in a temp dir and opens it as "dev".
@@ -235,6 +237,90 @@ func TestMigrateLocalSealsTheTrackerAsAnArchive(t *testing.T) {
 	}
 	if len(f2.calls) != 0 {
 		t.Errorf("rerun called GitHub: %v", f2.calls)
+	}
+}
+
+// probingClient runs onCreate just before the first issue is created on GitHub,
+// a moment squarely inside the migration.
+type probingClient struct {
+	*fakeClient
+	onCreate func()
+}
+
+func (p *probingClient) CreateIssue(ctx context.Context, title, body string, labels []string) (model.Issue, error) {
+	if p.onCreate != nil {
+		probe := p.onCreate
+		p.onCreate = nil
+		probe()
+	}
+	return p.fakeClient.CreateIssue(ctx, title, body, labels)
+}
+
+// The tracker is held for the whole run, so a local write made while issues are
+// being copied cannot land after the snapshot and be lost from GitHub.
+func TestMigrateLocalHoldsTheTrackerWhileIssuesAreCopied(t *testing.T) {
+	s, dir := localTracker(t)
+	n := mustCreateLocal(t, s, "A", "", "P2", "task")
+
+	f, app, opts := migrateLocalSetup(dir)
+	probe := &probingClient{fakeClient: f}
+	app.Client = probe
+	var writeErr error
+	probe.onCreate = func() {
+		wctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
+		writeErr = s.Comment(wctx, n, "slipped in mid-migration")
+	}
+	if err := app.MigrateLocal(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+
+	if !errors.Is(writeErr, context.DeadlineExceeded) {
+		t.Errorf("mid-migration write err = %v, want it stuck behind the migration's lock", writeErr)
+	}
+	archive, err := os.ReadFile(filepath.Join(dir, "issues.jsonl"))
+	mustLocal(t, err)
+	if strings.Contains(string(archive), "slipped in mid-migration") {
+		t.Error("a write made during the migration reached the archive")
+	}
+}
+
+// Everything is on GitHub but the switch-over fails: the tracker must stay
+// local, say to rerun, and the rerun must finish without copying anything twice.
+func TestMigrateLocalSealFailureStaysLocalAndRerunFinishes(t *testing.T) {
+	s, dir := localTracker(t)
+	n := mustCreateLocal(t, s, "A", "", "P2", "task")
+	mustLocal(t, s.Comment(ctx, n, "a note"))
+	// A directory where migrated.json belongs makes the seal's write fail.
+	blocker := filepath.Join(dir, local.MigratedFile)
+	mustLocal(t, os.Mkdir(blocker, 0o755))
+
+	f, app, opts := migrateLocalSetup(dir)
+	err := app.MigrateLocal(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "could not be switched over") || !strings.Contains(err.Error(), "rerun") {
+		t.Fatalf("err = %v, want the switch-over failure with the instruction to rerun", err)
+	}
+	if cfg, _ := local.ReadConfig(dir); cfg.Backend != local.BackendLocal {
+		t.Fatalf("backend = %q after a failed seal, want local", cfg.Backend)
+	}
+
+	mustLocal(t, os.Remove(blocker))
+	if err := app.MigrateLocal(ctx, opts); err != nil {
+		t.Fatalf("rerun: %v", err)
+	}
+	if f.callCounts["CreateIssue"] != 1 || len(f.issues) != 1 {
+		t.Errorf("CreateIssue called %d times, %d issues on GitHub; want the rerun to create nothing more", f.callCounts["CreateIssue"], len(f.issues))
+	}
+	if got := f.comments[101]; len(got) != 1 {
+		t.Errorf("comments = %q, want the note copied exactly once", got)
+	}
+	m, err := local.ReadMigrated(dir)
+	mustLocal(t, err)
+	if m.Mapping[n] != 101 {
+		t.Errorf("mapping = %v, want %d → 101", m.Mapping, n)
+	}
+	if cfg, _ := local.ReadConfig(dir); cfg.Backend != local.BackendGitHub {
+		t.Errorf("backend = %q after the rerun, want github", cfg.Backend)
 	}
 }
 
