@@ -35,7 +35,8 @@ func (p Priority) String() string {
 	return "P?"
 }
 
-// ParsePriority parses "P0".."P4" (exact match, as used in labels and flags).
+// ParsePriority parses a flag value, "P0".."P4", exactly. It is not the label
+// matcher: label names are case-insensitive, so labels go through LabelPriority.
 func ParsePriority(s string) (Priority, bool) {
 	for i, name := range priorityNames {
 		if s == name {
@@ -61,7 +62,8 @@ func LabelPriority(label string) (Priority, bool) {
 // issue carries more than one, the first of these wins.
 var Types = []string{"bug", "enhancement", "task"}
 
-// IsType reports whether the label name is one of the type labels.
+// IsType reports whether a flag value is exactly one of the type names. Label
+// names go through LabelType, which ignores case.
 func IsType(label string) bool {
 	return slices.Contains(Types, label)
 }
@@ -187,13 +189,11 @@ func (i Issue) Priority() (p Priority, multi bool) {
 // true.
 func (i Issue) Type() (typ string, multi bool) {
 	n := 0
-	for _, t := range Types {
-		for _, l := range i.Labels {
-			if strings.EqualFold(l, t) {
-				n++
-				if typ == "" {
-					typ = t
-				}
+	for _, l := range i.Labels {
+		if t, ok := LabelType(l); ok {
+			n++
+			if typ == "" || slices.Index(Types, t) < slices.Index(Types, typ) {
+				typ = t
 			}
 		}
 	}

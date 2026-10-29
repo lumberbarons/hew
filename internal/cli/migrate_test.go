@@ -1057,3 +1057,12 @@ func TestEnsureLabelsTreatsNamesAsCaseInsensitive(t *testing.T) {
 		}
 	}
 }
+
+// Bead labels that differ from a convention label only in case are derived, not
+// copied, exactly like the exact-case ones.
+func TestAreaLabelsSkipConventionLabelsInAnyCase(t *testing.T) {
+	got := areaLabels([]string{"Bug", "p1", "IN-Progress", "web-ui"})
+	if !slices.Equal(got, []string{"web-ui"}) {
+		t.Errorf("areaLabels = %v, want only web-ui", got)
+	}
+}

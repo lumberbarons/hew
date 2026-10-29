@@ -794,9 +794,13 @@ func (a *App) releaseClaim(ctx context.Context, issue model.Issue) (string, erro
 	if !issue.Claimed() {
 		return "", nil
 	}
-	if issue.InProgress() {
-		if err := a.Client.RemoveLabel(ctx, issue.Number, model.InProgressLabel); err != nil {
-			return "", err
+	// Remove each in-progress label by the spelling the issue carries, so the
+	// removal does not depend on the backend resolving case.
+	for _, l := range issue.Labels {
+		if model.IsInProgressLabel(l) {
+			if err := a.Client.RemoveLabel(ctx, issue.Number, l); err != nil {
+				return "", err
+			}
 		}
 	}
 	if len(issue.Assignees) == 0 {

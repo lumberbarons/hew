@@ -900,6 +900,15 @@ func TestLocalLabelsSkipsConventionLabelsAndRepeats(t *testing.T) {
 	}
 }
 
+func TestLocalItemsDropAStrayCaseClaimFromClosedIssues(t *testing.T) {
+	snap := &local.Snapshot{Issues: []local.Issue{
+		{Number: 1, State: "CLOSED", Labels: []string{"In-Progress", "P2"}},
+	}}
+	if got := localItems(snap)[0].Labels; slices.ContainsFunc(got, model.IsInProgressLabel) {
+		t.Errorf("closed item labels = %v, want no claim label in any case", got)
+	}
+}
+
 func TestLocalItemsDropTheClaimFromClosedIssues(t *testing.T) {
 	snap := &local.Snapshot{Issues: []local.Issue{
 		{Number: 1, State: "CLOSED", StateReason: "REOPENED", Labels: []string{"in-progress", "P2"}, Assignees: []string{"dev-wt"}},
