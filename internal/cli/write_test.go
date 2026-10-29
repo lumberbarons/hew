@@ -1170,8 +1170,6 @@ func TestReopenReleasesStaleClaim(t *testing.T) {
 	}
 }
 
-// The in-progress label alone is a claim too — start sets both, but the
-// label can outlive the assignee — and the output names what was released.
 // A stray-case label is a claim, and the release removes it by the spelling the
 // issue carries rather than leaning on the backend to resolve case.
 func TestReopenReleasesStrayCaseClaimLabelByItsOwnName(t *testing.T) {
@@ -1190,6 +1188,8 @@ func TestReopenReleasesStrayCaseClaimLabelByItsOwnName(t *testing.T) {
 	}
 }
 
+// The in-progress label alone is a claim too — start sets both, but the
+// label can outlive the assignee — and the output names what was released.
 func TestReopenReleasesLabelOnlyClaim(t *testing.T) {
 	closed := issue(1, "Work", "P2", "bug", model.InProgressLabel)
 	closed.State = "CLOSED"
