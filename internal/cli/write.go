@@ -60,17 +60,25 @@ func (a *App) Create(ctx context.Context, opts CreateOpts) error {
 
 	// Every reference is resolved before the editor opens or the issue is
 	// created, so a typo leaves nothing behind. A closed issue is still a
-	// valid reference: discovery follows a close, and a closed blocker or
-	// parent is a real issue. A reference can still vanish between this read
-	// and the mutation — GitHub has no transaction spanning them — so the
-	// write paths keep naming the created issue on that residual failure.
+	// valid --discovered-from or --parent reference: discovery follows a close.
+	// A closed blocker is refused, as it is by block: it blocks nothing. A
+	// reference can still vanish between this read and the mutation — GitHub
+	// has no transaction spanning them — so the write paths keep naming the
+	// created issue on that residual failure.
 	if opts.DiscoveredFrom > 0 {
 		if _, err := a.requireIssues(ctx, "--discovered-from", []int{opts.DiscoveredFrom}); err != nil {
 			return err
 		}
 	}
-	if _, err := a.requireIssues(ctx, "--blocked-by", opts.BlockedBy); err != nil {
+	blockedBy := uniqueInts(opts.BlockedBy)
+	blockers, err := a.requireIssues(ctx, "--blocked-by", blockedBy)
+	if err != nil {
 		return err
+	}
+	for _, blocker := range blockers {
+		if !blocker.IsOpen() {
+			return genericErr("--blocked-by: #%d is closed%s; closed blockers don't block", blocker.Number, closeState(blocker))
+		}
 	}
 	if opts.Parent > 0 {
 		if _, err := a.requireIssues(ctx, "--parent", []int{opts.Parent}); err != nil {
@@ -94,7 +102,7 @@ func (a *App) Create(ctx context.Context, opts CreateOpts) error {
 	}
 	// A brand-new issue has no dependents, so --blocked-by can't create a
 	// cycle; no transitive check needed on this path.
-	for _, blocker := range opts.BlockedBy {
+	for _, blocker := range blockedBy {
 		if err := a.Client.AddBlockedBy(ctx, created.Number, blocker); err != nil {
 			return fmt.Errorf("created #%d but --blocked-by %d failed: %w", created.Number, blocker, err)
 		}
@@ -639,6 +647,22 @@ func (a *App) requireIssues(ctx context.Context, flag string, numbers []int) ([]
 	return issues, nil
 }
 
+// uniqueInts drops repeated numbers, keeping first-seen order, so a reference
+// flag that names an issue twice neither fetches it twice nor attaches it
+// twice — a second attach of the same edge is the failure GitHub may reject
+// after the issue is already filed.
+func uniqueInts(numbers []int) []int {
+	seen := make(map[int]bool, len(numbers))
+	out := make([]int, 0, len(numbers))
+	for _, n := range numbers {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // mentionsIssue reports whether text already names #number as a reference of
 // this repository: not a longer number that merely starts with it, and not
 // the tail of another repository's owner/repo#number.
@@ -836,13 +860,14 @@ func (a *App) EpicCreate(ctx context.Context, opts EpicCreateOpts) error {
 	// AddSubIssue refuses it, so catching it here is what keeps the epic from
 	// being filed first. A child that disappears before the attach keeps the
 	// partial-failure message below, which names the epic already filed.
-	children, err := a.requireIssues(ctx, "--children", opts.Children)
+	childNumbers := uniqueInts(opts.Children)
+	children, err := a.requireIssues(ctx, "--children", childNumbers)
 	if err != nil {
 		return err
 	}
 	for _, child := range children {
 		if child.Parent != nil {
-			return genericErr("--children: #%d already has a parent (#%d); detach it first", child.Number, child.Parent.Number)
+			return genericErr("--children: #%d already has a parent (#%d); detach it first with `hew set %d --no-parent`", child.Number, child.Parent.Number, child.Number)
 		}
 	}
 	body, err := a.composeBody(bodySource{
@@ -855,12 +880,12 @@ func (a *App) EpicCreate(ctx context.Context, opts EpicCreateOpts) error {
 	if err != nil {
 		return err
 	}
-	for _, child := range opts.Children {
+	for _, child := range childNumbers {
 		if err := a.Client.AddSubIssue(ctx, created.Number, child, false); err != nil {
 			return fmt.Errorf("created epic #%d but attaching #%d failed: %w", created.Number, child, err)
 		}
 	}
-	return a.reportMutation(ctx, created.Number, "created epic #%d: %s (%d children)\n", created.Number, title, len(opts.Children))
+	return a.reportMutation(ctx, created.Number, "created epic #%d: %s (%d children)\n", created.Number, title, len(childNumbers))
 }
 
 // initResult is what `init` reports under --json, on either backend: the

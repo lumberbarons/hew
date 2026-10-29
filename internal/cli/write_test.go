@@ -1591,7 +1591,7 @@ func TestEpicCreateRefusesAChildWithAParent(t *testing.T) {
 		if got := ExitCode(err); got != ExitGeneric {
 			t.Errorf("exit code = %d, want %d", got, ExitGeneric)
 		}
-		for _, want := range []string{fmt.Sprintf("#%d", child.Number), fmt.Sprintf("#%d", parent.Number)} {
+		for _, want := range []string{fmt.Sprintf("#%d", child.Number), fmt.Sprintf("#%d", parent.Number), fmt.Sprintf("hew set %d --no-parent", child.Number)} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("err = %v, want it to name %s", err, want)
 			}
@@ -1657,6 +1657,70 @@ func TestEpicCreateChildFailureAfterTheCheckNamesTheCreatedEpic(t *testing.T) {
 
 // assertNoIssues is the "created nothing" half of a refused create: the
 // backend must hold no issue at all, open or closed.
+// TestCreateRefusesAClosedBlocker: block refuses a closed blocker because it
+// blocks nothing, and create --blocked-by writes the same edge, so it follows
+// the same rule instead of attaching a dead edge.
+func TestCreateRefusesAClosedBlocker(t *testing.T) {
+	closed := issue(2, "Done", "P2", "bug")
+	closed.State = "CLOSED"
+	f := newFake(closed)
+	app, _, _ := newApp(f)
+	err := app.Create(ctx, CreateOpts{Title: "T", Type: "bug", BlockedBy: []int{2}})
+	if err == nil || !strings.Contains(err.Error(), "closed blockers don't block") {
+		t.Fatalf("err = %v, want a closed-blocker refusal", err)
+	}
+	if got := ExitCode(err); got != ExitGeneric {
+		t.Errorf("exit code = %d, want %d", got, ExitGeneric)
+	}
+	if f.callCounts["CreateIssue"] != 0 {
+		t.Error("refused create still filed an issue")
+	}
+}
+
+// TestCreateAcceptsAClosedParent: only a blocker has to be open; a closed
+// parent or discovered-from issue is still a real issue to reference.
+func TestCreateAcceptsAClosedParent(t *testing.T) {
+	closed := issue(2, "Done", "P2", "bug")
+	closed.State = "CLOSED"
+	f := newFake(closed)
+	app, _, _ := newApp(f)
+	if err := app.Create(ctx, CreateOpts{Title: "T", Type: "bug", Parent: 2, DiscoveredFrom: 2}); err != nil {
+		t.Fatalf("create with a closed parent and discovered-from: %v", err)
+	}
+}
+
+// TestCreateDeduplicatesBlockers: a repeated number is fetched and attached
+// once, not twice.
+func TestCreateDeduplicatesBlockers(t *testing.T) {
+	f := newFake(issue(2, "Blocker", "P2", "bug"))
+	app, _, _ := newApp(f)
+	if err := app.Create(ctx, CreateOpts{Title: "T", Type: "bug", BlockedBy: []int{2, 2}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.callCounts["AddBlockedBy"]; got != 1 {
+		t.Errorf("AddBlockedBy called %d times, want 1", got)
+	}
+	if got := f.callCounts["GetIssue"]; got != 1 {
+		t.Errorf("GetIssue called %d times, want 1", got)
+	}
+}
+
+// TestEpicCreateDeduplicatesChildren: --children 5,5 attaches the child once
+// and reports one child.
+func TestEpicCreateDeduplicatesChildren(t *testing.T) {
+	f := newFake(issue(5, "Child", "P2", "task"))
+	app, out, _ := newApp(f)
+	if err := app.EpicCreate(ctx, EpicCreateOpts{Title: "Big", Children: []int{5, 5}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.callCounts["AddSubIssue"]; got != 1 {
+		t.Errorf("AddSubIssue called %d times, want 1", got)
+	}
+	if !strings.Contains(out.String(), "(1 children)") {
+		t.Errorf("out = %q, want one child reported", out.String())
+	}
+}
+
 func assertNoIssues(t *testing.T, store gh.IssueStore) {
 	t.Helper()
 	all, err := store.ListIssues(ctx, []gh.IssueState{gh.StateOpen, gh.StateClosed})
