@@ -160,6 +160,30 @@ func TestMigrateLocalCarriesLabelsEdgesAndClaims(t *testing.T) {
 	}
 }
 
+// A local tracker predating the comma rule may hold an area like "x,y"; it
+// migrates as "x-y" so it cannot read as two areas on GitHub.
+func TestMigrateLocalRenamesCommaLabels(t *testing.T) {
+	s, dir := localTracker(t)
+	mustCreateLocal(t, s, "Work", "", "P2", "task", "front,back")
+
+	f := newFake()
+	app, _, errOut := newApp(f)
+	if err := app.MigrateLocal(ctx, MigrateLocalOpts{Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.byNumber(101).Labels; !slices.Contains(got, "front-back") || slices.Contains(got, "front,back") {
+		t.Errorf("labels = %v, want front-back", got)
+	}
+	for _, l := range f.labels {
+		if strings.Contains(l.Name, ",") {
+			t.Errorf("label %q with a comma was created", l.Name)
+		}
+	}
+	if !strings.Contains(errOut.String(), `"front,back"`) {
+		t.Errorf("no rename warning: %q", errOut.String())
+	}
+}
+
 func TestMigrateLocalRewritesReferencesOutsideCodeSpans(t *testing.T) {
 	s, dir := localTracker(t)
 	a := mustCreateLocal(t, s, "A", "Blocked on #2 and `#2` and #99.\n\n```\n#2 in a fence\n```\n", "P2", "task")

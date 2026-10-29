@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lumberbarons/hew/internal/model"
 )
@@ -99,14 +100,43 @@ func TestListLongAreaDoesNotWidenOtherRows(t *testing.T) {
 	List(&buf, issues, Style{})
 	checkGolden(t, "list_long_area", buf.Bytes())
 
-	// "#1 " plus the capped column and its two-space gutter.
-	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
-		if strings.Contains(line, "Short") || strings.Contains(line, "Plain") {
-			if idx := strings.Index(line, "  "); idx < 0 || len(line) > len("#1 ")+maxMetaWidth+2+len("Short") {
-				t.Errorf("row padded past the cap: %q", line)
-			}
+	// The rows under the cap align to the widest of them, "P2 bug (cli)": the
+	// number, a space, that column, and the two-space gutter.
+	want := len("#1 ") + len("P2 bug (cli)") + 2
+	for _, title := range []string{"Short", "Plain"} {
+		if got := titleColumn(buf.String(), title); got != want {
+			t.Errorf("%s title starts at column %d, want %d (cap not applied?)\n%s", title, got, want, buf.String())
 		}
 	}
+}
+
+// The cap and the padding both count characters, not bytes: a CJK area that is
+// short on screen but long in UTF-8 must neither trip the cap nor misalign the
+// other rows.
+func TestListAreaWidthCountsCharacters(t *testing.T) {
+	area := strings.Repeat("界", 14) // 14 characters, 42 bytes
+	issues := []model.Issue{
+		{Number: 1, Title: "Wide", State: "OPEN", Labels: []string{"P2", "bug", area}},
+		{Number: 2, Title: "Plain", State: "OPEN", Labels: []string{"P2", "task"}},
+	}
+	var buf bytes.Buffer
+	List(&buf, issues, Style{})
+	want := len("#1 ") + utf8.RuneCountInString("P2 bug ("+area+")") + 2
+	for _, title := range []string{"Wide", "Plain"} {
+		if got := titleColumn(buf.String(), title); got != want {
+			t.Errorf("%s title starts at column %d, want %d\n%s", title, got, want, buf.String())
+		}
+	}
+}
+
+// titleColumn is the character offset at which a row's title starts.
+func titleColumn(out, title string) int {
+	for _, line := range strings.Split(out, "\n") {
+		if idx := strings.Index(line, "  "+title); idx >= 0 {
+			return utf8.RuneCountInString(line[:idx]) + 2
+		}
+	}
+	return -1
 }
 
 func TestListWithAssignees(t *testing.T) {
