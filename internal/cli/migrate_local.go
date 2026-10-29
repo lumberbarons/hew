@@ -313,7 +313,8 @@ func planEntry(it migrationItem) migrationPlanEntry {
 var blankLine = regexp.MustCompile(`\r?\n[ \t]*\r?\n`)
 
 // rewriteLocalRefs replaces each #n that names a key of mapping with #mapping[n],
-// leaving code alone: inline code spans, fenced blocks, and anything that only
+// leaving code alone: inline code spans, fenced blocks (including ones nested in
+// a list item or blockquote), indented code blocks, and anything that only
 // looks like a reference — part of a word, a URL fragment, an HTML entity, a
 // number the mapping does not know. A local issue's #n means nothing on GitHub,
 // where the numbers are new.
@@ -323,29 +324,200 @@ func rewriteLocalRefs(text string, mapping map[int]int) string {
 		out.WriteString(rewriteInline(chunk.String(), mapping))
 		chunk.Reset()
 	}
-	fence := "" // the opening fence while inside a fenced block
+	var (
+		stack []container
+		fence string // the opening fence while inside a fenced block
+		para  bool   // the previous line was paragraph text, which an indented line continues
+	)
 	for rest := text; rest != ""; {
 		line := rest
 		if i := strings.IndexByte(rest, '\n'); i >= 0 {
 			line = rest[:i+1]
 		}
 		rest = rest[len(line):]
-		switch {
-		case fence != "":
+
+		body, matched := continueContainers(line, stack)
+		if matched < len(stack) {
+			// A container the line does not continue has ended, and takes
+			// any fence opened inside it along.
+			stack, fence = stack[:matched], ""
+		}
+		if fence != "" {
 			out.WriteString(line)
-			if closesFence(line, fence) {
-				fence = ""
+			if closesFence(body, fence) {
+				fence, para = "", false
 			}
-		case opensFence(line) != "":
+			continue
+		}
+		for !isThematicBreak(body) {
+			c, after, ok := containerStart(body)
+			if !ok {
+				break
+			}
+			stack, body, para = append(stack, c), after, false
+		}
+		opened, blank := opensFence(body), strings.TrimSpace(body) == ""
+		switch {
+		case opened != "":
 			flush()
-			fence = opensFence(line)
+			fence, para = opened, false
+			out.WriteString(line)
+		case !para && !blank && indentColumns(body) >= 4:
+			flush()
 			out.WriteString(line)
 		default:
 			chunk.WriteString(line)
+			para = !blank && !endsParagraph(body)
 		}
 	}
 	flush()
 	return out.String()
+}
+
+// container is an open blockquote or list item. A list item's indent is how far
+// its continuation lines must be indented to belong to it.
+type container struct {
+	quote  bool
+	indent int
+}
+
+// continueContainers strips from line the markers and indentation of the
+// containers in stack, outermost first, and returns the rest along with how
+// many of them the line continues. A blank line continues a list item but ends
+// a blockquote.
+func continueContainers(line string, stack []container) (body string, matched int) {
+	body = line
+	for _, c := range stack {
+		switch {
+		case c.quote:
+			trimmed := strings.TrimLeft(body, " ")
+			if len(body)-len(trimmed) > 3 || !strings.HasPrefix(trimmed, ">") {
+				return body, matched
+			}
+			body = strings.TrimPrefix(trimmed[1:], " ")
+		case strings.TrimSpace(body) == "":
+		case indentColumns(body) >= c.indent:
+			body = dropColumns(body, c.indent)
+		default:
+			return body, matched
+		}
+		matched++
+	}
+	return body, matched
+}
+
+// containerStart reads a blockquote or list-item marker at the start of s, after
+// up to three spaces of indentation, and returns the container it opens and what
+// follows the marker. Five or more spaces after a list marker are one space of
+// separation and an indented code block.
+func containerStart(s string) (c container, after string, ok bool) {
+	trimmed := strings.TrimLeft(s, " ")
+	lead := len(s) - len(trimmed)
+	if lead > 3 || trimmed == "" {
+		return container{}, "", false
+	}
+	if trimmed[0] == '>' {
+		return container{quote: true}, strings.TrimPrefix(trimmed[1:], " "), true
+	}
+	marker := 1
+	if !strings.ContainsRune("-*+", rune(trimmed[0])) {
+		marker = len(trimmed) - len(strings.TrimLeft(trimmed, "0123456789"))
+		if marker < 1 || marker > 9 || marker >= len(trimmed) || (trimmed[marker] != '.' && trimmed[marker] != ')') {
+			return container{}, "", false
+		}
+		marker++
+	}
+	tail := trimmed[marker:]
+	if tail != "" && !strings.ContainsRune(" \t\r\n", rune(tail[0])) {
+		return container{}, "", false
+	}
+	gap := markerGap(tail, lead+marker)
+	if gap > 4 || strings.TrimSpace(tail) == "" {
+		gap = min(gap, 1)
+	}
+	return container{indent: lead + marker + max(gap, 1)}, dropColumns(tail, gap), true
+}
+
+// endsParagraph reports whether body is a line that is not paragraph text and
+// so leaves an indented line after it as code: an ATX heading, a thematic
+// break, or a setext underline.
+func endsParagraph(body string) bool {
+	trimmed := strings.TrimSpace(body)
+	return isHeading(body) || isThematicBreak(body) || (trimmed != "" && strings.Trim(trimmed, "=") == "")
+}
+
+// isThematicBreak reports whether body is three or more -, * or _ alone on the
+// line, spaces allowed between them. It takes precedence over a list marker.
+func isThematicBreak(body string) bool {
+	trimmed := strings.TrimLeft(body, " ")
+	if len(body)-len(trimmed) > 3 || trimmed == "" || !strings.ContainsRune("-*_", rune(trimmed[0])) {
+		return false
+	}
+	count := 0
+	for _, r := range trimmed {
+		switch {
+		case r == rune(trimmed[0]):
+			count++
+		case !strings.ContainsRune(" \t\r\n", r):
+			return false
+		}
+	}
+	return count >= 3
+}
+
+// markerGap is how many columns of whitespace start tail, which begins at
+// column col; a tab reaches the next multiple of four.
+func markerGap(tail string, col int) int {
+	gap := 0
+	for _, r := range tail {
+		switch r {
+		case ' ':
+			gap++
+		case '\t':
+			gap += 4 - (col+gap)%4
+		default:
+			return gap
+		}
+	}
+	return gap
+}
+
+// isHeading reports whether body is an ATX heading, which ends a paragraph.
+func isHeading(body string) bool {
+	trimmed := strings.TrimLeft(body, " ")
+	hashes := len(trimmed) - len(strings.TrimLeft(trimmed, "#"))
+	if hashes < 1 || hashes > 6 {
+		return false
+	}
+	return hashes == len(trimmed) || strings.ContainsRune(" \t\r\n", rune(trimmed[hashes]))
+}
+
+// indentColumns is the width of s's leading whitespace, a tab counting as four.
+func indentColumns(s string) int {
+	cols := 0
+	for _, r := range s {
+		switch r {
+		case ' ':
+			cols++
+		case '\t':
+			cols += 4
+		default:
+			return cols
+		}
+	}
+	return cols
+}
+
+// dropColumns removes n columns of leading whitespace from s, a tab counting as
+// four; a tab straddling the boundary goes whole.
+func dropColumns(s string, n int) string {
+	for cols := 0; cols < n && s != "" && (s[0] == ' ' || s[0] == '\t'); s = s[1:] {
+		if s[0] == '\t' {
+			cols += 3
+		}
+		cols++
+	}
+	return s
 }
 
 // opensFence returns the fence a line opens (its whole run of ` or ~), or "".
