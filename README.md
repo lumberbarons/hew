@@ -137,8 +137,10 @@ hew close 1 --completed --reason "..."   # finishing work: there is no `hew pr`
   always targets GitHub instead.
 - **Moving to GitHub.** `hew migrate local` creates every issue — closed ones
   too, with close reasons and comments — wires parents and blockers, and rewrites
-  `#n` references to the new numbers. Add `--dry-run` to see the plan first. Once
-  every step has finished it records the local → GitHub number map in
+  `#n` references to the new numbers. Add `--dry-run` to see the plan first; it
+  needs no GitHub target (unless an earlier run left a checkpoint, which takes
+  `--repo` to check) and past twenty issues prints a summary — `--json` lists
+  every one. Once every step has finished it records the local → GitHub number map in
   `.hew/migrated.json` and switches the repo to GitHub; `issues.jsonl` stays as a
   read-only archive. A failed run leaves the tracker local, and rerunning resumes
   it — so don't edit local issues between the two. The target is the git remote's
@@ -172,7 +174,7 @@ hew triage [--search <terms>]  # issues missing priority/type labels; --search r
                                    # the same search over untriaged titles and bodies
                                    # (open+closed) — the untriaged half of dedup
 hew set <n> [--priority ..] [--type ..] [--add-area X] [--remove-area X]
-           [--parent N | --no-parent] [--title "..."]
+           [--parent N | --no-parent] [--title "..."]  # an empty --title is refused
            [--body-file F]        # replace the body (an empty file is refused)
            [--closed]             # set/block/unblock refuse a closed target — an
                                   # edit landing on one is almost always stale
@@ -393,7 +395,10 @@ one before any write, naming the line and number, `--dry-run` included. Bodies c
 section fields the create flags use — `where`, `problem` or `goal`, `fix` or
 `approach`, `done-when` (a list, one checklist item each) — composed into the
 body template; `body` carries raw
-long-form text instead (mutually exclusive with the section fields).
+long-form text instead (mutually exclusive with the section fields). Shapes:
+`blocked-by`, `areas` and `done-when` are lists; `parent` and `discovered-from`
+are a single value (a local `id` or an issue number for `parent`, an issue number
+for `discovered-from`); `hew apply --help` lists every field.
 
 Creation and dependency wiring are both checkpointed to the `--state` file as
 they happen, so a failed run resumes without creating duplicates or

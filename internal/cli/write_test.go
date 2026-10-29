@@ -628,6 +628,37 @@ func TestSetValidation(t *testing.T) {
 	exitCode(t, app.Set(ctx, 1, SetOpts{AllowClosed: true}), ExitUsage)
 }
 
+// TestSetRejectsAnExplicitlyEmptyTitle: --title "" was indistinguishable from
+// no --title, so it reported "nothing to change" instead of naming the flag.
+func TestSetRejectsAnExplicitlyEmptyTitle(t *testing.T) {
+	for _, title := range []string{"", "   "} {
+		f := newFake(issue(1, "Work", "P2", "bug"))
+		app, _, _ := newApp(f)
+		// Paired with a valid change, the bad title must still refuse the lot.
+		err := app.Set(ctx, 1, SetOpts{Priority: "P0", Title: title, TitleSet: true})
+		exitCode(t, err, ExitUsage)
+		if !strings.Contains(err.Error(), "--title") || strings.Contains(err.Error(), "nothing to change") {
+			t.Errorf("title %q: err = %v, want a --title usage error", title, err)
+		}
+		if got := f.byNumber(1); got.Title != "Work" || !slices.Contains(got.Labels, "P2") {
+			t.Errorf("title %q: refused set still mutated the issue: %+v", title, got)
+		}
+	}
+}
+
+// TestBlankTitlesAreRefusedWhoeverCalls: the check lives in validateTitle, so
+// a caller that never sets TitleSet, and create, are covered too.
+func TestBlankTitlesAreRefusedWhoeverCalls(t *testing.T) {
+	f := newFake(issue(1, "Work", "P2", "bug"))
+	app, _, _ := newApp(f)
+	exitCode(t, app.Set(ctx, 1, SetOpts{Title: " ", TitleSet: true}), ExitUsage)
+	exitCode(t, app.Create(ctx, CreateOpts{Type: "task", Title: "   ", Sections: conventions.Sections{Goal: "g", DoneWhen: []string{"d"}}}), ExitUsage)
+	exitCode(t, app.EpicCreate(ctx, EpicCreateOpts{Title: "  "}), ExitUsage)
+	if got := f.byNumber(1).Title; got != "Work" {
+		t.Errorf("title = %q after refused edits", got)
+	}
+}
+
 func TestSetSwapsLabels(t *testing.T) {
 	f := newFake(issue(1, "Work", "P2", "bug", "old-area"))
 	app, out, _ := newApp(f)

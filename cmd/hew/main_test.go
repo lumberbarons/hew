@@ -491,6 +491,33 @@ func TestStartHelpNamesClaimAndRead(t *testing.T) {
 	}
 }
 
+// TestApplyHelpGivesEachFieldItsShape: the plan rejects a list where a single
+// number belongs, so help has to say which fields take which.
+func TestApplyHelpGivesEachFieldItsShape(t *testing.T) {
+	help := findCommand(t, root(), "apply").Description
+	for field, shape := range map[string]string{
+		"discovered-from": "not a list",
+		"blocked-by":      "list of",
+		"parent":          "one local id",
+		"areas":           "list of strings",
+		"done-when":       "list of strings",
+		"title":           "string, required",
+	} {
+		var line string
+		for _, l := range strings.Split(help, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(l), field+" ") {
+				line = l
+				break
+			}
+		}
+		if line == "" {
+			t.Errorf("apply help has no line for field %q:\n%s", field, help)
+		} else if !strings.Contains(line, shape) {
+			t.Errorf("apply help line for %q = %q, want it to say %q", field, line, shape)
+		}
+	}
+}
+
 // TestPRLayoutGuidanceIsOneText pins #180: the line-per-claim layout for
 // Testing and Risk is stated once, in the constants the missing-section
 // warnings carry, and `pr --help` and the README repeat it verbatim, so the

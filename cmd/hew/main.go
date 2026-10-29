@@ -94,6 +94,19 @@ func buildGitHubApp(cmd *ucli.Command, offerLocal bool) (*appcli.App, error) {
 	return app, nil
 }
 
+// buildMigrateLocalApp is buildGitHubApp, except that a dry run with no target
+// — no --repo and no git remote — gets an app with no client: the plan comes
+// from issues.jsonl alone, and MigrateLocal refuses the one case that would
+// need GitHub, a checkpoint to verify.
+func buildMigrateLocalApp(cmd *ucli.Command) (*appcli.App, error) {
+	if cmd.Bool("dry-run") && cmd.String("repo") == "" {
+		if _, err := repository.Current(); err != nil {
+			return newApp(cmd), nil
+		}
+	}
+	return buildGitHubApp(cmd, false)
+}
+
 // buildLocalApp opens the local store at tracker. There are no pull requests
 // to open, so PRs stays nil and `pr` refuses. The displayed repo is the main
 // checkout's directory name, so every worktree of one repository reads alike.
@@ -472,6 +485,7 @@ func setCmd() *ucli.Command {
 				Parent:      cmd.Int("parent"),
 				NoParent:    cmd.Bool("no-parent"),
 				Title:       cmd.String("title"),
+				TitleSet:    cmd.IsSet("title"),
 				BodyFile:    cmd.String("body-file"),
 				AllowClosed: cmd.Bool("closed"),
 			})
@@ -784,18 +798,27 @@ func applyCmd() *ucli.Command {
    {"id":"scaffold","title":"Scaffold the driver","type":"task","parent":"epic1","done-when":["driver builds"]}
    {"title":"Collector","type":"task","parent":"epic1","blocked-by":["scaffold",42],"areas":["ble"]}
 
-Fields: title (required), type bug|enhancement|task|epic (required; epic means
-a parent issue — no type label, "Epic: " title prefix), priority P0..P4
-(default P2), areas, parent, blocked-by, discovered-from, id. parent and
-blocked-by take a local id (string) or an existing issue number. Bodies come
-from the section fields — where, problem or goal, fix or approach, done-when
-(a list, one checklist item each) — composed into the body template; body
-holds raw long-form text instead (mutually exclusive with sections). Creation
-is checkpointed after every write, so a failed run resumes without duplicates;
-dependency cycles between entries are rejected before anything is written. The
-state file is local scratch bound to this repository and to a digest of the
-plan: edit the plan, move repositories, or bring a state file from elsewhere
-and it is refused rather than trusted.
+Fields and their shapes:
+  title            string, required
+  type             bug|enhancement|task|epic, required (epic means a parent
+                   issue — no type label, "Epic: " title prefix)
+  priority         P0..P4, default P2
+  areas            list of strings
+  id               string, a local name other entries refer to
+  parent           one local id (string) or one existing issue number
+  blocked-by       list of local ids and/or existing issue numbers
+  discovered-from  one existing issue number, not a list
+  where, problem, goal, fix, approach
+                   strings, composed into the body template (problem or goal,
+                   fix or approach, not both)
+  done-when        list of strings, one checklist item each
+  body             string of raw long-form text, instead of the section fields
+
+Creation is checkpointed after every write, so a failed run resumes without
+duplicates; dependency cycles between entries are rejected before anything is
+written. The state file is local scratch bound to this repository and to a
+digest of the plan: edit the plan, move repositories, or bring a state file
+from elsewhere and it is refused rather than trusted.
 
 ` + conventions.CodeSpanGuidance,
 		Flags: []ucli.Flag{
@@ -871,8 +894,9 @@ alone). On success .hew/migrated.json records the local → GitHub number map an
 .hew/config.json is switched to github, after which the local file takes no
 writes and every command uses GitHub.
 
-The target is --repo, or the git remote. The local tracker is locked for the
-whole run. If a step fails the tracker stays local and rerunning resumes where
+The target is --repo, or the git remote; --dry-run needs neither, and past
+twenty issues prints a summary (use --json for every one). The local tracker
+is locked for the whole run. If a step fails the tracker stays local and rerunning resumes where
 it stopped; the checkpoint is bound to the repository and to the exact contents
 of issues.jsonl, so changing local issues between runs is refused.`,
 				Flags: []ucli.Flag{
@@ -886,7 +910,7 @@ of issues.jsonl, so changing local issues between runs is refused.`,
 					if err != nil {
 						return err
 					}
-					app, err := buildGitHubApp(cmd, false)
+					app, err := buildMigrateLocalApp(cmd)
 					if err != nil {
 						return err
 					}

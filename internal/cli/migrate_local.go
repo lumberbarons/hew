@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -71,6 +72,23 @@ func (a *App) MigrateLocal(ctx context.Context, opts MigrateLocalOpts) error {
 		frozen, snap = fr, fr.Snapshot
 	}
 
+	for _, i := range snap.Issues {
+		a.warnCommaLabels(i.Labels)
+	}
+
+	// A dry run with no target repository never contacts GitHub, which is also
+	// why it cannot vouch for a checkpoint: that has to be checked against the
+	// issues it maps. Refuse rather than list work a real run would skip.
+	targetless := opts.DryRun && a.Client == nil
+	if targetless {
+		if _, err := os.Stat(opts.StatePath); err == nil {
+			return usageErr("%s holds a checkpoint from an earlier run, and a dry run can only check it against GitHub: pass --repo", opts.StatePath)
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return genericErr("cannot tell whether %s holds a checkpoint: %v", opts.StatePath, err)
+		}
+		return a.localMigrationPlan(localItems(snap), map[string]int{})
+	}
+
 	state, err := loadBatchState(opts.StatePath, a.stateRepo(), snap.Digest, "issues.jsonl")
 	if err != nil {
 		return err
@@ -85,9 +103,6 @@ func (a *App) MigrateLocal(ctx context.Context, opts MigrateLocalOpts) error {
 		return err
 	}
 
-	for _, i := range snap.Issues {
-		a.warnCommaLabels(i.Labels)
-	}
 	items := localItems(snap)
 	if opts.DryRun {
 		return a.localMigrationPlan(items, state.Mapping)
@@ -203,7 +218,7 @@ func localItems(snap *local.Snapshot) []migrationItem {
 // from. The footer sets the local number in a code span so reference rewriting
 // leaves the one place that names it alone.
 func localBody(i local.Issue) string {
-	footer := fmt.Sprintf("Migrated from local issue `#%d` (created %s)", i.Number, i.CreatedAt.Format("2006-01-02"))
+	footer := fmt.Sprintf("Migrated from local issue `#%d` (created %s)", i.Number, i.CreatedAt.UTC().Format("2006-01-02"))
 	if body := strings.TrimSpace(i.Body); body != "" {
 		return body + "\n\n---\n" + footer
 	}
@@ -218,7 +233,7 @@ func localComment(c local.Comment) string {
 	if author == "" {
 		author = "unknown"
 	}
-	return fmt.Sprintf("`%s` commented on %s:\n\n%s", author, c.CreatedAt.Format("2006-01-02"), c.Body)
+	return fmt.Sprintf("`%s` commented on %s:\n\n%s", author, c.CreatedAt.UTC().Format("2006-01-02"), c.Body)
 }
 
 // localLabels is every label the tracker uses that GitHub may not have yet, for
@@ -260,6 +275,10 @@ func localLabels(snap *local.Snapshot) []gh.Label {
 	return out
 }
 
+// planLineLimit is how many per-issue lines a text dry run prints before it
+// summarises instead; --json always lists every issue.
+const planLineLimit = 20
+
 // localMigrationPlan reports what a real run would do, in the same shape
 // `migrate beads --dry-run` uses.
 func (a *App) localMigrationPlan(items []migrationItem, state map[string]int) error {
@@ -284,6 +303,18 @@ func (a *App) localMigrationPlan(items []migrationItem, state map[string]int) er
 	return a.emitResult(map[string]any{
 		"dryRun": true, "wouldMigrate": wouldMigrate, "alreadyMigrated": already,
 	}, func() {
+		if len(steps) > planLineLimit {
+			closing := 0
+			for _, e := range wouldMigrate {
+				if e.ThenClose {
+					closing++
+				}
+			}
+			a.printf("dry run: %d local issues would be migrated (%d would be closed after creation); %d already migrated\n",
+				len(wouldMigrate), closing, len(already))
+			a.printf("per-issue lines are omitted for plans over %d issues; use --json for the full plan\n", planLineLimit)
+			return
+		}
 		for _, st := range steps {
 			if st.migrated != 0 {
 				a.printf("already migrated: %s → #%d\n", st.key, st.migrated)
