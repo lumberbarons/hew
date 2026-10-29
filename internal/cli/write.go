@@ -243,27 +243,25 @@ func (a *App) claimRefusal(ctx context.Context, issue model.Issue) error {
 
 // blockerRefusal keeps start in step with ready: an issue with an open
 // blocker is hidden from ready, so claiming it by id would take work whose
-// prerequisite is unfinished. A capped blocker list can hide an open blocker,
-// so that case warns rather than refusing on what it cannot see.
-func (a *App) blockerRefusal(issue model.Issue) error {
-	if open := issue.OpenBlockers(); len(open) > 0 {
-		refs := make([]string, len(open))
-		for i, n := range open {
-			refs[i] = fmt.Sprintf("#%d", n)
-		}
-		return &ExitError{Code: ExitBlocked, Message: fmt.Sprintf("#%d is blocked by open %s; pick the next ready item or --force", issue.Number, strings.Join(refs, ", "))}
+// prerequisite is unfinished.
+func blockerRefusal(issue model.Issue) error {
+	open := issue.OpenBlockers()
+	if len(open) == 0 {
+		return nil
 	}
-	if issue.BlockedByTotal > len(issue.BlockedBy) {
-		a.warnf("%s", render.FormatWarning(model.Warning{Kind: model.WarnBlockersCapped, Issue: issue.Number, Total: issue.BlockedByTotal, Fetched: len(issue.BlockedBy)}))
+	refs := make([]string, len(open))
+	for i, n := range open {
+		refs[i] = fmt.Sprintf("#%d", n)
 	}
-	return nil
+	return &ExitError{Code: ExitBlocked, Message: fmt.Sprintf("#%d is blocked by open %s; pick the next ready item or --force", issue.Number, strings.Join(refs, ", "))}
 }
 
 // StartOpts are the claim inputs; zero values mean the default behavior.
 type StartOpts struct {
 	// Priority is required when the issue is untriaged (claiming is triage).
 	Priority string
-	// Force steals an already-claimed issue.
+	// Force steals an already-claimed issue and claims one that has open
+	// blockers.
 	Force bool
 	// Show follows the claim confirmation with the issue's detail view, so
 	// claiming and reading are one call. --json already includes the body
@@ -295,7 +293,7 @@ func (a *App) Start(ctx context.Context, number int, opts StartOpts) error {
 		return a.claimRefusal(ctx, issue)
 	}
 	if !force {
-		if err := a.blockerRefusal(issue); err != nil {
+		if err := blockerRefusal(issue); err != nil {
 			return err
 		}
 	}
@@ -308,6 +306,11 @@ func (a *App) Start(ctx context.Context, number int, opts StartOpts) error {
 		priority = p
 	} else if priority == model.PriorityUnknown {
 		return usageErr("#%d is untriaged; start requires --priority (claiming is triage)", number)
+	}
+	// A capped blocker list can hide an open blocker, so the check cannot
+	// vouch for it; say so once the claim is certain to be attempted.
+	if !force && issue.BlockedByTotal > len(issue.BlockedBy) {
+		a.warnf("#%d has %d blockers, only %d fetched; an open blocker may be hidden", number, issue.BlockedByTotal, len(issue.BlockedBy))
 	}
 
 	viewer, err := a.Client.Viewer(ctx)

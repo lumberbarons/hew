@@ -1864,3 +1864,39 @@ func TestStartWarnsWhenBlockersAreCapped(t *testing.T) {
 		t.Errorf("expected a capped-blockers warning naming #2, got %q", errOut.String())
 	}
 }
+
+// The claim guard answers first: an issue that is both claimed and blocked
+// reports the claim, so a loop resumes its own work (exit 5) instead of being
+// told to pick another item.
+func TestStartClaimGuardPrecedesBlockerGuard(t *testing.T) {
+	blocked := issue(2, "Claimed and blocked", "P2", "task")
+	blocked.Assignees = []string{"other"}
+	blocked.BlockedBy = []model.Ref{{Number: 1, State: "OPEN"}}
+	f := newFake(issue(1, "Open blocker", "P2", "task"), blocked)
+	app, _, _ := newApp(f)
+	exitCode(t, app.Start(ctx, 2, StartOpts{}), ExitClaimed)
+}
+
+// A capped list that already shows an open blocker is still a refusal.
+func TestStartRefusesVisibleBlockerInCappedList(t *testing.T) {
+	blocked := issue(2, "Many blockers", "P2", "task")
+	blocked.BlockedBy = []model.Ref{{Number: 1, State: "OPEN"}}
+	blocked.BlockedByTotal = 60
+	f := newFake(issue(1, "Open blocker", "P2", "task"), blocked)
+	app, _, _ := newApp(f)
+	exitCode(t, app.Start(ctx, 2, StartOpts{}), ExitBlocked)
+}
+
+// The capped-list warning is for a claim that goes ahead, not for a command
+// that then fails validation.
+func TestStartCappedBlockersWarningSkippedOnUsageError(t *testing.T) {
+	untriaged := issue(2, "Untriaged")
+	untriaged.BlockedBy = []model.Ref{{Number: 1, State: "CLOSED"}}
+	untriaged.BlockedByTotal = 60
+	f := newFake(untriaged)
+	app, _, errOut := newApp(f)
+	exitCode(t, app.Start(ctx, 2, StartOpts{}), ExitUsage)
+	if errOut.Len() != 0 {
+		t.Errorf("unexpected warnings: %q", errOut.String())
+	}
+}

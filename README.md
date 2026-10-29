@@ -231,7 +231,8 @@ takes `--json` (stable flat schema; list commands emit NDJSON so output survives
 truncation and grep); every GitHub-touching command also takes `--repo owner/name`
 (`hooks` is local-only). Exit codes are meaningful: `3`
 means "already claimed by someone else, pick the next ready item", `5` means
-"already claimed by you, resume that work", `4` means "run `gh auth login`".
+"already claimed by you, resume that work", `6` means "blocked by open issues,
+pick the next ready item", `4` means "run `gh auth login`".
 
 ### Drafting a body before publishing
 
