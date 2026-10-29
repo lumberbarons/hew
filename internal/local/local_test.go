@@ -65,6 +65,31 @@ func TestStoreConforms(t *testing.T) {
 	conformance.Run(t, func(t *testing.T) gh.IssueStore { return newStore(t) })
 }
 
+func TestOpenGivesATrackerWithoutAnIDOne(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), DirName)
+	must(t, Init(dir))
+	cfg, err := ReadConfig(dir)
+	must(t, err)
+	cfg.ID = ""
+	must(t, WriteConfig(dir, cfg))
+
+	first, err := Open(dir, "me")
+	must(t, err)
+	if first.ID() == "" {
+		t.Fatal("a tracker written before ids stayed without one")
+	}
+	second, err := Open(dir, "me")
+	must(t, err)
+	if second.ID() != first.ID() {
+		t.Errorf("a second open saw id %q, want the persisted %q", second.ID(), first.ID())
+	}
+	stored, err := ReadConfig(dir)
+	must(t, err)
+	if stored.ID != first.ID() {
+		t.Errorf("config id = %q, want %q", stored.ID, first.ID())
+	}
+}
+
 func TestInitCreatesASelfIgnoringTrackerAndIsIdempotent(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), DirName)
 	must(t, Init(dir))
@@ -793,8 +818,11 @@ func TestLocateFindsOnlyAConfiguredLocalTracker(t *testing.T) {
 func TestMainCheckoutWithoutGit(t *testing.T) {
 	mainCheckout := func(t *testing.T) string {
 		t.Helper()
-		root := t.TempDir()
-		must(t, os.Mkdir(filepath.Join(root, ".git"), 0o755))
+		root, err := filepath.EvalSymlinks(t.TempDir())
+		must(t, err)
+		gitDir := filepath.Join(root, ".git")
+		must(t, os.Mkdir(gitDir, 0o755))
+		must(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("[core]\n\tbare = false\n"), 0o644))
 		return root
 	}
 
@@ -849,6 +877,42 @@ func TestMainCheckoutWithoutGit(t *testing.T) {
 		must(t, os.WriteFile(filepath.Join(sub, ".git"), []byte("gitdir: "+gitdir+"\n"), 0o644))
 		if got, ok := mainCheckoutWithoutGit(sub); ok {
 			t.Errorf("main = %q; want git to decide the submodule", got)
+		}
+	})
+
+	t.Run("a symlinked directory is read by its physical path", func(t *testing.T) {
+		// The lexical parent of the link holds its own checkout; git, and so
+		// this, must look at the real one.
+		decoy := mainCheckout(t)
+		real := mainCheckout(t)
+		sub := filepath.Join(real, "sub")
+		must(t, os.MkdirAll(sub, 0o755))
+		link := filepath.Join(decoy, "link")
+		must(t, os.Symlink(sub, link))
+		got, ok := mainCheckoutWithoutGit(link)
+		if !ok || got != real {
+			t.Errorf("main = %q, %v; want %q, not the link's parent %q", got, ok, real, decoy)
+		}
+	})
+
+	t.Run("a bare repository named .git is left to git", func(t *testing.T) {
+		bare := mainCheckout(t)
+		must(t, os.WriteFile(filepath.Join(bare, ".git", "config"), []byte("[core]\n\tbare = true\n"), 0o644))
+		gitdir := filepath.Join(bare, ".git", "worktrees", "wt")
+		must(t, os.MkdirAll(gitdir, 0o755))
+		wt := filepath.Join(t.TempDir(), "wt")
+		must(t, os.MkdirAll(wt, 0o755))
+		must(t, os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+gitdir+"\n"), 0o644))
+		if got, ok := mainCheckoutWithoutGit(wt); ok {
+			t.Errorf("main = %q; want git to find the bare repository's directory", got)
+		}
+	})
+
+	t.Run("a core.worktree override is left to git", func(t *testing.T) {
+		root := mainCheckout(t)
+		must(t, os.WriteFile(filepath.Join(root, ".git", "config"), []byte("[core]\n\tbare = false\n\tworktree = /elsewhere\n"), 0o644))
+		if got, ok := mainCheckoutWithoutGit(root); ok {
+			t.Errorf("main = %q; want git to honour core.worktree", got)
 		}
 	})
 

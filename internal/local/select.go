@@ -61,14 +61,22 @@ func mainCheckoutWithoutGit(dir string) (string, bool) {
 			return "", false
 		}
 	}
+	// Walk the physical path, as git does: through a symlinked cwd the lexical
+	// parents can be a different tree, with its own .git, from the real ones.
 	root, err := filepath.Abs(dir)
 	if err != nil {
+		return "", false
+	}
+	if root, err = filepath.EvalSymlinks(root); err != nil {
 		return "", false
 	}
 	for {
 		info, err := os.Lstat(filepath.Join(root, ".git"))
 		switch {
 		case err == nil && info.IsDir():
+			if !plainGitDir(filepath.Join(root, ".git")) {
+				return "", false
+			}
 			return root, true
 		case err == nil && info.Mode().IsRegular():
 			return mainCheckoutFromGitFile(root)
@@ -113,11 +121,37 @@ func mainCheckoutFromGitFile(root string) (string, bool) {
 	}
 	// A standard linked worktree's gitdir is under the main checkout's .git.
 	// Checking that catches a --separate-git-dir layout the pattern would
-	// otherwise misread.
-	if info, err := os.Stat(filepath.Join(main, ".git")); err != nil || !info.IsDir() {
+	// otherwise misread, and plainGitDir a bare repository that happens to be
+	// named .git, whose main "checkout" is the repository directory itself.
+	if info, err := os.Stat(filepath.Join(main, ".git")); err != nil || !info.IsDir() || !plainGitDir(filepath.Join(main, ".git")) {
 		return "", false
 	}
 	return main, true
+}
+
+// plainGitDir reports whether the repository directory is an ordinary
+// non-bare one whose working tree is the directory holding it: its config
+// neither says bare nor points core.worktree elsewhere. Anything it cannot
+// read or is unsure of is not plain, and git answers instead.
+func plainGitDir(gitDir string) bool {
+	raw, err := os.ReadFile(filepath.Join(gitDir, "config"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		key, value, _ := strings.Cut(strings.TrimSpace(line), "=")
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "bare":
+			switch strings.ToLower(strings.TrimSpace(value)) {
+			case "false", "no", "off", "0":
+			default:
+				return false
+			}
+		case "worktree":
+			return false
+		}
+	}
+	return true
 }
 
 func locate(mainCheckout func(string) (string, error), dir string) (string, bool, error) {

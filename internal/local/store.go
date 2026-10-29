@@ -211,6 +211,7 @@ func identityPart(name string) string {
 type Store struct {
 	dir    string
 	viewer string
+	id     string
 	now    func() time.Time
 
 	// lockTimeout overrides how long a writer waits for the lock; zero means
@@ -235,7 +236,8 @@ var (
 // no longer says local: after migration the issues are an archive, and writing
 // to them would quietly fork the tracker from GitHub.
 func Open(dir, viewer string) (*Store, error) {
-	if err := requireLocal(dir); err != nil {
+	cfg, err := readLocalConfig(dir)
+	if err != nil {
 		return nil, err
 	}
 	if _, err := os.Stat(filepath.Join(dir, issuesFile)); err != nil {
@@ -248,7 +250,42 @@ func Open(dir, viewer string) (*Store, error) {
 		}
 	}
 	removeStaleTempFiles(dir)
-	return &Store{dir: dir, viewer: viewer, now: func() time.Time { return time.Now().UTC() }}, nil
+	s := &Store{dir: dir, viewer: viewer, id: cfg.ID, now: func() time.Time { return time.Now().UTC() }}
+	if s.id == "" {
+		if err := s.backfillID(context.Background()); err != nil {
+			return nil, err
+		}
+	}
+	return s, nil
+}
+
+// ID is the tracker's stable identity, the same from every checkout and
+// across a rename of the directory holding it.
+func (s *Store) ID() string { return s.id }
+
+// backfillID gives a tracker created before ids existed one. It runs under the
+// lock and re-reads the config, so concurrent opens settle on whichever id
+// landed first instead of each inventing their own.
+func (s *Store) backfillID(ctx context.Context) error {
+	unlock, err := s.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	cfg, err := readLocalConfig(s.dir)
+	if err != nil {
+		return err
+	}
+	if cfg.ID == "" {
+		if cfg.ID, err = newID(); err != nil {
+			return err
+		}
+		if err := WriteConfig(s.dir, cfg); err != nil {
+			return err
+		}
+	}
+	s.id = cfg.ID
+	return nil
 }
 
 func (s *Store) path() string { return filepath.Join(s.dir, issuesFile) }
