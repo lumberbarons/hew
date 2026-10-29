@@ -15,6 +15,7 @@
 package local
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -110,7 +111,7 @@ func ReadConfig(dir string) (Config, error) {
 		Version int `json:"version"`
 	}
 	if err := json.Unmarshal(raw, &head); err != nil {
-		return cfg, fmt.Errorf("%s: %w", path, err)
+		return cfg, damagedConfigError(path, raw, err)
 	}
 	if head.Version > formatVersion {
 		cfg.Version = head.Version
@@ -118,9 +119,62 @@ func ReadConfig(dir string) (Config, error) {
 			path, head.Version, formatVersion)
 	}
 	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return cfg, fmt.Errorf("%s: %w", path, err)
+		return cfg, damagedConfigError(path, raw, err)
 	}
 	return cfg, nil
+}
+
+// configError is a config.json that will not decode, worded for a person. The
+// decoder's error stays reachable through Unwrap but out of the message.
+type configError struct {
+	msg   string
+	cause error
+}
+
+func (e *configError) Error() string { return e.msg }
+func (e *configError) Unwrap() error { return e.cause }
+
+// damagedConfigError says what a config that will not decode is and how to get
+// out, in place of the decoder's text, which names neither the file nor a fix.
+// It deliberately does not satisfy fs.ErrNotExist: a damaged config is not a
+// missing one, and Locate must not read it as "this repo is not local".
+func damagedConfigError(path string, raw []byte, cause error) error {
+	what := "is not a valid hew config"
+	if len(bytes.TrimSpace(raw)) == 0 {
+		what = "is empty"
+	}
+	var syntax *json.SyntaxError
+	var typed *json.UnmarshalTypeError
+	switch {
+	case errors.As(cause, &syntax):
+		what += fmt.Sprintf(" (syntax error at byte %d)", syntax.Offset)
+	case errors.As(cause, &typed) && typed.Field != "":
+		what += fmt.Sprintf(" (field %q has the wrong type)", typed.Field)
+	}
+	// A migrated repo's config says github over an archive. Deleting it and
+	// running init --local would make that archive a live local tracker again.
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), MigratedFile)); err == nil {
+		return &configError{cause: cause, msg: fmt.Sprintf("%s %s. This repo was migrated to GitHub (%s exists), so do not run `hew init --local`, which would make the archive a live local tracker again; restore the config from a backup, or rewrite it as {\"backend\":\"github\",\"version\":%d}",
+			path, what, MigratedFile, formatVersion)}
+	}
+	return &configError{cause: cause, msg: fmt.Sprintf("%s %s; to recover, restore it from a backup, or delete it and run `hew init --local`, which rewrites the config and keeps the issues (the tracker gets a new id, so resume checkpoints for `apply` and `migrate` start over)",
+		path, what)}
+}
+
+// issuesLost is the fact about a config that exists beside no issues.jsonl,
+// shared by the refusal and the notice init prints so the two cannot drift.
+const issuesLost = "is missing although the tracker's config exists, so its issues were lost"
+
+// missingIssuesError is the answer for a config that says local beside an
+// issues.jsonl that is gone: the issues were lost, and creating an empty file
+// behind the caller's back would hide it.
+func missingIssuesError(path string) error {
+	return fmt.Errorf("%s %s; to recover, restore it from a backup, or run `hew init --local` to start with an empty one", path, issuesLost)
+}
+
+// RecreatedIssuesNotice is what init says after recreating a lost issues.jsonl.
+func RecreatedIssuesNotice(path string) string {
+	return fmt.Sprintf("%s %s; recreated it empty with a new tracker id, so resume checkpoints for `apply` and `migrate` start over. If you have a backup, restore it over the new file", path, issuesLost)
 }
 
 // newID returns a fresh tracker identity: random bytes, hex, so it names one
@@ -143,11 +197,32 @@ func WriteConfig(dir string, cfg Config) error {
 	return writeFileAtomic(filepath.Join(dir, configFile), raw)
 }
 
+// InitResult reports what InitTracker did beyond creating a fresh tracker.
+type InitResult struct {
+	// IssuesRecreated is set when issues.jsonl was missing beside an existing
+	// config: the tracker lost its issues, and the file is now empty.
+	IssuesRecreated bool
+}
+
 // Init creates a local tracker in dir, leaving anything already there alone so
 // that running it twice is harmless. It never overwrites issues.
 func Init(dir string) error {
+	_, err := InitTracker(dir)
+	return err
+}
+
+// InitTracker is Init that says whether it had to recreate a lost issues.jsonl.
+// That case also gives the tracker a new id: the empty file starts a new
+// history, and checkpoints bound to the old id would map plan items onto issue
+// numbers that no longer exist.
+func InitTracker(dir string) (InitResult, error) {
+	var res InitResult
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+		return res, err
+	}
+	hadConfig, err := exists(filepath.Join(dir, configFile))
+	if err != nil {
+		return res, err
 	}
 	// A fixed order, config last: config.json is what selects the local backend,
 	// so a concurrent Locate that sees issues.jsonl without it reads a tracker
@@ -167,20 +242,46 @@ func Init(dir string) error {
 		}},
 	} {
 		path := filepath.Join(dir, f.name)
-		if _, err := os.Stat(path); err == nil {
+		if present, err := exists(path); err != nil {
+			return res, err
+		} else if present {
 			continue
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return err
 		}
 		raw, err := f.content()
 		if err != nil {
-			return err
+			return res, err
 		}
 		if err := writeFileAtomic(path, raw); err != nil {
-			return err
+			return res, err
+		}
+		res.IssuesRecreated = res.IssuesRecreated || (f.name == issuesFile && hadConfig)
+	}
+	if res.IssuesRecreated {
+		cfg, err := ReadConfig(dir)
+		if err != nil {
+			return res, err
+		}
+		if cfg.ID, err = newID(); err != nil {
+			return res, err
+		}
+		if err := WriteConfig(dir, cfg); err != nil {
+			return res, err
 		}
 	}
-	return nil
+	return res, nil
+}
+
+// exists reports whether path is there, distinguishing absence from a stat that
+// failed for another reason.
+func exists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return false, nil
+	}
+	return false, err
 }
 
 // DefaultViewer is who the local tracker says this agent is. HEW_USER wins
@@ -285,8 +386,11 @@ func Open(dir, viewer string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := os.Stat(filepath.Join(dir, issuesFile)); err != nil {
+	switch present, err := exists(filepath.Join(dir, issuesFile)); {
+	case err != nil:
 		return nil, err
+	case !present:
+		return nil, missingIssuesError(filepath.Join(dir, issuesFile))
 	}
 	if viewer == "" {
 		var err error

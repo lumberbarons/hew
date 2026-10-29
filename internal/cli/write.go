@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -1026,8 +1027,14 @@ func (a *App) InitLocal(dir string) error {
 	case err != nil:
 		return genericErr("%v", err)
 	}
-	if err := local.Init(tracker); err != nil {
+	// A config beside no issues.jsonl is a tracker that lost its issues; init
+	// is the documented way out, so it recreates the file but says so.
+	res, err := local.InitTracker(tracker)
+	if err != nil {
 		return genericErr("creating %s: %v", tracker, err)
+	}
+	if res.IssuesRecreated {
+		a.warnf("%s", local.RecreatedIssuesNotice(filepath.Join(tracker, "issues.jsonl")))
 	}
 	if fresh {
 		// Nothing outside .hew records that this repo is local, so a deleted

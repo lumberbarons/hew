@@ -137,8 +137,19 @@ func TestOpenRefusesWhatIsNotALocalTracker(t *testing.T) {
 	dir = filepath.Join(t.TempDir(), DirName)
 	must(t, Init(dir))
 	must(t, os.Remove(filepath.Join(dir, issuesFile)))
-	if _, err := Open(dir, "me"); err == nil {
-		t.Error("a tracker with no issues file opened")
+	_, err := Open(dir, "me")
+	if err == nil {
+		t.Fatal("a tracker with no issues file opened")
+	}
+	// Config present, issues gone: the message names the file and both ways out
+	// instead of a bare stat error.
+	for _, want := range []string{filepath.Join(dir, issuesFile), "backup", "hew init --local"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
+	}
+	if strings.HasPrefix(err.Error(), "stat ") {
+		t.Errorf("err = %v, still the bare stat error", err)
 	}
 }
 
@@ -152,6 +163,165 @@ func TestReadConfigRejectsBadFiles(t *testing.T) {
 		must(t, os.WriteFile(path, []byte(content), 0o644))
 		if _, err := ReadConfig(dir); err == nil {
 			t.Errorf("%s: no error", name)
+		}
+	}
+}
+
+// A damaged config.json is reported by path with the way out, not as the Go
+// decoder's text. An empty file is the common case (a crash mid-write elsewhere,
+// a truncating editor), and "unexpected end of JSON input" names nothing.
+func TestReadConfigSaysWhatToDoAboutADamagedFile(t *testing.T) {
+	for name, content := range map[string]string{
+		"empty":           "",
+		"whitespace only": " \n",
+		"not json":        "nope",
+		"wrong shape":     `["local"]`,
+		"wrong field":     `{"backend":"local","version":"one"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, configFile)
+			must(t, os.WriteFile(path, []byte(content), 0o644))
+			_, err := ReadConfig(dir)
+			if err == nil {
+				t.Fatal("no error")
+			}
+			for _, want := range []string{path, "backup", "hew init --local"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err = %v, want it to mention %q", err, want)
+				}
+			}
+			for _, raw := range []string{"invalid character", "unexpected end of JSON", "cannot unmarshal"} {
+				if strings.Contains(err.Error(), raw) {
+					t.Errorf("err = %v, leaks decoder text %q", err, raw)
+				}
+			}
+			if errors.Is(err, fs.ErrNotExist) {
+				t.Error("a damaged config reads as a missing one, which Locate treats as not local")
+			}
+		})
+	}
+}
+
+// The recovery text is only as good as the clue to the damage: a syntax error
+// says where, a wrongly typed field says which, and the decoder's error stays
+// reachable for callers that unwrap.
+func TestReadConfigKeepsTheCauseOfDamage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, configFile)
+
+	must(t, os.WriteFile(path, []byte(`{"backend":"local",`), 0o644))
+	_, err := ReadConfig(dir)
+	var syntax *json.SyntaxError
+	if !errors.As(err, &syntax) || !strings.Contains(err.Error(), fmt.Sprintf("byte %d", syntax.Offset)) {
+		t.Errorf("truncated config: err = %v, want the syntax error reachable and its byte offset named", err)
+	}
+
+	must(t, os.WriteFile(path, []byte(`{"backend":"local","version":"one"}`), 0o644))
+	_, err = ReadConfig(dir)
+	var typed *json.UnmarshalTypeError
+	if !errors.As(err, &typed) || !strings.Contains(err.Error(), `"version"`) {
+		t.Errorf("mistyped field: err = %v, want the type error reachable and the field named", err)
+	}
+}
+
+// A migrated repo's config says github and the issues are an archive. Deleting
+// a damaged config and running init --local would flip it back to a live local
+// tracker, so the advice there must be the opposite.
+func TestReadConfigWarnsAMigratedRepoAwayFromInitLocal(t *testing.T) {
+	dir := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(dir, configFile), nil, 0o644))
+	must(t, os.WriteFile(filepath.Join(dir, MigratedFile), []byte("{}\n"), 0o644))
+	_, err := ReadConfig(dir)
+	if err == nil {
+		t.Fatal("no error")
+	}
+	for _, want := range []string{"migrated to GitHub", "do not run `hew init --local`", `{"backend":"github","version":1}`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "delete it") {
+		t.Errorf("err = %v, still advises deleting the config", err)
+	}
+}
+
+// Recreating a lost issues.jsonl starts a new history, so the tracker gets a new
+// id: checkpoints for apply and migrate are bound to the old one and would
+// otherwise map plan items onto issue numbers that no longer exist.
+func TestInitTrackerGivesARecreatedIssuesFileANewID(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), DirName)
+	res, err := InitTracker(dir)
+	must(t, err)
+	if res.IssuesRecreated {
+		t.Error("a fresh tracker reports a recreated issues file")
+	}
+	before, err := ReadConfig(dir)
+	must(t, err)
+
+	res, err = InitTracker(dir)
+	must(t, err)
+	if res.IssuesRecreated {
+		t.Error("an intact tracker reports a recreated issues file")
+	}
+	if same, _ := ReadConfig(dir); same.ID != before.ID {
+		t.Errorf("id changed on a no-op init: %q -> %q", before.ID, same.ID)
+	}
+
+	must(t, os.Remove(filepath.Join(dir, issuesFile)))
+	res, err = InitTracker(dir)
+	must(t, err)
+	if !res.IssuesRecreated {
+		t.Error("recreating a lost issues file is not reported")
+	}
+	after, err := ReadConfig(dir)
+	must(t, err)
+	if after.ID == "" || after.ID == before.ID {
+		t.Errorf("id = %q after recreating issues, want a new one (was %q)", after.ID, before.ID)
+	}
+	if after.Backend != BackendLocal {
+		t.Errorf("backend = %q, want it kept", after.Backend)
+	}
+	if _, err := Open(dir, "me"); err != nil {
+		t.Errorf("the recovered tracker does not open: %v", err)
+	}
+}
+
+func TestInitTrackerKeepsConfigExtrasWhenItRenewsTheID(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), DirName)
+	must(t, Init(dir))
+	must(t, os.WriteFile(filepath.Join(dir, configFile), []byte(`{"backend":"local","version":1,"id":"old","surprise":true}`), 0o644))
+	must(t, os.Remove(filepath.Join(dir, issuesFile)))
+	_, err := InitTracker(dir)
+	must(t, err)
+	if got := readFile(t, filepath.Join(dir, configFile)); !strings.Contains(got, `"surprise":true`) {
+		t.Errorf("config after renewing the id = %s, want the unknown field kept", got)
+	}
+}
+
+// A config that exists but is not a regular readable file is not "missing":
+// the recovery text must not pretend the file is merely damaged JSON.
+func TestReadConfigKeepsOtherReadFailuresDistinct(t *testing.T) {
+	dir := t.TempDir()
+	must(t, os.Mkdir(filepath.Join(dir, configFile), 0o755))
+	_, err := ReadConfig(dir)
+	if err == nil || errors.Is(err, fs.ErrNotExist) || strings.Contains(err.Error(), "hew init --local") {
+		t.Errorf("err = %v, want the plain read failure", err)
+	}
+}
+
+// The file can vanish after Open too (a sibling agent's cleanup, a moved
+// worktree's tracker); the commands that read it then say the same thing.
+func TestStoreSaysWhatToDoWhenTheIssuesFileVanishesAfterOpen(t *testing.T) {
+	s := newStore(t)
+	must(t, os.Remove(s.path()))
+	_, err := s.load()
+	if err == nil {
+		t.Fatal("no error")
+	}
+	for _, want := range []string{s.path(), "backup", "hew init --local"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
 		}
 	}
 }
