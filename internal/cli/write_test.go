@@ -2098,3 +2098,41 @@ func TestStartCappedBlockersWarningSkippedOnUsageError(t *testing.T) {
 		t.Errorf("unexpected warnings: %q", errOut.String())
 	}
 }
+
+// The code-span convention is not GitHub's: local bodies are Markdown too, and
+// `hew migrate local` carries them to a browser later. So the warning fires on
+// the local backend, and says nothing that assumes the GitHub one.
+func TestCreateWarnsAboutUnmarkedCodeTextOnTheLocalBackendWithoutGitHubWording(t *testing.T) {
+	app, _, errOut := newLocalApp(newFake())
+	app.Local = true
+	err := app.Create(ctx, CreateOpts{
+		Title: "T", Type: "task",
+		Sections: conventions.Sections{
+			Goal:     "Edit main.go and internal/cli/write.go",
+			DoneWhen: []string{"go test -race ./... is green"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	warning := errOut.String()
+	for _, want := range []string{"not in code spans", "main.go", "internal/cli/write.go", "./..."} {
+		if !strings.Contains(warning, want) {
+			t.Errorf("local warning %q does not name %q", warning, want)
+		}
+	}
+	for _, banned := range []string{"GitHub", "github", "autolink", "browser"} {
+		if strings.Contains(warning, banned) {
+			t.Errorf("local warning %q assumes GitHub (%q)", warning, banned)
+		}
+	}
+}
+
+func TestCodeSpanGuidanceDoesNotClaimEveryBodyIsReadInABrowser(t *testing.T) {
+	if strings.Contains(conventions.CodeSpanGuidance, "read in a browser") {
+		t.Errorf("guidance %q states the GitHub reader as if it were the only one", conventions.CodeSpanGuidance)
+	}
+	if !strings.Contains(conventions.CodeSpanGuidance, "migrate local") {
+		t.Errorf("guidance %q does not say why local bodies follow the convention", conventions.CodeSpanGuidance)
+	}
+}

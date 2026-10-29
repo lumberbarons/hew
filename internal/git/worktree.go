@@ -2,6 +2,7 @@ package git
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -23,7 +24,7 @@ func mainCheckout(r runner, dir string) (string, error) {
 	}
 	out, err := r("git", args...)
 	if err != nil {
-		return "", fmt.Errorf("cannot find the main checkout: %w", err)
+		return "", fmt.Errorf("cannot find the main checkout: %w", describeFailure(err))
 	}
 	// git lists the main worktree first, whichever worktree it is run from.
 	// This is preferred to deriving it from --git-common-dir, which names the
@@ -35,6 +36,49 @@ func mainCheckout(r runner, dir string) (string, error) {
 		return "", fmt.Errorf("cannot find the main checkout: unexpected `git worktree list` output %q", first)
 	}
 	return path, nil
+}
+
+// failure is a failed git command reported in git's own words. An exit error
+// prints as "exit status 128", which says nothing; what git printed on stderr
+// is the message a person can act on. Unwrap keeps the exit error reachable
+// for IsNotRepo.
+type failure struct {
+	msg string
+	err error
+}
+
+func (f *failure) Error() string { return f.msg }
+func (f *failure) Unwrap() error { return f.err }
+
+// describeFailure returns err as the line of git's stderr that states the
+// cause, and err unchanged when there is none. That is the first "fatal:" line
+// (or the first line at all): git's remedy and hint lines follow the cause, and
+// on their own — a bare `git config --global --add safe.directory …` — they
+// read as the failure.
+func describeFailure(err error) error {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return err
+	}
+	var first, fatal string
+	for _, line := range strings.Split(string(exit.Stderr), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if first == "" {
+			first = line
+		}
+		if strings.HasPrefix(line, "fatal:") {
+			fatal = line
+			break
+		}
+	}
+	msg := cmp.Or(fatal, first)
+	if msg == "" {
+		return err
+	}
+	return &failure{msg: msg, err: err}
 }
 
 // LinkedWorktree returns the root path of the checkout containing dir when it
@@ -52,7 +96,7 @@ func linkedWorktree(r runner, dir string) (string, error) {
 	}
 	root, err := r("git", args...)
 	if err != nil {
-		return "", fmt.Errorf("cannot find the working tree: %w", err)
+		return "", fmt.Errorf("cannot find the working tree: %w", describeFailure(err))
 	}
 	if root == "" {
 		return "", fmt.Errorf("cannot find the working tree: git returned no path")

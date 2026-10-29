@@ -1,4 +1,5 @@
-// Command hew is an agentic-first CLI for GitHub Issues. All behavior
+// Command hew is an agentic-first issue tracker CLI, on GitHub Issues or a
+// local tracker. All behavior
 // lives in internal/; this file is flag wiring — parsing, exit-code mapping,
 // and editor invocation are delegated to internal packages so they can be
 // tested.
@@ -62,12 +63,12 @@ func buildApp(cmd *ucli.Command) (*appcli.App, error) {
 			return buildLocalApp(cmd, tracker)
 		}
 	}
-	return buildGitHubApp(cmd)
+	return buildGitHubApp(cmd, true)
 }
 
 // buildGitHubApp talks to GitHub whatever the checkout's config says: the
 // repository is --repo, or the git remote's.
-func buildGitHubApp(cmd *ucli.Command) (*appcli.App, error) {
+func buildGitHubApp(cmd *ucli.Command, offerLocal bool) (*appcli.App, error) {
 	var repo gh.Repo
 	if spec := cmd.String("repo"); spec != "" {
 		parsed, err := appcli.ParseRepoSpec(spec)
@@ -78,7 +79,7 @@ func buildGitHubApp(cmd *ucli.Command) (*appcli.App, error) {
 	} else {
 		current, err := repository.Current()
 		if err != nil {
-			return nil, fmt.Errorf("cannot detect repository (use --repo owner/name): %w", err)
+			return nil, appcli.RepoDetectError(err, offerLocal)
 		}
 		repo.Owner, repo.Name = current.Owner, current.Name
 	}
@@ -161,7 +162,7 @@ func fixedArgs(min, max int) ucli.BeforeFunc {
 func root() *ucli.Command {
 	return &ucli.Command{
 		Name:    "hew",
-		Usage:   "agentic-first CLI for GitHub Issues",
+		Usage:   "agentic-first issue tracker for coding agents, in GitHub Issues or a local .hew tracker",
 		Version: version,
 		Flags:   globalFlags(),
 		Commands: []*ucli.Command{
@@ -885,7 +886,7 @@ of issues.jsonl, so changing local issues between runs is refused.`,
 					if err != nil {
 						return err
 					}
-					app, err := buildGitHubApp(cmd)
+					app, err := buildGitHubApp(cmd, false)
 					if err != nil {
 						return err
 					}
@@ -905,8 +906,10 @@ func initCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:  "init",
 		Usage: "bootstrap convention labels; print the CLAUDE.md snippet",
+		Description: "--local needs a git checkout: hew finds the main checkout, where the tracker\n" +
+			"lives in .hew, through git. In a directory that is not a repository yet, run `git init` first.",
 		Flags: []ucli.Flag{
-			&ucli.BoolFlag{Name: "local", Usage: "create a local-only tracker in .hew at the main checkout instead of using GitHub Issues"},
+			&ucli.BoolFlag{Name: "local", Usage: "create a local-only tracker in .hew at the main checkout (needs a git checkout) instead of using GitHub Issues"},
 		},
 		Before: fixedArgs(0, 0),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {

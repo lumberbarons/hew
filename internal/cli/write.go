@@ -11,6 +11,7 @@ import (
 
 	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/git"
 	"github.com/lumberbarons/hew/internal/local"
 	"github.com/lumberbarons/hew/internal/model"
 	"github.com/lumberbarons/hew/internal/render"
@@ -957,6 +958,9 @@ func (a *App) printClaudeSnippet(snippet string) {
 // local one that no command would use.
 func (a *App) InitLocal(dir string) error {
 	tracker, err := local.MainDir(dir)
+	if git.IsNotRepo(err) {
+		return genericErr("the local tracker needs a git checkout (run `git init` first): %v", err)
+	}
 	if err != nil {
 		return genericErr("%v", err)
 	}

@@ -322,3 +322,27 @@ func TestInitLocalOutsideAGitCheckoutFails(t *testing.T) {
 		t.Errorf("err = %v, want the checkout failure", err)
 	}
 }
+
+// Local mode needs git, and the failure must say what git said rather than
+// the bare exit status.
+func TestInitLocalOutsideAGitCheckoutSurfacesGitsMessage(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolateGitConfig(t)
+	dir := t.TempDir()
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	app, _, _ := newApp(newFake())
+	err := app.InitLocal(dir)
+	exitCode(t, err, ExitGeneric)
+	msg := err.Error()
+	if !strings.Contains(msg, "not a git repository") {
+		t.Errorf("err = %q, want git's own message", msg)
+	}
+	if strings.Contains(msg, "exit status") || strings.Contains(msg, "\n") {
+		t.Errorf("err = %q, want one line without the bare exit status", msg)
+	}
+	if !strings.Contains(msg, "git init") {
+		t.Errorf("err = %q, want the requirement named with a way forward", msg)
+	}
+}

@@ -11,9 +11,12 @@ issues via `Fixes #n`, and nothing needs syncing.
 
 ## Install
 
-Needs `git` — the target repo is read from the local checkout, and `hew pr`
-reads the current branch — plus the [`gh` CLI](https://cli.github.com/) for
-authentication. The install script also needs `curl` and `tar`.
+Needs `git`. The target repo is read from the local checkout, `hew pr` reads the
+current branch, and [local mode](#local-mode) finds its tracker through git, so
+hew works only inside a git checkout (`git init` first in a new directory).
+
+GitHub use also needs the [`gh` CLI](https://cli.github.com/) for authentication.
+The install script needs `curl` and `tar`.
 
 ```sh
 curl -fsSL https://lumberbarons.github.io/hew/install.sh | bash
@@ -104,7 +107,8 @@ If any command exits `4`, authenticate first with `gh auth login`.
 
 For a project that has no GitHub tracker yet, or an agent that cannot reach one,
 `hew` can keep the issues in the repo's own checkout. Everything else works the
-same — the conventions, `ready`, `start`, epics, dependencies, `--json`.
+same — the conventions, `ready`, `start`, epics, dependencies, `--json`. It needs a
+git checkout (run `git init` in a new directory first), but no remote and no `gh`.
 
 ```sh
 hew init --local          # creates .hew/ at the main checkout and selects the local backend

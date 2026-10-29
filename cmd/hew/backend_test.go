@@ -220,7 +220,7 @@ func TestMigratedTrackerFallsBackToGitHub(t *testing.T) {
 	// The temp repo has no GitHub remote, so detection fails the way it does
 	// for any non-GitHub checkout — proof the local store was not opened.
 	err := app.Run(context.Background(), []string{"hew", "list"})
-	if err == nil || !strings.Contains(err.Error(), "cannot detect repository") {
+	if err == nil || !strings.Contains(err.Error(), "no git remote to find a GitHub repository from") {
 		t.Errorf("err = %v (app %+v), want GitHub repo detection to run", err, got)
 	}
 }

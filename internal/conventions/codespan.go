@@ -12,7 +12,8 @@ import (
 // land; this text is what the warning points at.
 const CodeSpanGuidance = "Write commands, flags, branch names, paths and error strings as code spans\n" +
 	"(`--title`, `feat/pr-head`, `internal/cli/pr.go`, `go test -race ./...`): issue\n" +
-	"and PR bodies are read in a browser and outlive the branch, and those are the\n" +
+	"and PR bodies are Markdown that outlives the branch (rendered in a browser on\n" +
+	"GitHub, and `hew migrate local` carries local ones there), and those are the\n" +
 	"characters that blur into prose. Wrap the whole command, not just the flag\n" +
 	"inside it. Composed bodies are checked and unmarked code text is warned about."
 
