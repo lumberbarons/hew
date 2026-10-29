@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"reflect"
 	"slices"
@@ -50,6 +51,24 @@ type commentRec struct {
 	Author    string    `json:"author"`
 	CreatedAt time.Time `json:"created_at"`
 	Body      string    `json:"body"`
+	extra     extras
+}
+
+// UnmarshalJSON keeps a comment's unknown fields, which the generic decode of
+// the enclosing issue would otherwise drop.
+func (r *commentRec) UnmarshalJSON(raw []byte) error {
+	type plain commentRec
+	var p plain
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return err
+	}
+	x, err := unknownFields(raw, p)
+	if err != nil {
+		return err
+	}
+	p.extra = x
+	*r = commentRec(p)
+	return nil
 }
 
 // issueRec is the stored form of an issue. Relationships are stored once, on
@@ -75,6 +94,11 @@ type issueRec struct {
 // The marshalers append a record's unknown fields after the ones it knows.
 // The plain aliases drop the methods, so marshalling them does not recurse.
 
+func (r commentRec) MarshalJSON() ([]byte, error) {
+	type plain commentRec
+	return marshalWithExtras(plain(r), r.extra)
+}
+
 func (r metaRec) MarshalJSON() ([]byte, error) {
 	type plain metaRec
 	return marshalWithExtras(plain(r), r.extra)
@@ -99,6 +123,10 @@ func marshalWithExtras(v any, x extras) ([]byte, error) {
 		return nil, err
 	}
 	out := bytes.TrimSuffix(bytes.TrimRight(line, "\n"), []byte("}"))
+	sep := byte(',')
+	if bytes.Equal(out, []byte("{")) {
+		sep = 0 // nothing written yet: no comma before the first field
+	}
 	keys := make([]string, 0, len(x))
 	for k := range x {
 		keys = append(keys, k)
@@ -109,12 +137,28 @@ func marshalWithExtras(v any, x extras) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, ',')
+		if sep != 0 {
+			out = append(out, sep)
+		}
+		sep = ','
 		out = append(out, bytes.TrimRight(name, "\n")...)
 		out = append(out, ':')
 		out = append(out, x[k]...)
 	}
 	return append(out, '}'), nil
+}
+
+// mergeExtras folds src into dst, later values winning. A hand-edited or badly
+// merged file can repeat a meta or label record; neither copy's fields are lost.
+func mergeExtras(dst, src extras) extras {
+	if len(src) == 0 {
+		return dst
+	}
+	if dst == nil {
+		dst = extras{}
+	}
+	maps.Copy(dst, src)
+	return dst
 }
 
 // unknownFields returns the fields of raw that v's type has no json name for.
@@ -178,9 +222,9 @@ func decodeData(r io.Reader, path string) (*data, error) {
 		if raw := bytes.TrimSpace(line); len(raw) > 0 {
 			meta, err := d.decodeRecord(raw, seen)
 			if err != nil {
-				var newer newerFormatError
+				var newer tooNewError
 				if errors.As(err, &newer) {
-					// Not damaged, only too new: repairing it would corrupt it.
+					// Not damaged, only from a newer hew: repairing it would corrupt it.
 					return nil, fmt.Errorf("%s: line %d: %w", path, n, err)
 				}
 				return nil, fmt.Errorf("%s: line %d: %w (to recover, fix or remove that line, or restore the file from a backup)", path, n, err)
@@ -198,13 +242,11 @@ func decodeData(r io.Reader, path string) (*data, error) {
 	return d, nil
 }
 
-// newerFormatError marks a meta record from a hew that writes a format this
-// build cannot read.
-type newerFormatError struct{ version int }
+// tooNewError marks a record this build cannot read because a newer hew wrote
+// it, as opposed to one that is damaged.
+type tooNewError struct{ msg string }
 
-func (e newerFormatError) Error() string {
-	return fmt.Sprintf("written by a newer hew (format %d, this build reads %d)", e.version, formatVersion)
-}
+func (e tooNewError) Error() string { return e.msg }
 
 // decodeRecord adds one record to d and reports whether it was the meta record.
 func (d *data) decodeRecord(raw []byte, seen map[int]bool) (isMeta bool, err error) {
@@ -221,11 +263,13 @@ func (d *data) decodeRecord(raw []byte, seen map[int]bool) (isMeta bool, err err
 			return false, err
 		}
 		if m.Version > formatVersion {
-			return false, newerFormatError{m.Version}
+			return false, tooNewError{fmt.Sprintf("written by a newer hew (format %d, this build reads %d)", m.Version, formatVersion)}
 		}
-		if d.metaExtra, err = unknownFields(raw, m); err != nil {
+		x, err := unknownFields(raw, m)
+		if err != nil {
 			return false, err
 		}
+		d.metaExtra = mergeExtras(d.metaExtra, x)
 		return true, nil
 	case typeLabel:
 		var l labelRec
@@ -240,7 +284,7 @@ func (d *data) decodeRecord(raw []byte, seen map[int]bool) (isMeta bool, err err
 			if d.labelExtra == nil {
 				d.labelExtra = map[string]extras{}
 			}
-			d.labelExtra[l.Name] = x
+			d.labelExtra[l.Name] = mergeExtras(d.labelExtra[l.Name], x)
 		}
 		d.labels = append(d.labels, gh.Label{Name: l.Name, Color: l.Color, Description: l.Description})
 	case "", typeIssue:
@@ -261,7 +305,7 @@ func (d *data) decodeRecord(raw []byte, seen map[int]bool) (isMeta bool, err err
 		rec.Type = ""
 		d.issues = append(d.issues, &rec)
 	default:
-		return false, fmt.Errorf("unknown record type %q", head.Type)
+		return false, tooNewError{fmt.Sprintf("unknown record type %q (written by a newer hew?)", head.Type)}
 	}
 	return false, nil
 }

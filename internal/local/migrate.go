@@ -97,7 +97,7 @@ func ReadSnapshot(dir string) (*Snapshot, error) {
 			Parent: rec.Parent, BlockedBy: slices.Clone(rec.BlockedBy),
 		}
 		for _, c := range rec.Comments {
-			i.Comments = append(i.Comments, Comment(c))
+			i.Comments = append(i.Comments, Comment{Author: c.Author, CreatedAt: c.CreatedAt, Body: c.Body})
 		}
 		snap.Issues = append(snap.Issues, i)
 	}

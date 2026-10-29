@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -829,7 +830,6 @@ func TestDecodeErrorsNameTheLineAndHowToRecover(t *testing.T) {
 		"truncated last line": {testMeta + testIssue + `{"number":2,"ti`, "line 3"},
 		"blank lines count":   {testMeta + "\n\n" + `{"number":1,"title":`, "line 4"},
 		"repeated number":     {testMeta + testIssue + testIssue, "line 3"},
-		"unknown record type": {testMeta + `{"_type":"mystery"}` + "\n", "line 2"},
 		"not an object":       {testMeta + "[1]\n", "line 2"},
 	} {
 		path := filepath.Join(t.TempDir(), issuesFile)
@@ -881,6 +881,8 @@ func TestOpenRemovesStaleTempFiles(t *testing.T) {
 	keep := filepath.Join(s.dir, "notes.tmp-1")
 	for _, p := range append(stale[:len(stale):len(stale)], keep) {
 		must(t, os.WriteFile(p, []byte("partial"), 0o644))
+		old := time.Now().Add(-time.Hour)
+		must(t, os.Chtimes(p, old, old))
 	}
 
 	if _, err := Open(s.dir, "me"); err != nil {
@@ -905,6 +907,8 @@ func TestOpenLeavesTempFilesWhileAWriterHoldsTheLock(t *testing.T) {
 	s := newStore(t)
 	tmp := filepath.Join(s.dir, issuesFile+".tmp-live")
 	must(t, os.WriteFile(tmp, []byte("in flight"), 0o644))
+	old := time.Now().Add(-time.Hour)
+	must(t, os.Chtimes(tmp, old, old))
 	unlock, err := s.lock(ctx)
 	must(t, err)
 	defer unlock()
@@ -963,5 +967,93 @@ func TestLockRefusesACancelledContextEvenWhenFree(t *testing.T) {
 	cancel()
 	if err := s.EditTitle(cctx, 1, "x"); !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+// Init writes issues.jsonl without the lock, so a young temp file may belong to
+// a writer the lock cannot see.
+func TestOpenLeavesYoungTempFilesEvenWhenTheLockIsFree(t *testing.T) {
+	s := newStore(t)
+	tmp := filepath.Join(s.dir, issuesFile+".tmp-young")
+	must(t, os.WriteFile(tmp, []byte("being written"), 0o644))
+	if _, err := Open(s.dir, "me"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(tmp); err != nil {
+		t.Errorf("a just-created temp file was removed: %v", err)
+	}
+}
+
+func TestUnknownFieldsInCommentsSurviveARewrite(t *testing.T) {
+	s := newStore(t)
+	must(t, os.WriteFile(s.path(), []byte(testMeta+
+		`{"number":1,"title":"t","state":"OPEN","created_at":"2026-07-01T00:00:00Z","comments":[{"author":"a","created_at":"2026-07-01T00:00:00Z","body":"hi <!-- x -->","reaction":"+1"}]}`+"\n"), 0o644))
+	must(t, s.EditTitle(ctx, 1, "renamed"))
+	got := readFile(t, s.path())
+	for _, want := range []string{`"reaction":"+1"`, `"body":"hi <!-- x -->"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("rewritten file lost %s:\n%s", want, got)
+		}
+	}
+}
+
+// A record type this build has never heard of most likely comes from a newer
+// hew; telling the user to remove its line would destroy good data.
+func TestUnknownRecordTypeIsNotOfferedARepair(t *testing.T) {
+	path := filepath.Join(t.TempDir(), issuesFile)
+	must(t, os.WriteFile(path, []byte(testMeta+`{"_type":"milestone","name":"v2"}`+"\n"), 0o644))
+	_, err := readData(path)
+	if err == nil || !strings.Contains(err.Error(), `"milestone"`) || !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("err = %v, want an unknown-type error naming the type and line 2", err)
+	}
+	if strings.Contains(err.Error(), "restore") || strings.Contains(err.Error(), "remove") {
+		t.Errorf("err = %v, offers to remove a record that is probably fine", err)
+	}
+}
+
+func TestDuplicateMetaAndLabelRecordsKeepEveryUnknownField(t *testing.T) {
+	s := newStore(t)
+	must(t, os.WriteFile(s.path(), []byte(
+		`{"_type":"meta","version":1,"first":1}`+"\n"+
+			`{"_type":"meta","version":1,"second":2}`+"\n"+
+			`{"_type":"label","name":"x","a":1}`+"\n"+
+			`{"_type":"label","name":"x","b":2}`+"\n"), 0o644))
+	d, err := s.load()
+	must(t, err)
+	out, err := d.encode()
+	must(t, err)
+	for _, want := range []string{`"first":1`, `"second":2`, `"a":1`, `"b":2`} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("encode lost %s:\n%s", want, out)
+		}
+	}
+}
+
+func TestMarshalWithExtrasHandlesAnEmptyBase(t *testing.T) {
+	type empty struct {
+		A int `json:"a,omitempty"`
+	}
+	got, err := marshalWithExtras(empty{}, extras{"k": json.RawMessage(`1`)})
+	must(t, err)
+	if string(got) != `{"k":1}` {
+		t.Errorf("got %s, want {\"k\":1}", got)
+	}
+}
+
+// Freeze keeps the lock for a whole migration, so a writer that times out
+// behind it must not be told the holder is hung.
+func TestLockTimeoutDoesNotAccuseTheHolderOfHanging(t *testing.T) {
+	s := newStore(t)
+	fr, err := Freeze(ctx, s.dir)
+	must(t, err)
+	defer fr.Release()
+
+	s.lockTimeout = 20 * time.Millisecond
+	err = s.EditTitle(ctx, 1, "x")
+	if err == nil || !strings.Contains(err.Error(), "migrate") {
+		t.Fatalf("err = %v, want a timeout that names a running migration as a possible holder", err)
+	}
+	if strings.Contains(err.Error(), "hung") || strings.Contains(err.Error(), "stop it") {
+		t.Errorf("err = %v, tells the user to kill a holder that may be healthy", err)
 	}
 }

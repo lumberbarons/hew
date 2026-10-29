@@ -282,7 +282,7 @@ func (s *Store) lock(ctx context.Context) (unlock func(), err error) {
 		if err := waitCtx.Err(); err != nil {
 			_ = f.Close()
 			if ctx.Err() == nil {
-				return nil, fmt.Errorf("timed out after %s waiting for the lock %s: another hew process is holding it (if it is hung, find it with `lsof %s` and stop it)", timeout, path, path)
+				return nil, fmt.Errorf("timed out after %s waiting for the lock %s: another hew process is holding it (a `hew migrate local` holds it for the whole migration; if none is running, `lsof %s` names the holder)", timeout, path, path)
 			}
 			return nil, fmt.Errorf("waiting for the lock %s: %w", path, err)
 		}
@@ -322,11 +322,17 @@ func tryFlock(f *os.File) (bool, error) {
 	}
 }
 
+// staleTempAge is how old a temp file must be before cleanup touches it. Update
+// holds the lock while it writes one, but Init writes issues.jsonl without it,
+// so the lock alone cannot tell a live temp file from an abandoned one; no write
+// takes anywhere near this long.
+const staleTempAge = time.Minute
+
 // removeStaleTempFiles deletes the issues.jsonl.tmp-* files a writer killed
-// between creating its temp file and renaming it leaves behind. They are only
-// stale when no writer is mid-write, which the lock says: it is taken without
-// waiting, and if someone holds it their temp file is live and stays. Cleanup is
-// best effort — a read-only checkout simply keeps its leftovers.
+// between creating its temp file and renaming it leaves behind. Only old files
+// go, and only when the lock is free: it is taken without waiting, and if
+// someone holds it their temp file is live and stays. Cleanup is best effort —
+// a read-only checkout simply keeps its leftovers.
 func removeStaleTempFiles(dir string) {
 	stale, err := filepath.Glob(filepath.Join(dir, issuesFile+".tmp-*"))
 	if err != nil || len(stale) == 0 {
@@ -341,7 +347,9 @@ func removeStaleTempFiles(dir string) {
 		return
 	}
 	for _, p := range stale {
-		_ = os.Remove(p)
+		if info, err := os.Stat(p); err == nil && time.Since(info.ModTime()) > staleTempAge {
+			_ = os.Remove(p)
+		}
 	}
 }
 
