@@ -582,7 +582,14 @@ agent silently duplicating half a plan.
     that says so is refused instead: a `backend` this build does not know, and an
     `issues.jsonl` or `lock` with no `config.json`, are errors naming the file and
     the recovery (`hew init --local` rewrites a missing config and keeps the
-    issues). Selection asks the filesystem first — a main checkout or linked
+    issues). A `config.json` that is empty or will not decode is refused the same
+    way, naming the file and the recovery rather than the decoder's text; on a
+    migrated repo (`migrated.json` present) the advice is to restore the config,
+    because `init --local` would make the archive a live local tracker again. A
+    config beside no `issues.jsonl` is a tracker that lost its issues: `Open`
+    refuses it with the path and the recovery, and `hew init --local` recreates
+    the file empty with a new tracker id (so `apply` and `migrate` checkpoints
+    bound to the old one start over) and warns on stderr that it did. Selection asks the filesystem first — a main checkout or linked
     worktree whose `.hew` is absent cannot be local — so a repo that never opted
     in pays no `git worktree list`; git answers whenever a `.hew` exists and for
     layouts the shortcut cannot read. Anything else — git failing for another

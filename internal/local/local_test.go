@@ -203,6 +203,102 @@ func TestReadConfigSaysWhatToDoAboutADamagedFile(t *testing.T) {
 	}
 }
 
+// The recovery text is only as good as the clue to the damage: a syntax error
+// says where, a wrongly typed field says which, and the decoder's error stays
+// reachable for callers that unwrap.
+func TestReadConfigKeepsTheCauseOfDamage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, configFile)
+
+	must(t, os.WriteFile(path, []byte(`{"backend":"local",`), 0o644))
+	_, err := ReadConfig(dir)
+	var syntax *json.SyntaxError
+	if !errors.As(err, &syntax) || !strings.Contains(err.Error(), fmt.Sprintf("byte %d", syntax.Offset)) {
+		t.Errorf("truncated config: err = %v, want the syntax error reachable and its byte offset named", err)
+	}
+
+	must(t, os.WriteFile(path, []byte(`{"backend":"local","version":"one"}`), 0o644))
+	_, err = ReadConfig(dir)
+	var typed *json.UnmarshalTypeError
+	if !errors.As(err, &typed) || !strings.Contains(err.Error(), `"version"`) {
+		t.Errorf("mistyped field: err = %v, want the type error reachable and the field named", err)
+	}
+}
+
+// A migrated repo's config says github and the issues are an archive. Deleting
+// a damaged config and running init --local would flip it back to a live local
+// tracker, so the advice there must be the opposite.
+func TestReadConfigWarnsAMigratedRepoAwayFromInitLocal(t *testing.T) {
+	dir := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(dir, configFile), nil, 0o644))
+	must(t, os.WriteFile(filepath.Join(dir, MigratedFile), []byte("{}\n"), 0o644))
+	_, err := ReadConfig(dir)
+	if err == nil {
+		t.Fatal("no error")
+	}
+	for _, want := range []string{"migrated to GitHub", "do not run `hew init --local`", `{"backend":"github","version":1}`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "delete it") {
+		t.Errorf("err = %v, still advises deleting the config", err)
+	}
+}
+
+// Recreating a lost issues.jsonl starts a new history, so the tracker gets a new
+// id: checkpoints for apply and migrate are bound to the old one and would
+// otherwise map plan items onto issue numbers that no longer exist.
+func TestInitTrackerGivesARecreatedIssuesFileANewID(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), DirName)
+	res, err := InitTracker(dir)
+	must(t, err)
+	if res.IssuesRecreated {
+		t.Error("a fresh tracker reports a recreated issues file")
+	}
+	before, err := ReadConfig(dir)
+	must(t, err)
+
+	res, err = InitTracker(dir)
+	must(t, err)
+	if res.IssuesRecreated {
+		t.Error("an intact tracker reports a recreated issues file")
+	}
+	if same, _ := ReadConfig(dir); same.ID != before.ID {
+		t.Errorf("id changed on a no-op init: %q -> %q", before.ID, same.ID)
+	}
+
+	must(t, os.Remove(filepath.Join(dir, issuesFile)))
+	res, err = InitTracker(dir)
+	must(t, err)
+	if !res.IssuesRecreated {
+		t.Error("recreating a lost issues file is not reported")
+	}
+	after, err := ReadConfig(dir)
+	must(t, err)
+	if after.ID == "" || after.ID == before.ID {
+		t.Errorf("id = %q after recreating issues, want a new one (was %q)", after.ID, before.ID)
+	}
+	if after.Backend != BackendLocal {
+		t.Errorf("backend = %q, want it kept", after.Backend)
+	}
+	if _, err := Open(dir, "me"); err != nil {
+		t.Errorf("the recovered tracker does not open: %v", err)
+	}
+}
+
+func TestInitTrackerKeepsConfigExtrasWhenItRenewsTheID(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), DirName)
+	must(t, Init(dir))
+	must(t, os.WriteFile(filepath.Join(dir, configFile), []byte(`{"backend":"local","version":1,"id":"old","surprise":true}`), 0o644))
+	must(t, os.Remove(filepath.Join(dir, issuesFile)))
+	_, err := InitTracker(dir)
+	must(t, err)
+	if got := readFile(t, filepath.Join(dir, configFile)); !strings.Contains(got, `"surprise":true`) {
+		t.Errorf("config after renewing the id = %s, want the unknown field kept", got)
+	}
+}
+
 // A config that exists but is not a regular readable file is not "missing":
 // the recovery text must not pretend the file is merely damaged JSON.
 func TestReadConfigKeepsOtherReadFailuresDistinct(t *testing.T) {
@@ -227,18 +323,6 @@ func TestStoreSaysWhatToDoWhenTheIssuesFileVanishesAfterOpen(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("err = %v, want it to mention %q", err, want)
 		}
-	}
-}
-
-func TestIssuesMissingReportsOnlyAbsence(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), DirName)
-	must(t, Init(dir))
-	if IssuesMissing(dir) {
-		t.Error("a fresh tracker reads as having lost its issues")
-	}
-	must(t, os.Remove(filepath.Join(dir, issuesFile)))
-	if !IssuesMissing(dir) {
-		t.Error("a tracker without issues.jsonl does not read as missing it")
 	}
 }
 

@@ -126,9 +126,11 @@ hew close 1 --completed --reason "..."   # finishing work: there is no `hew pr`
   outside `.hew/` records that the repo is local, so once it is deleted hew can no
   longer tell, and falls back to the git remote's GitHub issues — write commands
   then act on the real repository. (A `.hew/` that survives with an
-  `issues.jsonl` but has lost its `config.json`, or names an unknown `backend`, is
-  refused with the file named instead; `hew init --local` restores the config and
-  keeps the issues.)
+  `issues.jsonl` but has lost its `config.json`, names an unknown `backend`, or
+  holds a `config.json` that is empty or unreadable, is refused with the file
+  named instead; `hew init --local` restores the config and keeps the issues. A
+  `config.json` with no `issues.jsonl` is refused too, and `hew init --local`
+  starts over with an empty one and warns that it did.)
 - **Parallel agents are safe.** Writes are serialized under a lock and replaced
   atomically, and `start` has exactly one winner. Agents are told apart per
   worktree; set `HEW_USER` to a unique value per agent when sessions share one

@@ -1021,12 +1021,12 @@ func (a *App) InitLocal(dir string) error {
 	}
 	// A config beside no issues.jsonl is a tracker that lost its issues; init
 	// is the documented way out, so it recreates the file but says so.
-	lostIssues := !fresh && local.IssuesMissing(tracker)
-	if err := local.Init(tracker); err != nil {
+	res, err := local.InitTracker(tracker)
+	if err != nil {
 		return genericErr("creating %s: %v", tracker, err)
 	}
-	if lostIssues {
-		a.warnf("%s was missing although the tracker's config exists, so its issues were lost; recreated it empty. If you have a backup, restore it over the new file", filepath.Join(tracker, "issues.jsonl"))
+	if res.IssuesRecreated {
+		a.warnf("%s", local.RecreatedIssuesNotice(filepath.Join(tracker, "issues.jsonl")))
 	}
 	if fresh {
 		// Nothing outside .hew records that this repo is local, so a deleted

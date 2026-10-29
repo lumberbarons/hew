@@ -207,12 +207,20 @@ func TestInitLocalWarnsWhenItRecreatesAMissingIssuesFile(t *testing.T) {
 	if err := os.Remove(issues); err != nil {
 		t.Fatal(err)
 	}
+	oldCfg, err := local.ReadConfig(tracker)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	again, out, errOut := newApp(newFake())
 	if err := again.InitLocal(main); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{issues, "empty", "backup"} {
+	newCfg, err := local.ReadConfig(tracker)
+	if err != nil || newCfg.ID == "" || newCfg.ID == oldCfg.ID {
+		t.Errorf("tracker id = %q, %v; want a new one (was %q) so old checkpoints stop matching", newCfg.ID, err, oldCfg.ID)
+	}
+	for _, want := range []string{issues, "empty", "backup", "new tracker id"} {
 		if !strings.Contains(errOut.String(), want) {
 			t.Errorf("stderr missing %q:\n%s", want, errOut.String())
 		}
