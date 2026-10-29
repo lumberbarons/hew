@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -118,9 +119,10 @@ func TestApplyDryRun(t *testing.T) {
 	if err := app.Apply(ctx, opts); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.calls) != 0 {
-		t.Errorf("dry run made API calls: %v", f.calls)
-	}
+	// Reads only: the existing issue the fixture references is looked up, as it
+	// is on the real run, so the dry run can show the refusal the real run
+	// would hit (#233).
+	assertOnlyReads(t, f)
 	if _, err := os.Stat(opts.StatePath); !os.IsNotExist(err) {
 		t.Error("dry run wrote state")
 	}
@@ -309,12 +311,20 @@ func TestApplyCreatesLabels(t *testing.T) {
 	}
 }
 
-func TestApplyFailedEdgeWarns(t *testing.T) {
-	// A numeric blocked-by pointing at an issue that doesn't exist fails at
-	// the API; the create must survive and the edge failure must warn.
-	f, app, opts := applySetup(t, `{"title":"x","type":"task","blocked-by":[999]}`+"\n")
-	if err := app.Apply(ctx, opts); err != nil {
-		t.Fatal(err)
+// A reference to an existing issue is checked before the first write, so the
+// failure that is left for after creation is a race, not a typo. The write path
+// can still fail then (a GitHub error on one edge): the issue is real, the edge
+// is not, and the exit code has to say so — a script cannot read stderr.
+func TestApplyFailedEdgeWarnsAndExitsNonZero(t *testing.T) {
+	f, app, opts := applySetup(t, `{"title":"x","type":"task","blocked-by":[42]}`+"\n")
+	f.failOn["AddBlockedBy"] = errors.New("boom")
+	err := app.Apply(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "not wired") {
+		t.Fatalf("err = %v, want a non-zero exit naming the unwired edge", err)
+	}
+	var exit *ExitError
+	if !errors.As(err, &exit) || exit.Code != ExitGeneric {
+		t.Errorf("err = %#v, want an ExitError with ExitGeneric", err)
 	}
 	if f.byNumber(101) == nil {
 		t.Fatal("issue not created")
@@ -322,6 +332,152 @@ func TestApplyFailedEdgeWarns(t *testing.T) {
 	errOut := app.ErrOut.(interface{ String() string }).String()
 	if !strings.Contains(errOut, "blocked-by edge") {
 		t.Errorf("no edge warning: %q", errOut)
+	}
+}
+
+// The result is still emitted when an edge failed: the created issues exist,
+// and the mapping is how the caller finds them.
+func TestApplyFailedEdgeStillReportsTheResult(t *testing.T) {
+	f, app, opts := applySetup(t, `{"title":"x","type":"task","blocked-by":[42]}`+"\n")
+	app.JSON = true
+	f.failOn["AddBlockedBy"] = errors.New("boom")
+	if err := app.Apply(ctx, opts); err == nil {
+		t.Fatal("dropped edge exited 0")
+	}
+	out := app.Out.(interface{ String() string }).String()
+	var got struct {
+		Created  int            `json:"created"`
+		Warnings []string       `json:"warnings"`
+		Mapping  map[string]int `json:"mapping"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("result not emitted as JSON: %v: %q", err, out)
+	}
+	if got.Created != 1 || len(got.Warnings) != 1 || len(got.Mapping) != 1 {
+		t.Errorf("result = %+v", got)
+	}
+}
+
+// readOnlyAfterEdge makes the checkpoint directory unwritable once an edge has
+// landed, so the save that follows it fails.
+type readOnlyAfterEdge struct {
+	*fakeClient
+	t   *testing.T
+	dir string
+}
+
+func (c readOnlyAfterEdge) AddBlockedBy(ctx context.Context, issue, blocker int) error {
+	if err := c.fakeClient.AddBlockedBy(ctx, issue, blocker); err != nil {
+		return err
+	}
+	if err := os.Chmod(c.dir, 0o500); err != nil {
+		c.t.Fatal(err)
+	}
+	c.t.Cleanup(func() { _ = os.Chmod(c.dir, 0o700) })
+	return nil
+}
+
+// A checkpoint that cannot be saved is worth a warning, but the edge did land:
+// reporting it as unwired would send the user to rerun and re-attempt an edge
+// GitHub already has.
+func TestApplyCheckpointSaveFailureIsNotAnUnwiredEdge(t *testing.T) {
+	f, app, opts := applySetup(t, `{"title":"x","type":"task","blocked-by":[42]}`+"\n")
+	app.Client = readOnlyAfterEdge{fakeClient: f, t: t, dir: filepath.Dir(opts.StatePath)}
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatalf("an edge that landed exited non-zero: %v", err)
+	}
+	if errOut := app.ErrOut.(interface{ String() string }).String(); !strings.Contains(errOut, "saving checkpoint") {
+		t.Errorf("save failure not warned about: %q", errOut)
+	}
+}
+
+// One edge reads singular.
+func TestApplyUnwiredEdgeCountAgrees(t *testing.T) {
+	f, app, opts := applySetup(t, `{"title":"x","type":"task","blocked-by":[42]}`+"\n")
+	f.failOn["AddBlockedBy"] = errors.New("boom")
+	err := app.Apply(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "1 dependency edge was not wired") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// Every existing-issue reference the plan carries — parent, blocked-by and
+// discovered-from — is looked up before anything is created, on the dry run as
+// well as the real one, and the refusal names the line and the number (#233).
+func TestApplyRefusesAMissingExistingReference(t *testing.T) {
+	for _, tc := range []struct {
+		name, line string
+	}{
+		{"parent", `"parent":9999`},
+		{"blocked-by", `"blocked-by":[42,9999]`},
+		{"discovered-from", `"discovered-from":9999`},
+	} {
+		for _, dryRun := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/dry-run=%t", tc.name, dryRun), func(t *testing.T) {
+				plan := `{"title":"First","type":"task"}` + "\n" +
+					`{"title":"Second","type":"task",` + tc.line + `}` + "\n"
+				f, app, opts := applySetup(t, plan)
+				opts.DryRun = dryRun
+				err := app.Apply(ctx, opts)
+				if err == nil {
+					t.Fatal("a plan referencing a missing issue was accepted")
+				}
+				for _, want := range []string{"line 2", tc.name, "#9999"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("err = %q, want it to contain %q", err, want)
+					}
+				}
+				assertOnlyReads(t, f)
+				if f.byNumber(101) != nil {
+					t.Error("an issue was created before the plan was refused")
+				}
+				if _, statErr := os.Stat(opts.StatePath); statErr == nil {
+					t.Error("a refused plan still wrote a checkpoint")
+				}
+			})
+		}
+	}
+}
+
+// The existing-issue check also holds on the local store, whose "not found"
+// comes from a different implementation than the fake's.
+func TestApplyRefusesAMissingExistingReferenceOnEachBackend(t *testing.T) {
+	eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+		app, _, _ := newLocalApp(store)
+		opts := ApplyOpts{File: filepath.Join(t.TempDir(), "plan.jsonl")}
+		if err := os.WriteFile(opts.File, []byte(`{"title":"Orphan","type":"task","parent":9999}`+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		err := app.Apply(ctx, opts)
+		if err == nil || !strings.Contains(err.Error(), "line 1") || !strings.Contains(err.Error(), "#9999") {
+			t.Fatalf("err = %v, want a refusal naming line 1 and #9999", err)
+		}
+		issues, listErr := store.ListIssues(ctx, []gh.IssueState{gh.StateOpen})
+		if listErr != nil {
+			t.Fatal(listErr)
+		}
+		if len(issues) != 0 {
+			t.Errorf("issues created for a refused plan: %+v", issues)
+		}
+	})
+}
+
+// A numeric reference several entries share is looked up once.
+func TestApplyChecksEachExistingReferenceOnce(t *testing.T) {
+	f, app, opts := applySetup(t, `{"title":"A","type":"task","blocked-by":[42]}
+{"title":"B","type":"task","blocked-by":[42],"discovered-from":42}
+`)
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatal(err)
+	}
+	reads := 0
+	for _, c := range f.calls {
+		if c == "GetIssue 42" {
+			reads++
+		}
+	}
+	if reads != 1 {
+		t.Errorf("GetIssue 42 called %d times, want 1: %v", reads, f.calls)
 	}
 }
 
@@ -365,20 +521,30 @@ func TestApplyResumeSkipsWiredEdges(t *testing.T) {
 // and warns again — the whole point of recording the successful ones is
 // that the remaining warnings are real.
 func TestApplyResumeRetriesAFailedEdge(t *testing.T) {
-	f, app, opts := applySetup(t, `{"title":"x","type":"task","blocked-by":[999]}`+"\n")
-	if err := app.Apply(ctx, opts); err != nil {
-		t.Fatal(err)
+	f, app, opts := applySetup(t, `{"title":"x","type":"task","blocked-by":[42]}`+"\n")
+	f.failOn["AddBlockedBy"] = errors.New("boom")
+	if err := app.Apply(ctx, opts); err == nil {
+		t.Fatal("dropped edge exited 0")
 	}
 	if edges := readState(t, opts.StatePath).Edges; len(edges) != 0 {
 		t.Errorf("failed edge was checkpointed: %v", edges)
 	}
 
 	app2, _, errOut := newApp(f)
-	if err := app2.Apply(ctx, opts); err != nil {
-		t.Fatal(err)
+	if err := app2.Apply(ctx, opts); err == nil {
+		t.Fatal("resume of a still-failing edge exited 0")
 	}
 	if !strings.Contains(errOut.String(), "blocked-by edge") {
 		t.Errorf("resume did not retry the failed edge: %q", errOut.String())
+	}
+
+	delete(f.failOn, "AddBlockedBy")
+	app3, _, errOut3 := newApp(f)
+	if err := app3.Apply(ctx, opts); err != nil {
+		t.Fatalf("resume after the cause cleared: %v", err)
+	}
+	if errOut3.String() != "" {
+		t.Errorf("clean resume warned: %q", errOut3.String())
 	}
 }
 
@@ -746,8 +912,8 @@ func TestApplyRefusesAMissingDiscoveredFrom(t *testing.T) {
 			f, app, opts := applySetupWith(t, missing, issue(7, "Source", "P2", "task"))
 			opts.DryRun = dryRun
 			err := app.Apply(ctx, opts)
-			if err == nil || !strings.Contains(err.Error(), "--discovered-from") || !strings.Contains(err.Error(), "#99") {
-				t.Fatalf("err = %v, want a --discovered-from refusal naming #99", err)
+			if err == nil || !strings.Contains(err.Error(), "line 3") || !strings.Contains(err.Error(), "discovered-from") || !strings.Contains(err.Error(), "#99") {
+				t.Fatalf("err = %v, want a discovered-from refusal naming line 3 and #99", err)
 			}
 			assertOnlyReads(t, f)
 			if _, statErr := os.Stat(opts.StatePath); statErr == nil {

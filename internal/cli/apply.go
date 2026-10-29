@@ -24,7 +24,9 @@ type ApplyOpts struct {
 	// from elsewhere is refused rather than trusted (#81). Empty means
 	// File + ".state.json".
 	StatePath string
-	// DryRun prints the plan without touching GitHub.
+	// DryRun prints the plan without creating anything. It still reads: the
+	// state file's issues and every existing issue the plan references are
+	// looked up, so it shows the refusal the real run would hit.
 	DryRun bool
 	// Throttle is slept between writes to stay under GitHub's secondary
 	// rate limits for content creation.
@@ -104,9 +106,10 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 		}
 	}
 
-	// Same reasoning: a dangling provenance link is a typo, and finding it
-	// after half the plan is filed leaves those issues behind to clean up.
-	if err := a.requireDiscoveredFrom(ctx, entries, state.Mapping); err != nil {
+	// Same reasoning: a reference to an issue that does not exist is a typo,
+	// and finding it after half the plan is filed leaves those issues behind to
+	// clean up (#233).
+	if err := a.requireExistingRefs(ctx, entries, state.Mapping); err != nil {
 		return err
 	}
 
@@ -122,15 +125,27 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	if err != nil {
 		return err
 	}
-	wired, warned := a.applyWire(ctx, entries, state, opts)
+	wired, unwired, warned := a.applyWire(ctx, entries, state, opts)
 
-	return a.emitResult(map[string]any{
+	if err := a.emitResult(map[string]any{
 		"created": created, "wired": wired, "warnings": warned,
 		"mapping": state.Mapping,
 	}, func() {
 		a.printf("applied %s: %d created, %d dependencies wired\n", opts.File, created, wired)
 		a.printf("mapping saved to %s\n", opts.StatePath)
-	})
+	}); err != nil {
+		return err
+	}
+	// The issues exist and the result above says so, but an edge that did not
+	// land is a plan that was not applied: a script branches on the exit code,
+	// not on stderr (#233). The edge is not checkpointed, so a rerun retries it.
+	switch {
+	case unwired == 1:
+		return genericErr("1 dependency edge was not wired (see warnings): fix the cause and rerun to retry it")
+	case unwired > 1:
+		return genericErr("%d dependency edges were not wired (see warnings): fix the cause and rerun to retry them", unwired)
+	}
+	return nil
 }
 
 // applyPlanEntry is one issue a dry run would create, in the shape both the
@@ -236,12 +251,14 @@ func (a *App) applyCreate(ctx context.Context, entries []plan.Entry, state *batc
 
 // applyWire connects parents and blockers, checkpointing each edge as it
 // lands so a resume skips it. Failures warn and continue, and are retried on
-// the next run — but a *successful* edge is never re-attempted, because
-// GitHub rejects the duplicate and the warning it produces would drown the
-// ones that mean something. Local references need no cycle check here:
+// the next run; they are counted in unwired so Apply can exit non-zero. A
+// warning about the checkpoint file is not counted, because that edge did land.
+// A *successful* edge is never re-attempted, because GitHub rejects the
+// duplicate and the warning it produces would drown the ones that mean
+// something. Local references need no cycle check here:
 // plan.Parse already rejected cycles, and existing issues cannot depend on
 // issues that didn't exist yet.
-func (a *App) applyWire(ctx context.Context, entries []plan.Entry, state *batchState, opts ApplyOpts) (wired int, warnings []string) {
+func (a *App) applyWire(ctx context.Context, entries []plan.Entry, state *batchState, opts ApplyOpts) (wired, unwired int, warnings []string) {
 	warn := func(format string, args ...any) {
 		msg := fmt.Sprintf(format, args...)
 		warnings = append(warnings, msg)
@@ -265,6 +282,7 @@ func (a *App) applyWire(ctx context.Context, entries []plan.Entry, state *batchS
 			to, ok := resolve(edge.To)
 			if !ok {
 				warn("%s %s of %s not created, edge dropped", edge.Kind, edge.To, e.Key())
+				unwired++
 				continue
 			}
 			key := edgeKey(edge.Kind, from, to)
@@ -279,32 +297,42 @@ func (a *App) applyWire(ctx context.Context, entries []plan.Entry, state *batchS
 			}
 			if err != nil {
 				warn("%s edge #%d→#%d: %v", edge.Kind, from, to, err)
+				unwired++
 				continue
 			}
 			state.Edges[key] = true
 			if err := saveBatchState(opts.StatePath, state); err != nil {
-				warn("%v", err)
+				warn("saving checkpoint: %v", err)
 			}
 			wired++
 			sleep(opts.Throttle)
 		}
 	}
-	return wired, warnings
+	return wired, unwired, warnings
 }
 
-// requireDiscoveredFrom checks every distinct discovered-from source in the
-// plan exists, reads only, naming the entry that carries a bad one. Entries
-// an earlier run already created are skipped: their source was checked then,
-// and refusing a resume over one that has since gone would strand the rest.
-func (a *App) requireDiscoveredFrom(ctx context.Context, entries []plan.Entry, created map[string]int) error {
+// requireExistingRefs checks every issue the plan references by number —
+// parent, blocked-by and discovered-from — exists, reads only, naming the line
+// and field that carries a bad one. Each number is looked up once, and the
+// first line to use it is the one reported. Entries an earlier run already
+// created are skipped: their references were checked then, and refusing a
+// resume over one that has since gone would strand the rest. A reference of
+// theirs that was never wired is retried and, if it still fails, exits
+// non-zero from the wire pass.
+func (a *App) requireExistingRefs(ctx context.Context, entries []plan.Entry, created map[string]int) error {
 	checked := map[int]bool{}
 	for _, e := range entries {
-		if _, done := created[e.Key()]; done || e.DiscoveredFrom <= 0 || checked[e.DiscoveredFrom] {
+		if _, done := created[e.Key()]; done {
 			continue
 		}
-		checked[e.DiscoveredFrom] = true
-		if _, err := a.requireIssue(ctx, e.DiscoveredFrom, "--discovered-from"); err != nil {
-			return fmt.Errorf("%s: %w", e.Key(), err)
+		for _, ref := range e.ExistingRefs() {
+			if checked[ref.Number] {
+				continue
+			}
+			checked[ref.Number] = true
+			if _, err := a.requireIssue(ctx, ref.Number, ref.Field); err != nil {
+				return fmt.Errorf("line %d: %w", ref.Line, err)
+			}
 		}
 	}
 	return nil

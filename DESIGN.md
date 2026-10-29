@@ -265,7 +265,9 @@ obvious from a flag name.
   Progress is checkpointed after every create and every edge wired, so a run is
   resumable without duplicates and re-running a finished plan is a quiet no-op.
   Plan-internal dependency cycles are rejected up front, a complete check since
-  pre-existing issues cannot reference entries that do not exist yet. See
+  pre-existing issues cannot reference entries that do not exist yet. Numeric
+  references (`parent`, `blocked-by`, `discovered-from`) are looked up before the
+  first write, and an edge that still fails to wire exits non-zero. See
   Checkpoint binding.
 - **`migrate beads`** imports `.beads/issues.jsonl`, parsed raw with no bd
   dependency: P0–P4 and types map to labels, blocks to blocked-by, parent-child

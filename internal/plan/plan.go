@@ -118,6 +118,38 @@ func (e Entry) Edges() []Edge {
 	return out
 }
 
+// ExistingRef is a numeric reference in a plan entry: an issue that must
+// already exist, which parsing cannot verify.
+type ExistingRef struct {
+	// Line is the 1-based line of the entry carrying the reference.
+	Line int
+	// Field is the plan field it came from: parent, blocked-by or
+	// discovered-from.
+	Field  string
+	Number int
+}
+
+// ExistingRefs returns the entry's references to issues outside the plan, in
+// field order: parent, blockers, then discovered-from. Local ids are left out —
+// Parse already proved they match an entry — so what remains is exactly what
+// the caller has to look up before writing anything, since a number that names
+// no issue is only discovered by the store.
+func (e Entry) ExistingRefs() []ExistingRef {
+	var out []ExistingRef
+	if e.Parent != nil && e.Parent.ID == "" {
+		out = append(out, ExistingRef{Line: e.Line, Field: "parent", Number: e.Parent.Number})
+	}
+	for _, b := range e.BlockedBy {
+		if b.ID == "" {
+			out = append(out, ExistingRef{Line: e.Line, Field: "blocked-by", Number: b.Number})
+		}
+	}
+	if e.DiscoveredFrom > 0 {
+		out = append(out, ExistingRef{Line: e.Line, Field: "discovered-from", Number: e.DiscoveredFrom})
+	}
+	return out
+}
+
 // rawEntry is the wire shape of one line; field names match the create
 // command's flags.
 type rawEntry struct {
@@ -267,7 +299,7 @@ func validate(entries []Entry) error {
 }
 
 // checkRef validates a single reference. Numeric refs pass — they point at
-// existing issues the API will verify at wire time.
+// existing issues only the store can vouch for (see Entry.ExistingRefs).
 func checkRef(r Ref, e Entry, ids map[string]int, kind string) error {
 	if r.ID == "" {
 		return nil
