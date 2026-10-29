@@ -63,7 +63,7 @@ func (a *App) MigrateLocal(ctx context.Context, opts MigrateLocalOpts) error {
 		}
 		snap = s
 	} else {
-		fr, err := local.Freeze(opts.Dir)
+		fr, err := local.Freeze(ctx, opts.Dir)
 		if err != nil {
 			return genericErr("%v", err)
 		}

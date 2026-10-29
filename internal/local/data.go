@@ -1,13 +1,16 @@
 package local
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/lumberbarons/hew/internal/gh"
@@ -23,9 +26,16 @@ const (
 	typeIssue = "issue"
 )
 
+// extras holds the fields of a record this build does not know. A newer hew
+// may add fields without bumping the format version, and every mutation
+// rewrites the whole file, so they are carried through verbatim rather than
+// dropped or refused.
+type extras map[string]json.RawMessage
+
 type metaRec struct {
 	Type    string `json:"_type"`
 	Version int    `json:"version"`
+	extra   extras
 }
 
 type labelRec struct {
@@ -33,6 +43,7 @@ type labelRec struct {
 	Name        string `json:"name"`
 	Color       string `json:"color,omitempty"`
 	Description string `json:"description,omitempty"`
+	extra       extras
 }
 
 type commentRec struct {
@@ -58,12 +69,88 @@ type issueRec struct {
 	Parent      int          `json:"parent,omitempty"`
 	BlockedBy   []int        `json:"blocked_by,omitempty"`
 	Comments    []commentRec `json:"comments,omitempty"`
+	extra       extras
+}
+
+// The marshalers append a record's unknown fields after the ones it knows.
+// The plain aliases drop the methods, so marshalling them does not recurse.
+
+func (r metaRec) MarshalJSON() ([]byte, error) {
+	type plain metaRec
+	return marshalWithExtras(plain(r), r.extra)
+}
+
+func (r labelRec) MarshalJSON() ([]byte, error) {
+	type plain labelRec
+	return marshalWithExtras(plain(r), r.extra)
+}
+
+func (r issueRec) MarshalJSON() ([]byte, error) {
+	type plain issueRec
+	return marshalWithExtras(plain(r), r.extra)
+}
+
+// marshalWithExtras encodes v, a struct that always has at least one field
+// set, and splices x in before the closing brace in a stable order. Known
+// fields win: x never holds a name v already writes.
+func marshalWithExtras(v any, x extras) ([]byte, error) {
+	line, err := marshalLine(v)
+	if err != nil {
+		return nil, err
+	}
+	out := bytes.TrimSuffix(bytes.TrimRight(line, "\n"), []byte("}"))
+	keys := make([]string, 0, len(x))
+	for k := range x {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		name, err := marshalLine(k)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ',')
+		out = append(out, bytes.TrimRight(name, "\n")...)
+		out = append(out, ':')
+		out = append(out, x[k]...)
+	}
+	return append(out, '}'), nil
+}
+
+// unknownFields returns the fields of raw that v's type has no json name for.
+// Names are compared case-insensitively because decoding matches them that
+// way: "Title" fills Title, so it is not unknown.
+func unknownFields(raw []byte, v any) (extras, error) {
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &all); err != nil {
+		return nil, err
+	}
+	t := reflect.TypeOf(v)
+	for i := range t.NumField() {
+		tag, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		for k := range all {
+			if strings.EqualFold(k, tag) {
+				delete(all, k)
+			}
+		}
+	}
+	if len(all) == 0 {
+		return nil, nil
+	}
+	return all, nil
 }
 
 // data is the whole file in memory. Issues stay sorted by number.
 type data struct {
 	labels []gh.Label
 	issues []*issueRec
+
+	// Unknown fields of the meta record and of each label, by label name.
+	metaExtra  extras
+	labelExtra map[string]extras
 }
 
 func readData(path string) (*data, error) {
@@ -75,59 +162,33 @@ func readData(path string) (*data, error) {
 	return decodeData(f, path)
 }
 
-// decodeData parses the file's records; path only names the source in errors.
+// decodeData parses the file's records, one per line; path only names the
+// source in errors. Blank lines are skipped but still counted, so a reported
+// line number is the one an editor shows.
 func decodeData(r io.Reader, path string) (*data, error) {
 	d := &data{}
 	seen := map[int]bool{}
 	sawMeta := false
-	dec := json.NewDecoder(r)
+	br := bufio.NewReader(r)
 	for n := 1; ; n++ {
-		var raw json.RawMessage
-		if err := dec.Decode(&raw); errors.Is(err, io.EOF) {
+		line, readErr := br.ReadBytes('\n')
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return nil, fmt.Errorf("%s: line %d: %w", path, n, readErr)
+		}
+		if raw := bytes.TrimSpace(line); len(raw) > 0 {
+			meta, err := d.decodeRecord(raw, seen)
+			if err != nil {
+				var newer newerFormatError
+				if errors.As(err, &newer) {
+					// Not damaged, only too new: repairing it would corrupt it.
+					return nil, fmt.Errorf("%s: line %d: %w", path, n, err)
+				}
+				return nil, fmt.Errorf("%s: line %d: %w (to recover, fix or remove that line, or restore the file from a backup)", path, n, err)
+			}
+			sawMeta = sawMeta || meta
+		}
+		if readErr != nil {
 			break
-		} else if err != nil {
-			return nil, fmt.Errorf("%s: record %d: %w", path, n, err)
-		}
-		bad := func(err error) error { return fmt.Errorf("%s: record %d: %w", path, n, err) }
-
-		var head struct {
-			Type string `json:"_type"`
-		}
-		if err := json.Unmarshal(raw, &head); err != nil {
-			return nil, bad(err)
-		}
-		switch head.Type {
-		case typeMeta:
-			var m metaRec
-			if err := strictUnmarshal(raw, &m); err != nil {
-				return nil, bad(err)
-			}
-			if m.Version > formatVersion {
-				return nil, bad(fmt.Errorf("written by a newer hew (format %d, this build reads %d)", m.Version, formatVersion))
-			}
-			sawMeta = true
-		case typeLabel:
-			var l labelRec
-			if err := strictUnmarshal(raw, &l); err != nil {
-				return nil, bad(err)
-			}
-			d.labels = append(d.labels, gh.Label{Name: l.Name, Color: l.Color, Description: l.Description})
-		case "", typeIssue:
-			var rec issueRec
-			if err := strictUnmarshal(raw, &rec); err != nil {
-				return nil, bad(err)
-			}
-			if rec.Number <= 0 || seen[rec.Number] {
-				return nil, bad(fmt.Errorf("issue number %d is invalid or repeated", rec.Number))
-			}
-			if rec.State != string(gh.StateOpen) && rec.State != string(gh.StateClosed) {
-				return nil, bad(fmt.Errorf("issue %d has unknown state %q (want %s or %s)", rec.Number, rec.State, gh.StateOpen, gh.StateClosed))
-			}
-			seen[rec.Number] = true
-			rec.Type = ""
-			d.issues = append(d.issues, &rec)
-		default:
-			return nil, bad(fmt.Errorf("unknown record type %q", head.Type))
 		}
 	}
 	if !sawMeta {
@@ -135,6 +196,74 @@ func decodeData(r io.Reader, path string) (*data, error) {
 	}
 	slices.SortFunc(d.issues, func(a, b *issueRec) int { return a.Number - b.Number })
 	return d, nil
+}
+
+// newerFormatError marks a meta record from a hew that writes a format this
+// build cannot read.
+type newerFormatError struct{ version int }
+
+func (e newerFormatError) Error() string {
+	return fmt.Sprintf("written by a newer hew (format %d, this build reads %d)", e.version, formatVersion)
+}
+
+// decodeRecord adds one record to d and reports whether it was the meta record.
+func (d *data) decodeRecord(raw []byte, seen map[int]bool) (isMeta bool, err error) {
+	var head struct {
+		Type string `json:"_type"`
+	}
+	if err := json.Unmarshal(raw, &head); err != nil {
+		return false, err
+	}
+	switch head.Type {
+	case typeMeta:
+		var m metaRec
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return false, err
+		}
+		if m.Version > formatVersion {
+			return false, newerFormatError{m.Version}
+		}
+		if d.metaExtra, err = unknownFields(raw, m); err != nil {
+			return false, err
+		}
+		return true, nil
+	case typeLabel:
+		var l labelRec
+		if err := json.Unmarshal(raw, &l); err != nil {
+			return false, err
+		}
+		x, err := unknownFields(raw, l)
+		if err != nil {
+			return false, err
+		}
+		if x != nil {
+			if d.labelExtra == nil {
+				d.labelExtra = map[string]extras{}
+			}
+			d.labelExtra[l.Name] = x
+		}
+		d.labels = append(d.labels, gh.Label{Name: l.Name, Color: l.Color, Description: l.Description})
+	case "", typeIssue:
+		var rec issueRec
+		if err := json.Unmarshal(raw, &rec); err != nil {
+			return false, err
+		}
+		if rec.Number <= 0 || seen[rec.Number] {
+			return false, fmt.Errorf("issue number %d is invalid or repeated", rec.Number)
+		}
+		if rec.State != string(gh.StateOpen) && rec.State != string(gh.StateClosed) {
+			return false, fmt.Errorf("issue %d has unknown state %q (want %s or %s)", rec.Number, rec.State, gh.StateOpen, gh.StateClosed)
+		}
+		if rec.extra, err = unknownFields(raw, rec); err != nil {
+			return false, err
+		}
+		seen[rec.Number] = true
+		rec.Type = ""
+		d.issues = append(d.issues, &rec)
+	default:
+		return false, fmt.Errorf("unknown record type %q", head.Type)
+	}
+	return false, nil
 }
 
 func (d *data) encode() ([]byte, error) {
@@ -147,11 +276,11 @@ func (d *data) encode() ([]byte, error) {
 		buf.Write(line)
 		return nil
 	}
-	if err := write(metaRec{Type: typeMeta, Version: formatVersion}); err != nil {
+	if err := write(metaRec{Type: typeMeta, Version: formatVersion, extra: d.metaExtra}); err != nil {
 		return nil, err
 	}
 	for _, l := range d.labels {
-		if err := write(labelRec{Type: typeLabel, Name: l.Name, Color: l.Color, Description: l.Description}); err != nil {
+		if err := write(labelRec{Type: typeLabel, Name: l.Name, Color: l.Color, Description: l.Description, extra: d.labelExtra[l.Name]}); err != nil {
 			return nil, err
 		}
 	}
@@ -175,8 +304,9 @@ func marshalLine(v any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// strictUnmarshal refuses unknown fields: the file is rewritten on every
-// mutation, so a field this build doesn't know would be silently dropped.
+// strictUnmarshal refuses unknown fields. It guards the small files that are
+// rewritten from scratch (config.json, the migration record); the issue file
+// carries unknown fields through instead.
 func strictUnmarshal(raw []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
