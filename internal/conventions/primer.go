@@ -28,7 +28,7 @@ hew create ... --discovered-from <n>.`
 - Bodies: ### Where / ### Problem or ### Goal / ### Fix or ### Approach / ### Done when (checklist). Omit empty sections.
 - Issues missing priority/type are untriaged, not broken: unvetted input ready, prime, list and search all omit; only hew triage (and show <n>) emits it — label via hew set. Missing priority renders P? and sorts last.
 - Never call hew triage unless the user explicitly asked — it is the sole emitter of content no maintainer has vetted.
-- start refuses claimed issues: exit 3 pick the next ready item, exit 5 the claim is yours — resume it. Untriaged issues need start --priority.
+- start refuses claimed issues: exit 3 pick the next ready item, exit 5 the claim is yours — resume it, exit 6 open blockers — pick another. Untriaged issues need start --priority.
 
 Output: one line per issue — #n priority type (areas) title [blocked by #m; epic done/total; in progress @user].
 list sorts ready work first, then claimed, blocked, epics. Prefer text output; --json on list commands emits NDJSON.

@@ -93,7 +93,8 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
   `create --discovered-from <n>`.
 - **Claiming is guarded**: `start` refuses an issue that is already assigned or
   `in-progress` and exits with a distinct code, so an agent loop moves on to the
-  next ready item instead of doubling up. GitHub has no conditional writes, so its
+  next ready item instead of doubling up. It likewise refuses an issue with open
+  blockers (exit 6); `ready` is not the only blocker filter. GitHub has no conditional writes, so its
   guard is check-then-act with a re-read after claiming — a small race window
   remains (see open questions). The local backend holds an exclusive lock and
   implements the optional atomic claim (`gh.Claimer`), so simultaneous starts
@@ -222,7 +223,12 @@ obvious from a flag name.
   untriaged half of dedup.
 - **`start`** is a guarded claim. It refuses an issue that is assigned or
   in-progress: exit 3 means pick the next ready item, exit 5 means the claimant
-  is you and the response is to resume that work. `--force` steals. An untriaged
+  is you and the response is to resume that work. It also refuses an issue with
+  open blockers — the issues `ready` hides — with exit 6 naming them, so an id taken
+  from `list` or `show` cannot claim work whose prerequisite is unfinished; closed
+  blockers do not count, and a capped blocker list warns instead of refusing on
+  what it cannot see. `--force` steals a claim or overrides the blockers (the way
+  to take an issue stuck in a dependency cycle). An untriaged
   issue requires `--priority`, because claiming is triage. `--show` (or
   `--json`) returns the body from the post-claim read with no extra fetch, so a
   separate `show` after claiming is unnecessary; like every mutation it omits
@@ -474,7 +480,7 @@ object is neither the text primer nor the data schema.
   exits 0 with `no ready work`; `start` on an issue claimed by someone else exits 3
   with `already claimed`; `start` on an issue you already claimed exits 5, because
   the response is to resume that work rather than to pick a different item; auth
-  failure exits 4; etc.). The exit code is the signal agents branch on — a
+  failure exits 4; `start` on an issue with open blockers exits 6; etc.). The exit code is the signal agents branch on — a
   distinction worth acting on gets a code, not a `--json`-only field.
 
 ## Checkpoint binding
@@ -703,7 +709,7 @@ any product code.
   blocker, so a cycle silently excludes all its members from `ready` forever.
   `prime` and `ready` warn when they see one.
 
-## Token efficiency (measured 2026-10-23)
+## Token efficiency (measured 2026-10-29)
 
 The token-lean claim, measured rather than asserted. The harness lives in
 [evals/](evals/): `capture` records both sides' raw output from a live repo into
@@ -730,17 +736,17 @@ lumberbarons/solar-controller — 14 open issues:
 | `hew ready` | 324 | 1969 | 6.1x | gh issue list --json † |
 | `hew list` | 353 | 1172 | 3.3x | gh api graphql (open issues) |
 | `hew list --json` | 1607 | 1172 | 0.7x | gh api graphql (open issues) |
-| `hew prime` | 1092 | 1172 | 1.1x | gh api graphql (open issues) |
+| `hew prime` | 1101 | 1172 | 1.1x | gh api graphql (open issues) |
 | `hew show #119` | 430 | 590 | 1.4x | gh issue view --json + gh api graphql |
 
 Findings, including the ones that don't flatter the tool:
 
 - **The claim holds for the reads an agent actually loops on.** `ready` and
-  `list` cost 16–25 tokens per open issue against 75–84 for the equivalent
-  GraphQL and 104–141 for `gh issue list --json` — 3.3x–4.6x and 5.3x–6.4x
+  `list` cost 16–25 tokens per open issue against 74–84 for the equivalent
+  GraphQL and 105–141 for `gh issue list --json` — 3.3x–4.6x and 5.3x–6.4x
   respectively across both fixtures. This is the whole-tracker read that
   happens every iteration, so it is where the saving compounds.
-- **`show` saves less: 1.3x–1.7x.** Bodies dominate `show` and both sides carry
+- **`show` saves less: 1.3x–1.5x.** Bodies dominate `show` and both sides carry
   them verbatim; the value there is the deps line, not the token count. Worth
   saying plainly rather than averaging into a headline.
 - **`list --json` currently costs *more* than the raw GraphQL it replaces
@@ -748,10 +754,10 @@ Findings, including the ones that don't flatter the tool:
   empty arrays, derived booleans, `createdAt` — where the lean query writes seven
   fields. The schema's stability is deliberate (agents parse it), but the token
   cost is a real regression against the tool's own claim, filed as #62.
-- **`prime` measures 1092–1101 tokens against its ~1200 target, restated in
+- **`prime` measures 1101–1110 tokens against its ~1200 target, restated in
   #63.** The ~600 target came from the mock, not from output: the static
-  conventions half alone measures ~890 tokens under o200k_base, and the live
-  sections add ~150–165 on the fixtures. Every command and flag of the cheatsheet
+  conventions half alone measures ~920 tokens under o200k_base, and the live
+  sections add ~180–190 on the fixtures. Every command and flag of the cheatsheet
   is documented by design (`TestPrimerMatchesCommandSurface` pins that
   surface), so the original target was unreachable without gutting the tool's
   core teaching — the budget moved to the measured number instead, and the

@@ -26,6 +26,9 @@ const (
 	// to resume it, not to pick a different item. The guard is unchanged —
 	// this only says whose claim blocked it.
 	ExitClaimedByYou = 5
+	// ExitBlocked is start's "open blockers" refusal: ready hides the issue
+	// until its blockers close, so pick the next ready item instead.
+	ExitBlocked = 6
 )
 
 // ExitError carries a specific exit code to main.
