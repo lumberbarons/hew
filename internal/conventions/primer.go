@@ -34,7 +34,7 @@ Output: one line per issue — #n priority type (areas) title [blocked by #m; ep
 list sorts ready work first, then claimed, blocked, epics. Prefer text output; --json on list commands emits NDJSON.
 
 Commands: ready [--limit N (0 for all)] | list [--label X --epic N --state open/closed/all --bodies (with --json)] |
-show <n> | search <terms> | triage [--search <terms>] |
+show <n> | config (read-only: backend, repo or path/id) | search <terms> | triage [--search <terms>] |
 create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
 draft [same section flags] --out F | --check F (compose/validate a body locally, no GitHub; then create --body-file F) |

@@ -1002,7 +1002,7 @@ func TestLocateFindsOnlyAConfiguredLocalTracker(t *testing.T) {
 	}
 
 	t.Run("no .hew directory is not local", func(t *testing.T) {
-		got, ok, err := locate(main, t.TempDir())
+		got, _, ok, err := locateConfig(main, t.TempDir())
 		if err != nil || ok || got != "" {
 			t.Errorf("locate = %q, %v, %v; want not local", got, ok, err)
 		}
@@ -1010,16 +1010,19 @@ func TestLocateFindsOnlyAConfiguredLocalTracker(t *testing.T) {
 	t.Run("a .hew directory without a config is not local", func(t *testing.T) {
 		root := t.TempDir()
 		must(t, os.Mkdir(filepath.Join(root, DirName), 0o755))
-		if _, ok, err := locate(main, root); err != nil || ok {
+		if _, _, ok, err := locateConfig(main, root); err != nil || ok {
 			t.Errorf("locate ok = %v, err = %v; want not local", ok, err)
 		}
 	})
 	t.Run("a local config selects the tracker", func(t *testing.T) {
 		root := t.TempDir()
 		must(t, Init(filepath.Join(root, DirName)))
-		got, ok, err := locate(main, root)
+		got, cfg, ok, err := locateConfig(main, root)
 		if err != nil || !ok || got != filepath.Join(root, DirName) {
 			t.Errorf("locate = %q, %v, %v; want the tracker", got, ok, err)
+		}
+		if cfg.Backend != BackendLocal || cfg.ID == "" {
+			t.Errorf("locate config = %+v, want the local config it selected", cfg)
 		}
 	})
 	t.Run("a migrated config is not local", func(t *testing.T) {
@@ -1027,7 +1030,7 @@ func TestLocateFindsOnlyAConfiguredLocalTracker(t *testing.T) {
 		dir := filepath.Join(root, DirName)
 		must(t, Init(dir))
 		must(t, WriteConfig(dir, Config{Backend: BackendGitHub}))
-		if got, ok, err := locate(main, root); err != nil || ok || got != "" {
+		if got, _, ok, err := locateConfig(main, root); err != nil || ok || got != "" {
 			t.Errorf("locate = %q, %v, %v; want not local", got, ok, err)
 		}
 	})
@@ -1036,17 +1039,17 @@ func TestLocateFindsOnlyAConfiguredLocalTracker(t *testing.T) {
 		dir := filepath.Join(root, DirName)
 		must(t, Init(dir))
 		must(t, os.WriteFile(filepath.Join(dir, configFile), []byte("{not json"), 0o644))
-		if _, ok, err := locate(main, root); err == nil || ok {
+		if _, _, ok, err := locateConfig(main, root); err == nil || ok {
 			t.Errorf("locate ok = %v, err = %v; want an error", ok, err)
 		}
 	})
 	t.Run("outside a checkout is not local", func(t *testing.T) {
-		if _, ok, err := locate(notGit, t.TempDir()); err != nil || ok {
+		if _, _, ok, err := locateConfig(notGit, t.TempDir()); err != nil || ok {
 			t.Errorf("locate ok = %v, err = %v; want not local", ok, err)
 		}
 	})
 	t.Run("git failing for another reason is an error, not a GitHub fallback", func(t *testing.T) {
-		_, ok, err := locate(gitBroken, t.TempDir())
+		_, _, ok, err := locateConfig(gitBroken, t.TempDir())
 		var exit *exec.ExitError
 		if ok || !errors.As(err, &exit) || !strings.Contains(string(exit.Stderr), "dubious ownership") {
 			t.Errorf("locate ok = %v, err = %v; want the git failure surfaced", ok, err)
@@ -1055,7 +1058,7 @@ func TestLocateFindsOnlyAConfiguredLocalTracker(t *testing.T) {
 	t.Run("a .hew that is a file belongs to something else", func(t *testing.T) {
 		root := t.TempDir()
 		must(t, os.WriteFile(filepath.Join(root, DirName), []byte("not a tracker"), 0o644))
-		if got, ok, err := locate(main, root); err != nil || ok || got != "" {
+		if got, _, ok, err := locateConfig(main, root); err != nil || ok || got != "" {
 			t.Errorf("locate = %q, %v, %v; want not local", got, ok, err)
 		}
 	})

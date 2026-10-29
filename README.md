@@ -109,6 +109,8 @@ For a project that has no GitHub tracker yet, or an agent that cannot reach one,
 `hew` can keep the issues in the repo's own checkout. Everything else works the
 same — the conventions, `ready`, `start`, epics, dependencies, `--json`. It needs a
 git checkout (run `git init` in a new directory first), but no remote and no `gh`.
+Run `hew config` to see which backend this checkout uses; it is read-only and
+does not bootstrap a tracker or contact GitHub.
 
 ```sh
 hew init --local          # creates .hew/ at the main checkout and selects the local backend
@@ -219,6 +221,8 @@ hew apply <plan.jsonl> [--dry-run] [--state F] [--throttle D]
                                  # plan — labels, bodies, parents, dependencies —
                                  # checkpointed and resumable (see "Plan files")
                                  # defaults: --state <plan>.state.json, --throttle 500ms
+hew config                     # read-only: the active backend and its target —
+                               # repo (GitHub) or path + id (local)
 hew init [--local]            # --local: create a local-only tracker in .hew
 hew hooks install|remove <claude|codex|cursor|opencode>
                               # add/remove a session-start hook running `hew prime`

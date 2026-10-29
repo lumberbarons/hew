@@ -350,6 +350,15 @@ obvious from a flag name.
   says so rather than silently redirecting. opencode install and remove are
   idempotent by a marker, so hew never clobbers or deletes a plugin file it did
   not write.
+- **`config`** answers which backend the commands in this checkout would use,
+  read-only. It resolves the same target as every other command — `--repo`
+  wins, then `.hew/config.json` at the main checkout, then the git remote — but
+  opens neither store nor client, so it needs no credentials or network, and
+  unlike `init --json` it bootstraps nothing. `--json` is one flat object
+  (`backend`, `repo`, `path`, `id`) with empty fields where they do not apply;
+  text omits those fields. The stable identity is `repo` on GitHub and the
+  tracker `id` locally, because two checkouts can share a directory name and a
+  rename must not change it.
 
 Global flags: `--json` (structured output, stable schema), `--repo owner/name`
 (default: detect from git remote via go-gh).
@@ -664,8 +673,9 @@ GitHub later is a one-way migration.
   refuses a repo whose config names another backend. A bare `hew init` in a local
   repo is the same command: it reports the tracker and the local CLAUDE.md
   snippet rather than bootstrapping GitHub labels. `init --json` is one shape on
-  both backends (`backend`, `path`, `createdLabels`). Backend selection is in
-  Architecture.
+  both backends (`backend`, `path`, `createdLabels`). `hew config` is the
+  read-only way to ask which backend is active, without bootstrapping anything.
+  Backend selection is in Architecture.
 - **Where it lives.** One `issues.jsonl` and a `config.json` in `.hew/` at the
   *main* checkout, so every linked worktree of a repository shares one tracker.
   The config carries a random `id` generated when the tracker is created; batch

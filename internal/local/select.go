@@ -36,6 +36,15 @@ func mainDir(mainCheckout func(string) (string, error), dir string) (string, err
 // issues.jsonl or lock but no config, which is a local tracker that lost the
 // file saying so.
 func Locate(dir string) (trackerDir string, ok bool, err error) {
+	tracker, _, ok, err := LocateConfig(dir)
+	return tracker, ok, err
+}
+
+// LocateConfig is Locate plus the config that selected the tracker. A caller
+// that reports the tracker's identity reads it from the config validated here
+// instead of reading the file again and disagreeing with the selection. cfg is
+// the zero Config unless ok is true.
+func LocateConfig(dir string) (trackerDir string, cfg Config, ok bool, err error) {
 	// Backend selection runs before every command, so answer it from the
 	// filesystem when the filesystem already knows there is nothing to find:
 	// a checkout whose main working tree has no .hew cannot be local. Git
@@ -43,10 +52,10 @@ func Locate(dir string) (trackerDir string, ok bool, err error) {
 	// exist, because a wrong answer there would hide a real tracker.
 	if main, known := mainCheckoutWithoutGit(dir); known {
 		if info, statErr := os.Stat(filepath.Join(main, DirName)); statErr != nil || !info.IsDir() {
-			return "", false, nil
+			return "", Config{}, false, nil
 		}
 	}
-	return locate(git.MainCheckout, dir)
+	return locateConfig(git.MainCheckout, dir)
 }
 
 // mainCheckoutWithoutGit finds the main checkout from the filesystem alone. A
@@ -157,32 +166,32 @@ func plainGitDir(gitDir string) bool {
 	return true
 }
 
-func locate(mainCheckout func(string) (string, error), dir string) (string, bool, error) {
+func locateConfig(mainCheckout func(string) (string, error), dir string) (string, Config, bool, error) {
 	tracker, err := mainDir(mainCheckout, dir)
 	switch {
 	case git.IsNotRepo(err):
-		return "", false, nil
+		return "", Config{}, false, nil
 	case err != nil:
-		return "", false, err
+		return "", Config{}, false, err
 	}
 	if info, err := os.Stat(tracker); err != nil || !info.IsDir() {
 		// Absent, or something else named .hew: no opt-in to local either way.
-		return "", false, nil
+		return "", Config{}, false, nil
 	}
 	cfg, err := ReadConfig(tracker)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return "", false, refuseOrphanedTracker(tracker)
+		return "", Config{}, false, refuseOrphanedTracker(tracker)
 	case err != nil:
-		return "", false, err
+		return "", Config{}, false, err
 	}
 	switch cfg.Backend {
 	case BackendLocal:
-		return tracker, true, nil
+		return tracker, cfg, true, nil
 	case BackendGitHub:
-		return "", false, nil
+		return "", Config{}, false, nil
 	default:
-		return "", false, fmt.Errorf("%s names the backend %q, which is neither %q nor %q; a newer hew may have written it, so upgrade first, and if it is a typo correct it",
+		return "", Config{}, false, fmt.Errorf("%s names the backend %q, which is neither %q nor %q; a newer hew may have written it, so upgrade first, and if it is a typo correct it",
 			filepath.Join(tracker, configFile), cfg.Backend, BackendLocal, BackendGitHub)
 	}
 }

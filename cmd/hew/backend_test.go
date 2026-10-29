@@ -401,3 +401,152 @@ func TestGitHubOnlyRepoSkipsGitForBackendSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// configOutput is the flat shape `hew config --json` promises on either
+// backend.
+type configOutput struct {
+	Backend string `json:"backend"`
+	Repo    string `json:"repo"`
+	Path    string `json:"path"`
+	ID      string `json:"id"`
+}
+
+// isolateGitHubAuth removes every credential source go-gh would otherwise
+// find, so a command that builds a GitHub client fails instead of quietly
+// using the developer's account.
+func isolateGitHubAuth(t *testing.T) {
+	t.Helper()
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_ENTERPRISE_TOKEN", "")
+	t.Setenv("GH_REPO", "")
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+	t.Setenv("GH_PATH", filepath.Join(t.TempDir(), "gh-missing"))
+}
+
+func configOf(t *testing.T, args ...string) configOutput {
+	t.Helper()
+	out, err := capture(t, args...)
+	if err != nil {
+		t.Fatalf("%v: %v", args, err)
+	}
+	var got configOutput
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("%v: %v:\n%s", args, err, out)
+	}
+	return got
+}
+
+// The tracker lives at the main checkout, so a linked worktree reports it too.
+// Removing issues.jsonl proves the query reads config.json alone: opening the
+// store would fail on the missing file.
+func TestConfigReportsTheLocalBackendWithoutOpeningTheStore(t *testing.T) {
+	main, wt := localRepo(t)
+	t.Chdir(wt)
+	tracker := filepath.Join(main, local.DirName)
+	cfg, err := local.ReadConfig(tracker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(tracker, "issues.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+
+	got := configOf(t, "config", "--json")
+	if got.Backend != local.BackendLocal || got.Repo != "" || got.Path != tracker || got.ID != cfg.ID {
+		t.Errorf("config = %+v, want backend local, path %s, id %q and no repo", got, tracker, cfg.ID)
+	}
+}
+
+// A config written before ids existed is still a valid selection. config
+// reports the absence honestly rather than inventing the id Open backfills.
+func TestConfigReportsALocalTrackerWithoutAnID(t *testing.T) {
+	main, wt := localRepo(t)
+	tracker := filepath.Join(main, local.DirName)
+	if err := local.WriteConfig(tracker, local.Config{Backend: local.BackendLocal}); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(wt)
+
+	got := configOf(t, "config", "--json")
+	if got.Backend != local.BackendLocal || got.Path != tracker || got.ID != "" {
+		t.Errorf("config = %+v, want backend local, path %s and no id", got, tracker)
+	}
+}
+
+// A GitHub checkout answers from the git remote alone. With every credential
+// source removed, a command that built a client would fail before printing.
+func TestConfigReportsGitHubWithoutCredentials(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolateGitHubAuth(t)
+	// remote detection only considers hosts it knows about; name the public
+	// host without supplying a token for it.
+	t.Setenv("GH_HOST", "github.com")
+	dir := gitCheckoutAt(t, t.TempDir(), "github-only")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/octo/hello.git")
+	t.Chdir(dir)
+
+	got := configOf(t, "config", "--json")
+	if got.Backend != local.BackendGitHub || got.Repo != "octo/hello" || got.Path != "" || got.ID != "" {
+		t.Errorf("config = %+v, want backend github and repo octo/hello", got)
+	}
+}
+
+// --repo is the explicit way back to GitHub and must win over a local tracker,
+// exactly as it does for the other commands.
+func TestConfigRepoFlagForcesGitHubOverALocalTracker(t *testing.T) {
+	_, wt := localRepo(t)
+	t.Chdir(wt)
+	isolateGitHubAuth(t)
+
+	got := configOf(t, "config", "--repo", "octo/hello", "--json")
+	if got.Backend != local.BackendGitHub || got.Repo != "octo/hello" || got.Path != "" || got.ID != "" {
+		t.Errorf("config = %+v, want backend github and repo octo/hello", got)
+	}
+}
+
+func TestConfigWithoutATargetNamesTheWayOut(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolateGitHubAuth(t)
+	t.Chdir(gitCheckoutAt(t, t.TempDir(), "no-remote"))
+
+	_, err := capture(t, "config")
+	if err == nil || !strings.Contains(err.Error(), "no git remote to find a GitHub repository from") || !strings.Contains(err.Error(), "hew init --local") {
+		t.Errorf("err = %v, want the no-remote guidance naming --repo and init --local", err)
+	}
+}
+
+func TestConfigOutsideGitNamesTheRepoFlag(t *testing.T) {
+	isolateGitHubAuth(t)
+	t.Chdir(t.TempDir())
+
+	_, err := capture(t, "config")
+	if err == nil || !strings.Contains(err.Error(), "not a git repository") || !strings.Contains(err.Error(), "--repo owner/name") {
+		t.Errorf("err = %v, want the not-a-repository guidance naming --repo", err)
+	}
+}
+
+func TestConfigSurfacesADamagedTrackerConfig(t *testing.T) {
+	main, wt := localRepo(t)
+	t.Chdir(wt)
+	path := filepath.Join(main, local.DirName, "config.json")
+	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := capture(t, "config")
+	if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "hew init --local") {
+		t.Errorf("err = %v, want the damaged-config refusal naming %s and init --local", err, path)
+	}
+}
+
+func TestConfigRejectsArguments(t *testing.T) {
+	_, err := capture(t, "config", "extra")
+	if err == nil || appcli.ExitCode(err) != appcli.ExitUsage {
+		t.Errorf("err = %v, want a usage error (exit %d)", err, appcli.ExitUsage)
+	}
+}
