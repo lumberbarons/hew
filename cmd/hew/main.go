@@ -7,7 +7,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,10 +32,67 @@ import (
 var version = "dev"
 
 func main() {
-	if err := root().Run(context.Background(), os.Args); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(appcli.ExitCode(err))
+	os.Exit(run(context.Background(), os.Args, os.Stdout, os.Stderr))
+}
+
+// run executes hew and returns the process exit code, printing a failure to
+// stderr exactly once. It is separate from main so the exit-code contract is
+// testable end to end.
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	cmd := root()
+	cmd.Writer, cmd.ErrWriter = stdout, stderr
+	// Without this the framework calls os.Exit itself for any ExitCoder it
+	// raises, bypassing the exit-code mapping below.
+	cmd.ExitErrHandler = func(context.Context, *ucli.Command, error) {}
+	err := cmd.Run(ctx, args)
+	if err == nil {
+		return 0
 	}
+	fmt.Fprintln(stderr, err)
+	return exitCode(err)
+}
+
+// exitCode is appcli.ExitCode plus the one thing only the framework can raise:
+// an error that carries its own exit code (the help command's "No help topic"
+// is exit 3). hew never builds one itself, so any that reaches here is a
+// command-line mistake, and 3 is `start`'s "claimed by someone else" — it must
+// read as usage (2) instead.
+func exitCode(err error) int {
+	var coder ucli.ExitCoder
+	if errors.As(err, &coder) {
+		return appcli.ExitUsage
+	}
+	return appcli.ExitCode(err)
+}
+
+// usageError turns a flag-parse or required-flag failure into the usage exit
+// code with one line and a pointer to --help. The framework's own handling
+// prints the message twice, dumps the full help, and exits 1.
+func usageError(_ context.Context, cmd *ucli.Command, err error, _ bool) error {
+	return appcli.UsageError("%v; see `%s --help`", err, cmd.FullName())
+}
+
+// wireUsageErrors installs usageError on cmd and every command below it, since
+// OnUsageError is looked up on the failing command alone.
+func wireUsageErrors(cmd *ucli.Command) {
+	cmd.OnUsageError = usageError
+	for _, sub := range cmd.Commands {
+		wireUsageErrors(sub)
+	}
+}
+
+// groupAction is the action of a command that only dispatches to
+// subcommands. With no further arguments it shows its help; with one, nothing
+// matched it, so the framework default (help for an unknown topic, exit 3) is
+// replaced by a usage error.
+func groupAction(_ context.Context, cmd *ucli.Command) error {
+	if cmd.Args().Present() {
+		return appcli.UsageError("unknown command %q; see `%s --help`", cmd.Args().First(), cmd.FullName())
+	}
+	if cmd.Root() == cmd {
+		return ucli.ShowRootCommandHelp(cmd)
+	}
+	return ucli.ShowSubcommandHelp(cmd)
 }
 
 // globalFlags are declared on the root command only. urfave/cli v3 flags
@@ -173,11 +232,12 @@ func fixedArgs(min, max int) ucli.BeforeFunc {
 }
 
 func root() *ucli.Command {
-	return &ucli.Command{
+	cmd := &ucli.Command{
 		Name:    "hew",
 		Usage:   "agentic-first issue tracker for coding agents, in GitHub Issues or a local .hew tracker",
 		Version: version,
 		Flags:   globalFlags(),
+		Action:  groupAction,
 		Commands: []*ucli.Command{
 			primeCmd(), readyCmd(), listCmd(), showCmd(), searchCmd(),
 			createCmd(), draftCmd(), startCmd(), triageCmd(), setCmd(), prCmd(), closeCmd(),
@@ -185,6 +245,8 @@ func root() *ucli.Command {
 			hooksCmd(), migrateCmd(),
 		},
 	}
+	wireUsageErrors(cmd)
+	return cmd
 }
 
 func primeCmd() *ucli.Command {
@@ -674,8 +736,9 @@ func unblockCmd() *ucli.Command {
 
 func epicCmd() *ucli.Command {
 	return &ucli.Command{
-		Name:  "epic",
-		Usage: "manage epics (sub-issue trees)",
+		Name:   "epic",
+		Usage:  "manage epics (sub-issue trees)",
+		Action: groupAction,
 		Commands: []*ucli.Command{
 			{
 				Name:  "create",
@@ -742,8 +805,9 @@ func hooksApp(cmd *ucli.Command) (*appcli.App, string, error) {
 
 func hooksCmd() *ucli.Command {
 	return &ucli.Command{
-		Name:  "hooks",
-		Usage: "manage agent hooks that run `hew prime` (claude, codex, cursor, or opencode)",
+		Name:   "hooks",
+		Usage:  "manage agent hooks that run `hew prime` (claude, codex, cursor, or opencode)",
+		Action: groupAction,
 		Commands: []*ucli.Command{
 			{
 				Name:      "install",
@@ -844,8 +908,9 @@ from elsewhere and it is refused rather than trusted.
 
 func migrateCmd() *ucli.Command {
 	return &ucli.Command{
-		Name:  "migrate",
-		Usage: "import issues from another tracker, or move the local tracker to GitHub",
+		Name:   "migrate",
+		Usage:  "import issues from another tracker, or move the local tracker to GitHub",
+		Action: groupAction,
 		Commands: []*ucli.Command{
 			{
 				Name:  "beads",
