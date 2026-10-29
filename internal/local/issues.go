@@ -93,6 +93,10 @@ func containsAll(haystack string, words []string) bool {
 	return !slices.ContainsFunc(words, func(w string) bool { return !strings.Contains(haystack, w) })
 }
 
+// CreateIssue stores raw issue fields. User-facing title and area validation
+// belongs to the shared CLI write path, so local and GitHub commands refuse
+// the same inputs. Labels here can include convention labels such as the
+// in-progress claim; they are not necessarily user-supplied areas.
 func (s *Store) CreateIssue(ctx context.Context, title, body string, labels []string) (model.Issue, error) {
 	var created model.Issue
 	err := s.update(ctx, func(d *data) error {

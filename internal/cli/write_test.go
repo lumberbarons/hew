@@ -1656,6 +1656,145 @@ func eachBackend(t *testing.T, run func(t *testing.T, store gh.IssueStore)) {
 	})
 }
 
+func TestWriteFieldValidation(t *testing.T) {
+	cases := []struct {
+		name, title, area, message string
+	}{
+		{name: "newline", title: "first\nsecond", message: "single line"},
+		{name: "carriage return", title: "first\rsecond", message: "single line"},
+		{name: "CRLF", title: "first\r\nsecond", message: "single line"},
+		{name: "Unicode line separator", title: "first\u2028second", message: "single line"},
+		{name: "long ASCII title", title: strings.Repeat("a", 257), message: "256"},
+		{name: "long Unicode title", title: strings.Repeat("界", 257), message: "256"},
+		{name: "epic prefix overflow", title: strings.Repeat("a", 251), message: "256"},
+		{name: "unprefixed epic boundary", title: strings.Repeat("a", 250)},
+		{name: "prefixed title overflow", title: "Epic: " + strings.Repeat("a", 251), message: "256"},
+		{name: "long ASCII area", area: strings.Repeat("a", 51), message: "50"},
+		{name: "long Unicode area", area: strings.Repeat("界", 51), message: "50"},
+		{name: "claim label", area: "in-progress", message: "convention"},
+		{name: "mixed case claim label", area: "IN-Progress", message: "convention"},
+		{name: "ASCII boundaries", title: strings.Repeat("a", 256), area: strings.Repeat("a", 50)},
+		{name: "Unicode boundaries", title: strings.Repeat("界", 256), area: strings.Repeat("界", 50)},
+	}
+	for _, command := range []string{"create", "set", "epic create", "apply", "apply epic", "apply dry run"} {
+		t.Run(command, func(t *testing.T) {
+			for _, tc := range cases {
+				if strings.Contains(tc.name, "epic") && !strings.Contains(command, "epic") {
+					continue
+				}
+				if strings.Contains(command, "epic") && tc.area != "" && tc.title == "" {
+					continue // epic create has no area flag
+				}
+				t.Run(tc.name, func(t *testing.T) {
+					eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+						work, err := store.CreateIssue(ctx, "Existing", "body", []string{"P2", "bug"})
+						if err != nil {
+							t.Fatal(err)
+						}
+						before, err := store.ListIssues(ctx, []gh.IssueState{gh.StateOpen})
+						if err != nil {
+							t.Fatal(err)
+						}
+						labels, err := store.ListLabels(ctx)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if f, ok := store.(*fakeClient); ok {
+							f.calls = nil
+						}
+						app, out, _ := newLocalApp(store)
+						title := tc.title
+						if title == "" {
+							title = "Valid title"
+						}
+						// Keep valid boundary cases at 256 after the cosmetic prefix.
+						if strings.Contains(command, "epic") && strings.HasSuffix(tc.name, "boundaries") {
+							title = conventions.EpicTitlePrefix + string([]rune(title)[len(conventions.EpicTitlePrefix):])
+						}
+						storedTitle := title
+						if strings.Contains(command, "epic") && !strings.HasPrefix(storedTitle, conventions.EpicTitlePrefix) {
+							storedTitle = conventions.EpicTitlePrefix + storedTitle
+						}
+						areas := []string{}
+						if tc.area != "" && command != "epic create" {
+							areas = append(areas, tc.area)
+						}
+						var opts ApplyOpts
+						switch command {
+						case "create":
+							err = app.Create(ctx, CreateOpts{Title: title, Type: "bug", Areas: areas})
+						case "set":
+							err = app.Set(ctx, work.Number, SetOpts{Title: title, AddAreas: areas, Priority: "P0"})
+						case "epic create":
+							err = app.EpicCreate(ctx, EpicCreateOpts{Title: title})
+						default:
+							entry := map[string]any{"title": title, "type": "bug", "areas": areas}
+							if command == "apply epic" {
+								entry["type"] = "epic"
+							}
+							data, marshalErr := json.Marshal(entry)
+							if marshalErr != nil {
+								t.Fatal(marshalErr)
+							}
+							opts = ApplyOpts{File: filepath.Join(t.TempDir(), "plan.jsonl"), DryRun: command == "apply dry run"}
+							// A bad later entry must not leave the first issue or its labels behind.
+							data = append([]byte("{\"title\":\"First\",\"type\":\"task\",\"areas\":[\"new-area\"]}\n"), data...)
+							if err := os.WriteFile(opts.File, data, 0o600); err != nil {
+								t.Fatal(err)
+							}
+							err = app.Apply(ctx, opts)
+						}
+						if tc.message != "" {
+							if err == nil {
+								t.Fatal("invalid input was accepted")
+							}
+							// The plan parser already refuses an exact convention-label collision.
+							if strings.HasPrefix(command, "apply") && tc.area == "in-progress" {
+								exitCode(t, err, ExitGeneric)
+							} else {
+								exitCode(t, err, ExitUsage)
+							}
+							if !strings.Contains(err.Error(), tc.message) {
+								t.Errorf("error = %v, want %q", err, tc.message)
+							}
+							if out.Len() != 0 {
+								t.Errorf("refused write emitted output: %q", out.String())
+							}
+							if f, ok := store.(*fakeClient); ok {
+								assertOnlyReads(t, f)
+							}
+							if opts.File != "" {
+								if _, err := os.Stat(opts.File + ".state.json"); !errors.Is(err, os.ErrNotExist) {
+									t.Errorf("refusal wrote a checkpoint: %v", err)
+								}
+							}
+						} else if err != nil {
+							t.Fatalf("valid boundary input refused: %v", err)
+						}
+						after, err := store.ListIssues(ctx, []gh.IssueState{gh.StateOpen})
+						if err != nil {
+							t.Fatal(err)
+						}
+						afterLabels, err := store.ListLabels(ctx)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if tc.message != "" || opts.DryRun {
+							if !reflect.DeepEqual(before, after) || !reflect.DeepEqual(labels, afterLabels) {
+								t.Errorf("refused write or dry run changed store: issues=%+v labels=%v", after, afterLabels)
+							}
+						} else if !slices.ContainsFunc(after, func(i model.Issue) bool {
+							return i.Title == storedTitle && (len(areas) == 0 || slices.Contains(i.Labels, tc.area))
+						}) {
+							t.Errorf("accepted input missing from store: %+v", after)
+						}
+					})
+				})
+			}
+		})
+	}
+}
+
 // TestCloseDuplicateOfRefusesBadTargets covers #212: a duplicate of itself or
 // of an issue that does not exist is a typo, and closing on it would leave a
 // closed issue pointing nowhere.

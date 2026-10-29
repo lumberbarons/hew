@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/gh"
@@ -39,6 +40,9 @@ func (a *App) Create(ctx context.Context, opts CreateOpts) error {
 	}
 	if opts.Title == "" {
 		return usageErr("--title is required")
+	}
+	if err := validateTitle(opts.Title); err != nil {
+		return err
 	}
 	if !model.IsType(opts.Type) {
 		return usageErr("--type must be one of %s", strings.Join(model.Types, "|"))
@@ -405,6 +409,9 @@ func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 	// Validate every flag up front: Set applies several mutations in
 	// sequence, so a usage error discovered mid-way would exit 2 ("nothing
 	// happened") after earlier changes had already been written.
+	if err := validateTitle(opts.Title); err != nil {
+		return err
+	}
 	var priority model.Priority
 	if opts.Priority != "" {
 		p, ok := model.ParsePriority(opts.Priority)
@@ -510,17 +517,33 @@ func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 	return a.reportMutation(ctx, number, "updated #%d\n", number)
 }
 
-// validateAreas refuses area names that collide with the priority/type
-// vocabulary: passing them through verbatim would stack a second convention
-// label (or strip the only one), breaking the exactly-one invariant the
-// write path exists to enforce.
+// validateTitle checks the stored title, including any cosmetic epic prefix.
+// Count characters rather than bytes so non-ASCII titles get the same limit.
+func validateTitle(title string) error {
+	if strings.ContainsAny(title, "\r\n\v\f\u0085\u2028\u2029") {
+		return usageErr("--title must be a single line")
+	}
+	if utf8.RuneCountInString(title) > 256 {
+		return usageErr("--title must be at most 256 characters (including the Epic: prefix for epics)")
+	}
+	return nil
+}
+
+// validateAreas enforces GitHub's label length limit and reserves convention
+// labels: areas must neither change priority/type nor manufacture a claim.
 func validateAreas(flag string, areas []string) error {
 	for _, area := range areas {
+		if utf8.RuneCountInString(area) > 50 {
+			return usageErr("%s must be at most 50 characters", flag)
+		}
 		if _, ok := model.ParsePriority(area); ok {
 			return usageErr("%s %q is a priority label; use --priority", flag, area)
 		}
 		if model.IsType(area) {
 			return usageErr("%s %q is a type label; use --type", flag, area)
+		}
+		if strings.EqualFold(area, model.InProgressLabel) {
+			return usageErr("%s %q is a reserved convention label; use hew start to claim an issue", flag, area)
 		}
 	}
 	return nil
@@ -799,6 +822,9 @@ func (a *App) EpicCreate(ctx context.Context, opts EpicCreateOpts) error {
 	title := opts.Title
 	if !strings.HasPrefix(title, conventions.EpicTitlePrefix) {
 		title = conventions.EpicTitlePrefix + title
+	}
+	if err := validateTitle(title); err != nil {
+		return err
 	}
 	body, err := a.composeBody(bodySource{
 		sections: opts.Sections, bodyFile: opts.BodyFile, edit: opts.Edit,

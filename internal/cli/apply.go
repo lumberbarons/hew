@@ -50,6 +50,16 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	if err != nil {
 		return genericErr("parsing %s: %v", opts.File, err)
 	}
+	// Validate the whole plan before label bootstrapping or any creates: a
+	// bad later entry must leave neither issues nor checkpoints behind.
+	for _, e := range entries {
+		if err := validateTitle(applyTitle(e)); err != nil {
+			return usageErr("line %d: %v", e.Line, err)
+		}
+		if err := validateAreas("areas", e.Areas); err != nil {
+			return usageErr("line %d: %v", e.Line, err)
+		}
+	}
 	if len(entries) == 0 {
 		// An empty plan still answers in the shape the mode promises: a dry
 		// run keyed on dryRun/wouldCreate must parse this as it parses any other.
