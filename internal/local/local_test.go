@@ -146,14 +146,38 @@ func TestReadConfigRejectsBadFiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, configFile)
 	for name, content := range map[string]string{
-		"not json":      "nope",
-		"unknown field": `{"backend":"local","surprise":1}`,
-		"newer format":  `{"backend":"local","version":99}`,
+		"not json":     "nope",
+		"newer format": `{"backend":"local","version":99}`,
 	} {
 		must(t, os.WriteFile(path, []byte(content), 0o644))
 		if _, err := ReadConfig(dir); err == nil {
 			t.Errorf("%s: no error", name)
 		}
+	}
+}
+
+func TestConfigToleratesFieldsFromANewerHew(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, configFile)
+	must(t, os.WriteFile(path, []byte(`{"backend":"local","version":1,"id":"abc","surprise":{"n":[1,2]}}`), 0o644))
+
+	cfg, err := ReadConfig(dir)
+	if err != nil {
+		t.Fatalf("a config with an extra field at the current version: %v", err)
+	}
+	if cfg.Backend != BackendLocal || cfg.ID != "abc" {
+		t.Errorf("config = %+v, want the known fields read as written", cfg)
+	}
+
+	cfg.Backend = BackendGitHub
+	must(t, WriteConfig(dir, cfg))
+	var got map[string]json.RawMessage
+	must(t, json.Unmarshal([]byte(readFile(t, path)), &got))
+	if string(got["surprise"]) != `{"n":[1,2]}` {
+		t.Errorf("unknown field after WriteConfig = %s, want it carried through verbatim", got["surprise"])
+	}
+	if string(got["backend"]) != `"github"` {
+		t.Errorf("backend = %s, want the edit applied beside the extra field", got["backend"])
 	}
 }
 

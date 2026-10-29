@@ -19,6 +19,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -64,6 +65,17 @@ type Config struct {
 	// directory name: two checkouts can share a name, and a rename must not
 	// invalidate a checkpoint kept outside the tracker.
 	ID string `json:"id,omitempty"`
+
+	// extra holds the fields this build does not know. A newer hew may add
+	// them without bumping the format version, so they are read past and
+	// written back rather than refused, as the records in issues.jsonl are.
+	extra extras
+}
+
+// MarshalJSON writes the fields ReadConfig carried past, after the known ones.
+func (c Config) MarshalJSON() ([]byte, error) {
+	type plain Config
+	return marshalWithExtras(plain(c), c.extra)
 }
 
 // ReadConfig reads dir's config. A missing file satisfies errors.Is(err,
@@ -74,7 +86,10 @@ func ReadConfig(dir string) (Config, error) {
 	if err != nil {
 		return cfg, err
 	}
-	if err := strictUnmarshal(raw, &cfg); err != nil {
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return cfg, fmt.Errorf("%s: %w", filepath.Join(dir, configFile), err)
+	}
+	if cfg.extra, err = unknownFields(raw, cfg); err != nil {
 		return cfg, fmt.Errorf("%s: %w", filepath.Join(dir, configFile), err)
 	}
 	if cfg.Version > formatVersion {
