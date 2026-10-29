@@ -19,7 +19,7 @@ func TestLabelsCoverConventionSet(t *testing.T) {
 			t.Errorf("label %q color has leading #", l.Name)
 		}
 	}
-	for _, want := range []string{"P0", "P1", "P2", "P3", "P4", "bug", "enhancement", "task", model.InProgressLabel} {
+	for _, want := range []string{"P0", "P1", "P2", "P3", "P4", "bug", "enhancement", "task", model.InProgressLabel, model.EpicLabel} {
 		if _, ok := byName[want]; !ok {
 			t.Errorf("label set missing %q", want)
 		}
@@ -28,10 +28,10 @@ func TestLabelsCoverConventionSet(t *testing.T) {
 		if _, ok := model.ParsePriority(l.Name); ok {
 			continue
 		}
-		if model.IsType(l.Name) || l.Name == model.InProgressLabel {
+		if model.IsType(l.Name) || l.Name == model.InProgressLabel || l.Name == model.EpicLabel {
 			continue
 		}
-		t.Errorf("label %q is not part of the priority/type/in-progress conventions", l.Name)
+		t.Errorf("label %q is not part of the priority/type/in-progress/epic conventions", l.Name)
 	}
 }
 

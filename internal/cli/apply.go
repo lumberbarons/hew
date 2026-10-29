@@ -10,6 +10,7 @@ import (
 
 	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/model"
 	"github.com/lumberbarons/hew/internal/plan"
 )
 
@@ -232,7 +233,9 @@ func (a *App) applyCreate(ctx context.Context, entries []plan.Entry, state *batc
 			continue
 		}
 		labels := []string{e.Priority.String()}
-		if !e.IsEpic() {
+		if e.IsEpic() {
+			labels = append(labels, model.EpicLabel)
+		} else {
 			labels = append(labels, e.Type)
 		}
 		labels = append(labels, e.Areas...)

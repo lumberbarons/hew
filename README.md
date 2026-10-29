@@ -386,7 +386,7 @@ dry-run it, apply it. One JSON object per line:
 ```
 
 `type` is `bug|enhancement|task`, or `epic` for a parent issue (no type label,
-`Epic: ` title prefix). `priority` defaults to P2. `parent` and `blocked-by`
+`epic` label, `Epic: ` title prefix). `priority` defaults to P2. `parent` and `blocked-by`
 take either a local `id` — a string, resolved to the created issue's number,
 so entries can reference each other before numbers exist — or an existing
 issue number. `discovered-from` adds the same origin link the create flag

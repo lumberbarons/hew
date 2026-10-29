@@ -13,6 +13,7 @@ import (
 
 	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/model"
 )
 
 // migrationFixture covers the shapes seen in real beads databases: an
@@ -48,6 +49,9 @@ func TestMigrateBeadsOpenOnly(t *testing.T) {
 	}
 	if got, _ := epic.Type(); got != "" {
 		t.Errorf("epic has type label: %v", epic.Labels)
+	}
+	if !slices.Contains(epic.Labels, model.EpicLabel) {
+		t.Errorf("epic lacks the epic label: %v", epic.Labels)
 	}
 	one := f.byNumber(102)
 	if !slices.Contains(one.Labels, "P1") || !slices.Contains(one.Labels, "enhancement") ||

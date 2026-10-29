@@ -117,5 +117,5 @@ func DiscoveredFrom(n int) string {
 }
 
 // EpicTitlePrefix is the cosmetic title prefix the tool adds to parent
-// issues. Epic-ness itself is defined by having sub-issues.
+// issues. Epic-ness itself is defined by having sub-issues or the epic label.
 const EpicTitlePrefix = "Epic: "

@@ -72,6 +72,9 @@ func TestApplyCreatesAndWires(t *testing.T) {
 	if got, _ := epic.Type(); got != "" {
 		t.Errorf("epic has type label: %v", epic.Labels)
 	}
+	if !slices.Contains(epic.Labels, model.EpicLabel) {
+		t.Errorf("epic lacks the epic label, so it would read as untriaged until a child lands: %v", epic.Labels)
+	}
 	if !slices.Contains(epic.Labels, "P1") || !strings.Contains(epic.Body, "### Goal") {
 		t.Errorf("epic labels = %v body = %q", epic.Labels, epic.Body)
 	}

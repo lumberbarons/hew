@@ -85,27 +85,41 @@ func IsInProgressLabel(label string) bool {
 	return strings.EqualFold(label, InProgressLabel)
 }
 
-// IsConventionLabel reports whether the label name is a priority, type or
-// in-progress label in any case — the names an area must not take.
+// IsEpicLabel reports whether the label name is the epic marker,
+// case-insensitively.
+func IsEpicLabel(label string) bool {
+	return strings.EqualFold(label, EpicLabel)
+}
+
+// IsConventionLabel reports whether the label name is a priority, type,
+// in-progress or epic label in any case — the names an area must not take.
 func IsConventionLabel(label string) bool {
 	_, isPriority := LabelPriority(label)
 	_, isType := LabelType(label)
-	return isPriority || isType || IsInProgressLabel(label)
+	return isPriority || isType || IsInProgressLabel(label) || IsEpicLabel(label)
 }
+
+// EpicLabel marks an issue the tool created as an epic. Sub-issues are what
+// make an epic in practice, but a freshly created one has none yet, and
+// without a marker it would read as an untriaged plain issue and vanish from
+// every list-shaped read. A label rather than the title prefix because it is
+// permission-verified like the priority and type labels: GitHub drops labels
+// from non-collaborators, whereas anyone can type "Epic: " into a title.
+const EpicLabel = "epic"
 
 // InProgressLabel marks claimed issues; the assignee is the claim, the label
 // is the visibility.
 const InProgressLabel = "in-progress"
 
 // LabelVocabulary returns every label name the tool assigns meaning to, in a
-// stable order: priorities, then types, then the in-progress label. It is the
+// stable order: priorities, then types, then the in-progress and epic labels. It is the
 // single source of truth for label names — conventions attaches the cosmetics
 // (color, description) keyed by these names.
 func LabelVocabulary() []string {
-	out := make([]string, 0, len(priorityNames)+len(Types)+1)
+	out := make([]string, 0, len(priorityNames)+len(Types)+2)
 	out = append(out, priorityNames[:]...)
 	out = append(out, Types...)
-	out = append(out, InProgressLabel)
+	out = append(out, InProgressLabel, EpicLabel)
 	return out
 }
 
@@ -219,10 +233,11 @@ func (i Issue) HasLabel(name string) bool {
 	return slices.ContainsFunc(i.Labels, func(l string) bool { return strings.EqualFold(l, name) })
 }
 
-// IsEpic reports whether the issue has sub-issues. The "Epic: " title
-// prefix is cosmetic; sub-issues are the truth.
+// IsEpic reports whether the issue has sub-issues or carries the epic label
+// the tool puts on every epic it creates, so a new epic is an epic before its
+// first child is attached. The "Epic: " title prefix is cosmetic.
 func (i Issue) IsEpic() bool {
-	return i.SubIssuesTotal > 0
+	return i.SubIssuesTotal > 0 || slices.ContainsFunc(i.Labels, IsEpicLabel)
 }
 
 // InProgress reports whether the issue carries the in-progress label.

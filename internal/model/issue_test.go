@@ -213,6 +213,31 @@ func TestReadyExcludesUnlabeledEpic(t *testing.T) {
 	}
 }
 
+func TestEpicLabelMakesAChildlessEpic(t *testing.T) {
+	// The tool's own childless epic: priority and the epic label, no type, no
+	// sub-issues. It is an epic (listed, never ready), not an untriaged issue.
+	epic := open(1, "P2", "Epic")
+	if !epic.IsEpic() || epic.Untriaged() {
+		t.Errorf("labels %v: IsEpic=%v Untriaged=%v, want an epic that is triaged", epic.Labels, epic.IsEpic(), epic.Untriaged())
+	}
+	if got := Ready([]Issue{epic}); len(got) != 0 {
+		t.Errorf("Ready() = %v, want empty", got)
+	}
+	if got := Epics([]Issue{epic}); len(got) != 1 {
+		t.Errorf("Epics() = %v, want the childless epic", got)
+	}
+	if got := UntriagedIssues([]Issue{epic}); len(got) != 0 {
+		t.Errorf("UntriagedIssues() = %v, want empty", got)
+	}
+	if got := epic.Areas(); len(got) != 0 {
+		t.Errorf("Areas() = %v, the epic label is not an area", got)
+	}
+	// Without the label or a child it is still an ordinary issue.
+	if open(2, "P2").IsEpic() {
+		t.Error("a plain issue is not an epic")
+	}
+}
+
 func TestInProgressEpicsUntriagedLists(t *testing.T) {
 	epic := open(2, "P1")
 	epic.SubIssuesTotal = 2
