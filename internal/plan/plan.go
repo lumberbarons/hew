@@ -18,7 +18,8 @@ import (
 )
 
 // TypeEpic is the plan-only type marking a parent issue: no type label, the
-// cosmetic Epic title prefix, and (usually) other entries pointing at it.
+// epic label, the cosmetic Epic title prefix, and (usually) other entries
+// pointing at it.
 const TypeEpic = "epic"
 
 // Ref points at another issue: a plan entry by local id, or an existing

@@ -57,7 +57,9 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
   create cycles — GitHub itself only rejects self-blocks and direct two-issue
   cycles, not longer ones (see spike results).
 - **Epics are sub-issue trees.** Epics are never worked directly; `ready` excludes
-  them.
+  them. Every epic the tool creates (`epic create`, `apply` epic entries,
+  `migrate beads`) also carries the `epic` label, which is what makes a childless
+  one an epic — see read-path normalization.
 - **Discovered work** links back: `Discovered while working on #123` in the body,
   via `--discovered-from 123`.
 - **Body template**: `### Where` / `### Problem`|`### Goal` / `### Fix`|`### Approach` /
@@ -131,8 +133,24 @@ primer so agents know what they're looking at:
   highest wins, plus a warning.
 - Missing type → shown without one. Multiple → first of bug|enhancement|task wins,
   plus a warning.
-- Epic-ness = *has sub-issues*; the `Epic: ` title prefix is cosmetic. `ready`
-  excludes any issue with sub-issues.
+- Epic-ness = *has sub-issues, or carries the `epic` label*; the `Epic: ` title
+  prefix is cosmetic. `ready` excludes every epic, `start` refuses one, and an
+  epic is exempt from triage (it needs no type label). The label exists for the
+  window before the first child is attached: `epic create` files the epic, then
+  attaches children, so a childless epic is a normal intermediate state, and
+  `epic create` with no `--children` is a normal way to start one (#252). Without
+  a marker that issue — priority label, no type, no sub-issues — is
+  indistinguishable from a drive-by report and falls into the untriaged gate, so
+  `epic create` reported success on an issue that `list`, `search` and `epic
+  status` then hid. Alternatives rejected: a warning at creation (leaves the
+  epic hidden, and `start` would still claim it); giving epics a type label
+  (types mean work, so `ready` would offer it); recognising the `Epic: ` title
+  prefix (anyone can type a title, which would open the untriaged trust boundary
+  below — a label is permission-verified like priority and type). The write path
+  enforces the label, the read path never repairs its absence, `epic` is
+  reserved from areas like the other convention labels, and the one cost is
+  that a repo already using an `epic` label for something else has those issues
+  read as epics.
 - Label matching is case-insensitive, as it is on GitHub: `list --label upper`
   finds an issue labelled `UPPER` on both backends, agreeing with the write path,
   which already de-duplicates areas that way.

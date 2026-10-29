@@ -612,6 +612,9 @@ func validateAreaLabels(flag string, areas []string) error {
 		if model.IsInProgressLabel(area) {
 			return usageErr("%s %q is a reserved convention label; use hew start to claim an issue", flag, area)
 		}
+		if model.IsEpicLabel(area) {
+			return usageErr("%s %q is a reserved convention label; use hew epic create to make an epic", flag, area)
+		}
 	}
 	return nil
 }
@@ -915,8 +918,9 @@ type EpicCreateOpts struct {
 }
 
 // EpicCreate files a parent issue and attaches existing children. Epics
-// get the cosmetic title prefix and a priority label but no type — they
-// are containers, not work.
+// get the cosmetic title prefix, a priority label and the epic label but no
+// type — they are containers, not work. The epic label is what keeps a
+// childless epic triaged, listed and unworkable until its first child lands.
 func (a *App) EpicCreate(ctx context.Context, opts EpicCreateOpts) error {
 	if strings.TrimSpace(opts.Title) == "" {
 		return usageErr("--title is required")
@@ -953,7 +957,7 @@ func (a *App) EpicCreate(ctx context.Context, opts EpicCreateOpts) error {
 	if err != nil {
 		return err
 	}
-	created, err := a.Client.CreateIssue(ctx, title, body, []string{model.DefaultPriority.String()})
+	created, err := a.Client.CreateIssue(ctx, title, body, []string{model.DefaultPriority.String(), model.EpicLabel})
 	if err != nil {
 		return err
 	}

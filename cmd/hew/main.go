@@ -870,7 +870,7 @@ func applyCmd() *ucli.Command {
 Fields and their shapes:
   title            string, required
   type             bug|enhancement|task|epic, required (epic means a parent
-                   issue — no type label, "Epic: " title prefix)
+                   issue — no type label, epic label, "Epic: " title prefix)
   priority         P0..P4, default P2
   areas            list of strings
   id               string, a local name other entries refer to

@@ -25,6 +25,7 @@ var labelStyle = map[string]struct{ Color, Description string }{
 	"enhancement":         {"a2eeef", "New feature or improvement"},
 	"task":                {"bfdadc", "Chore, refactor, or process work"},
 	model.InProgressLabel: {"1d76db", "Actively being worked (claimed)"},
+	model.EpicLabel:       {"3e4b9e", "Container for sub-issues; never worked directly"},
 }
 
 // Labels is the convention label set `hew init` bootstraps: model's

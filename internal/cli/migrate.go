@@ -35,7 +35,8 @@ type MigrateOpts struct {
 }
 
 // beadTypeLabels maps bead issue types to convention type labels; epics
-// map to no type label (epic-ness is having sub-issues).
+// map to no type label (epic-ness is having sub-issues or the epic label,
+// which beadItems adds).
 var beadTypeLabels = map[string]string{
 	"bug":     "bug",
 	"feature": "enhancement",
@@ -269,6 +270,9 @@ func beadItems(selected []beads.Bead) []migrationItem {
 		labels := []string{model.Priority(clampPriority(b.Priority)).String()}
 		if t := beadTypeLabels[b.IssueType]; t != "" {
 			labels = append(labels, t)
+		}
+		if b.IssueType == "epic" {
+			labels = append(labels, model.EpicLabel)
 		}
 		var assignees []string
 		if b.Status == "in_progress" {
