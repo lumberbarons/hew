@@ -58,10 +58,30 @@ func (a *App) Create(ctx context.Context, opts CreateOpts) error {
 		return err
 	}
 
+	// Every reference is resolved before the editor opens or the issue is
+	// created, so a typo leaves nothing behind. A closed issue is still a
+	// valid --discovered-from or --parent reference: discovery follows a close.
+	// A closed blocker is refused, as it is by block: it blocks nothing. A
+	// reference can still vanish between this read and the mutation — GitHub
+	// has no transaction spanning them — so the write paths keep naming the
+	// created issue on that residual failure.
 	if opts.DiscoveredFrom > 0 {
-		// Before the editor opens or the issue is created, so a typo leaves
-		// nothing behind. A closed source is fine: discovery follows a close.
-		if _, err := a.requireIssue(ctx, opts.DiscoveredFrom, "--discovered-from"); err != nil {
+		if _, err := a.requireIssues(ctx, "--discovered-from", []int{opts.DiscoveredFrom}); err != nil {
+			return err
+		}
+	}
+	blockedBy := uniqueInts(opts.BlockedBy)
+	blockers, err := a.requireIssues(ctx, "--blocked-by", blockedBy)
+	if err != nil {
+		return err
+	}
+	for _, blocker := range blockers {
+		if !blocker.IsOpen() {
+			return genericErr("--blocked-by: #%d is closed%s; closed blockers don't block", blocker.Number, closeState(blocker))
+		}
+	}
+	if opts.Parent > 0 {
+		if _, err := a.requireIssues(ctx, "--parent", []int{opts.Parent}); err != nil {
 			return err
 		}
 	}
@@ -82,7 +102,7 @@ func (a *App) Create(ctx context.Context, opts CreateOpts) error {
 	}
 	// A brand-new issue has no dependents, so --blocked-by can't create a
 	// cycle; no transitive check needed on this path.
-	for _, blocker := range opts.BlockedBy {
+	for _, blocker := range blockedBy {
 		if err := a.Client.AddBlockedBy(ctx, created.Number, blocker); err != nil {
 			return fmt.Errorf("created #%d but --blocked-by %d failed: %w", created.Number, blocker, err)
 		}
@@ -609,6 +629,40 @@ func (a *App) requireIssue(ctx context.Context, number int, flag string) (model.
 	return issue, nil
 }
 
+// requireIssues resolves the issues a reference flag names, in order, so a
+// typo fails before anything is written rather than leaving a reference that
+// points nowhere. The resolved issues are returned so a caller can apply a
+// rule beyond existence. Keeping the loop here is what stops the next
+// reference flag from repeating #232: the flag stays an argument instead of a
+// pre-check each command has to remember.
+func (a *App) requireIssues(ctx context.Context, flag string, numbers []int) ([]model.Issue, error) {
+	issues := make([]model.Issue, 0, len(numbers))
+	for _, number := range numbers {
+		issue, err := a.requireIssue(ctx, number, flag)
+		if err != nil {
+			return nil, err
+		}
+		issues = append(issues, issue)
+	}
+	return issues, nil
+}
+
+// uniqueInts drops repeated numbers, keeping first-seen order, so a reference
+// flag that names an issue twice neither fetches it twice nor attaches it
+// twice — a second attach of the same edge is the failure GitHub may reject
+// after the issue is already filed.
+func uniqueInts(numbers []int) []int {
+	seen := make(map[int]bool, len(numbers))
+	out := make([]int, 0, len(numbers))
+	for _, n := range numbers {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // mentionsIssue reports whether text already names #number as a reference of
 // this repository: not a longer number that merely starts with it, and not
 // the tail of another repository's owner/repo#number.
@@ -800,6 +854,22 @@ func (a *App) EpicCreate(ctx context.Context, opts EpicCreateOpts) error {
 	if !strings.HasPrefix(title, conventions.EpicTitlePrefix) {
 		title = conventions.EpicTitlePrefix + title
 	}
+	// Check the children before the editor opens or the epic is created: a
+	// typo must not leave a childless epic that looks like a triage mistake.
+	// A child already in another epic is the same kind of bad reference —
+	// AddSubIssue refuses it, so catching it here is what keeps the epic from
+	// being filed first. A child that disappears before the attach keeps the
+	// partial-failure message below, which names the epic already filed.
+	childNumbers := uniqueInts(opts.Children)
+	children, err := a.requireIssues(ctx, "--children", childNumbers)
+	if err != nil {
+		return err
+	}
+	for _, child := range children {
+		if child.Parent != nil {
+			return genericErr("--children: #%d already has a parent (#%d); detach it first with `hew set %d --no-parent`", child.Number, child.Parent.Number, child.Number)
+		}
+	}
 	body, err := a.composeBody(bodySource{
 		sections: opts.Sections, bodyFile: opts.BodyFile, edit: opts.Edit,
 	})
@@ -810,12 +880,12 @@ func (a *App) EpicCreate(ctx context.Context, opts EpicCreateOpts) error {
 	if err != nil {
 		return err
 	}
-	for _, child := range opts.Children {
+	for _, child := range childNumbers {
 		if err := a.Client.AddSubIssue(ctx, created.Number, child, false); err != nil {
 			return fmt.Errorf("created epic #%d but attaching #%d failed: %w", created.Number, child, err)
 		}
 	}
-	return a.reportMutation(ctx, created.Number, "created epic #%d: %s (%d children)\n", created.Number, title, len(opts.Children))
+	return a.reportMutation(ctx, created.Number, "created epic #%d: %s (%d children)\n", created.Number, title, len(childNumbers))
 }
 
 // initResult is what `init` reports under --json, on either backend: the
