@@ -14,7 +14,7 @@ const (
 )
 
 func TestRepoDetectErrorWithoutRemoteOffersLocalMode(t *testing.T) {
-	err := RepoDetectError(errors.New(goGHNoRemotes))
+	err := RepoDetectError(errors.New(goGHNoRemotes), true)
 	for _, want := range []string{"hew init --local", "--repo owner/name"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("err = %q, want it to mention %q", err, want)
@@ -23,7 +23,7 @@ func TestRepoDetectErrorWithoutRemoteOffersLocalMode(t *testing.T) {
 }
 
 func TestRepoDetectErrorOutsideGitIsOneCleanLine(t *testing.T) {
-	err := RepoDetectError(errors.New(goGHNotARepo))
+	err := RepoDetectError(errors.New(goGHNotARepo), true)
 	msg := err.Error()
 	if strings.Contains(msg, "\n") || strings.Contains(msg, "exit status") || strings.Contains(msg, ". error:") {
 		t.Errorf("err = %q, want one line without go-gh's wrapper noise", msg)
@@ -39,12 +39,25 @@ func TestRepoDetectErrorOutsideGitIsOneCleanLine(t *testing.T) {
 }
 
 func TestRepoDetectErrorKeepsOtherFailuresReadable(t *testing.T) {
-	err := RepoDetectError(errors.New("could not find git executable in PATH. error: exec: \"git\": executable file not found in $PATH"))
+	err := RepoDetectError(errors.New("could not find git executable in PATH. error: exec: \"git\": executable file not found in $PATH"), true)
 	msg := err.Error()
 	if !strings.Contains(msg, "could not find git executable in PATH") || !strings.Contains(msg, "--repo owner/name") {
 		t.Errorf("err = %q, want the cause and the --repo escape hatch", msg)
 	}
 	if strings.Contains(msg, "PATH. error:") {
 		t.Errorf("err = %q, want the wrapper suffix dropped", msg)
+	}
+}
+
+// migrate local reaches GitHub from a checkout that is already local, so
+// `hew init --local` is no way forward there.
+func TestRepoDetectErrorWithoutRemoteDoesNotOfferLocalWhenAlreadyLocal(t *testing.T) {
+	err := RepoDetectError(errors.New(goGHNoRemotes), false)
+	msg := err.Error()
+	if strings.Contains(msg, "init --local") {
+		t.Errorf("err = %q, must not suggest init --local", msg)
+	}
+	if !strings.Contains(msg, "add one") || !strings.Contains(msg, "--repo owner/name") {
+		t.Errorf("err = %q, want it to say to add a remote or pass --repo", msg)
 	}
 }

@@ -11,10 +11,12 @@ issues via `Fixes #n`, and nothing needs syncing.
 
 ## Install
 
-Needs `git` — the target repo is read from the local checkout, `hew pr`
-reads the current branch, and [local mode](#local-mode) finds its tracker through
-it, so it works only inside a git checkout (`git init` first in a new directory) —
-plus the [`gh` CLI](https://cli.github.com/) for GitHub authentication. The install script also needs `curl` and `tar`.
+Needs `git`. The target repo is read from the local checkout, `hew pr` reads the
+current branch, and [local mode](#local-mode) finds its tracker through git, so
+hew works only inside a git checkout (`git init` first in a new directory).
+
+GitHub use also needs the [`gh` CLI](https://cli.github.com/) for authentication.
+The install script needs `curl` and `tar`.
 
 ```sh
 curl -fsSL https://lumberbarons.github.io/hew/install.sh | bash

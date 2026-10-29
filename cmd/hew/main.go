@@ -63,12 +63,12 @@ func buildApp(cmd *ucli.Command) (*appcli.App, error) {
 			return buildLocalApp(cmd, tracker)
 		}
 	}
-	return buildGitHubApp(cmd)
+	return buildGitHubApp(cmd, true)
 }
 
 // buildGitHubApp talks to GitHub whatever the checkout's config says: the
 // repository is --repo, or the git remote's.
-func buildGitHubApp(cmd *ucli.Command) (*appcli.App, error) {
+func buildGitHubApp(cmd *ucli.Command, offerLocal bool) (*appcli.App, error) {
 	var repo gh.Repo
 	if spec := cmd.String("repo"); spec != "" {
 		parsed, err := appcli.ParseRepoSpec(spec)
@@ -79,7 +79,7 @@ func buildGitHubApp(cmd *ucli.Command) (*appcli.App, error) {
 	} else {
 		current, err := repository.Current()
 		if err != nil {
-			return nil, appcli.RepoDetectError(err)
+			return nil, appcli.RepoDetectError(err, offerLocal)
 		}
 		repo.Owner, repo.Name = current.Owner, current.Name
 	}
@@ -886,7 +886,7 @@ of issues.jsonl, so changing local issues between runs is refused.`,
 					if err != nil {
 						return err
 					}
-					app, err := buildGitHubApp(cmd)
+					app, err := buildGitHubApp(cmd, false)
 					if err != nil {
 						return err
 					}

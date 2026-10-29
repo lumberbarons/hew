@@ -889,7 +889,7 @@ func (a *App) printClaudeSnippet(snippet string) {
 func (a *App) InitLocal(dir string) error {
 	tracker, err := local.MainDir(dir)
 	if git.IsNotRepo(err) {
-		return genericErr("%v: the local tracker lives in a git checkout, so run `git init` first", err)
+		return genericErr("the local tracker needs a git checkout (run `git init` first): %v", err)
 	}
 	if err != nil {
 		return genericErr("%v", err)
