@@ -23,7 +23,7 @@ func mainCheckout(r runner, dir string) (string, error) {
 	}
 	out, err := r("git", args...)
 	if err != nil {
-		return "", fmt.Errorf("cannot find the main checkout: %w", err)
+		return "", fmt.Errorf("cannot find the main checkout: %w", describeFailure(err))
 	}
 	// git lists the main worktree first, whichever worktree it is run from.
 	// This is preferred to deriving it from --git-common-dir, which names the
@@ -35,6 +35,33 @@ func mainCheckout(r runner, dir string) (string, error) {
 		return "", fmt.Errorf("cannot find the main checkout: unexpected `git worktree list` output %q", first)
 	}
 	return path, nil
+}
+
+// failure is a failed git command reported in git's own words. An exit error
+// prints as "exit status 128", which says nothing; what git printed on stderr
+// is the message a person can act on. Unwrap keeps the exit error reachable
+// for IsNotRepo.
+type failure struct {
+	msg string
+	err error
+}
+
+func (f *failure) Error() string { return f.msg }
+func (f *failure) Unwrap() error { return f.err }
+
+// describeFailure returns err as git's last stderr line when there is one, and
+// err unchanged otherwise.
+func describeFailure(err error) error {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return err
+	}
+	lines := strings.Split(strings.TrimSpace(string(exit.Stderr)), "\n")
+	msg := strings.TrimSpace(lines[len(lines)-1])
+	if msg == "" {
+		return err
+	}
+	return &failure{msg: msg, err: err}
 }
 
 // LinkedWorktree returns the root path of the checkout containing dir when it
