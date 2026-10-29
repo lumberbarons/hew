@@ -730,9 +730,23 @@ func (a *App) EpicCreate(ctx context.Context, opts EpicCreateOpts) error {
 	return a.reportMutation(ctx, created.Number, "created epic #%d: %s (%d children)\n", created.Number, title, len(opts.Children))
 }
 
+// initResult is what `init` reports under --json, on either backend: the
+// backend that answered, where it keeps the issues (empty on GitHub), and the
+// convention labels it had to create.
+type initResult struct {
+	Backend       string   `json:"backend"`
+	Path          string   `json:"path"`
+	CreatedLabels []string `json:"createdLabels"`
+}
+
 // Init bootstraps the convention labels in the repo and prints the
-// CLAUDE.md snippet.
+// CLAUDE.md snippet. On the local backend there are no labels to bootstrap:
+// the store carries them, so init reports the tracker instead of pretending a
+// local repo is GitHub.
 func (a *App) Init(ctx context.Context) error {
+	if a.Local {
+		return a.InitLocal("")
+	}
 	existing, err := a.Client.ListLabels(ctx)
 	if err != nil {
 		return err
@@ -754,7 +768,7 @@ func (a *App) Init(ctx context.Context) error {
 	if created == nil {
 		created = []string{}
 	}
-	return a.emitResult(map[string]any{"createdLabels": created}, func() {
+	return a.emitResult(initResult{Backend: local.BackendGitHub, CreatedLabels: created}, func() {
 		if len(created) == 0 {
 			a.printf("all convention labels already exist in %s\n", a.Repo)
 		} else {
@@ -799,7 +813,7 @@ func (a *App) InitLocal(dir string) error {
 	if err := local.Init(tracker); err != nil {
 		return genericErr("creating %s: %v", tracker, err)
 	}
-	return a.emitResult(map[string]any{"backend": local.BackendLocal, "path": tracker}, func() {
+	return a.emitResult(initResult{Backend: local.BackendLocal, Path: tracker, CreatedLabels: []string{}}, func() {
 		a.printf("local tracker ready in %s\n", tracker)
 		a.printClaudeSnippet(conventions.ClaudeSnippetLocal)
 	})

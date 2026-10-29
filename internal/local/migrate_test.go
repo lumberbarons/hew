@@ -90,6 +90,8 @@ func TestSnapshotRefusesATrackerThatIsNotLocal(t *testing.T) {
 
 func TestSealRecordsTheMappingAndFlipsTheBackend(t *testing.T) {
 	s := newStore(t)
+	before, err := ReadConfig(s.dir)
+	must(t, err)
 	a := mustCreate(t, s, "A", "")
 	b := mustCreate(t, s, "B", "")
 	fr, err := Freeze(ctx, s.dir)
@@ -101,6 +103,9 @@ func TestSealRecordsTheMappingAndFlipsTheBackend(t *testing.T) {
 	must(t, err)
 	if cfg.Backend != BackendGitHub {
 		t.Errorf("backend = %q, want github", cfg.Backend)
+	}
+	if cfg.ID != before.ID {
+		t.Errorf("id after seal = %q, want the tracker's %q", cfg.ID, before.ID)
 	}
 	m, err := ReadMigrated(s.dir)
 	must(t, err)

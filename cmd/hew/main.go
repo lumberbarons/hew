@@ -100,9 +100,21 @@ func buildLocalApp(cmd *ucli.Command, tracker string) (*appcli.App, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg, err := local.ReadConfig(tracker)
+	if err != nil {
+		return nil, err
+	}
 	app := newApp(cmd)
 	app.Client = store
 	app.Repo = gh.Repo{Owner: "local", Name: filepath.Base(filepath.Dir(tracker))}
+	// Checkpoints bind to the tracker's id, not the name above: the name is
+	// what every worktree reads alike, and two checkouts can share it.
+	app.RepoKey = "local/" + cfg.ID
+	if cfg.ID == "" {
+		// A tracker written before ids keep the old binding rather than
+		// inventing one a concurrent run could disagree with.
+		app.RepoKey = "local/" + app.Repo.Name
+	}
 	app.Local = true
 	return app, nil
 }

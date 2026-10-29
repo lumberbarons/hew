@@ -71,7 +71,7 @@ func (a *App) MigrateLocal(ctx context.Context, opts MigrateLocalOpts) error {
 		frozen, snap = fr, fr.Snapshot
 	}
 
-	state, err := loadBatchState(opts.StatePath, a.Repo.String(), snap.Digest, "issues.jsonl")
+	state, err := loadBatchState(opts.StatePath, a.stateRepo(), snap.Digest, "issues.jsonl")
 	if err != nil {
 		return err
 	}

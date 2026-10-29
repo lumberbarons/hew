@@ -77,11 +77,19 @@ func TestInitCreatesASelfIgnoringTrackerAndIsIdempotent(t *testing.T) {
 	if cfg.Backend != BackendLocal || cfg.Version != formatVersion {
 		t.Errorf("config = %+v", cfg)
 	}
+	if cfg.ID == "" {
+		t.Error("config has no id: a checkpoint cannot tell this tracker from another checkout's")
+	}
 
 	s, err := Open(dir, "me")
 	must(t, err)
 	mustCreate(t, s, "keep me", "")
 	must(t, Init(dir))
+	again, err := ReadConfig(dir)
+	must(t, err)
+	if again.ID != cfg.ID {
+		t.Errorf("a second Init changed the id from %q to %q", cfg.ID, again.ID)
+	}
 	issues, err := s.ListIssues(ctx, []gh.IssueState{gh.StateOpen})
 	must(t, err)
 	if len(issues) != 1 {
@@ -774,6 +782,81 @@ func TestLocateFindsOnlyAConfiguredLocalTracker(t *testing.T) {
 		must(t, os.WriteFile(filepath.Join(root, DirName), []byte("not a tracker"), 0o644))
 		if got, ok, err := locate(main, root); err != nil || ok || got != "" {
 			t.Errorf("locate = %q, %v, %v; want not local", got, ok, err)
+		}
+	})
+}
+
+// Backend selection runs before every command, so a checkout that never opted
+// in must be answered from the filesystem. These are the layouts the shortcut
+// is allowed to read; anything else has to fall through to git rather than be
+// guessed, because a wrong answer hides a real tracker.
+func TestMainCheckoutWithoutGit(t *testing.T) {
+	mainCheckout := func(t *testing.T) string {
+		t.Helper()
+		root := t.TempDir()
+		must(t, os.Mkdir(filepath.Join(root, ".git"), 0o755))
+		return root
+	}
+
+	t.Run("the main checkout, from a subdirectory", func(t *testing.T) {
+		root := mainCheckout(t)
+		sub := filepath.Join(root, "cmd", "hew")
+		must(t, os.MkdirAll(sub, 0o755))
+		got, ok := mainCheckoutWithoutGit(sub)
+		if !ok || got != root {
+			t.Errorf("main = %q, %v; want %q", got, ok, root)
+		}
+	})
+
+	t.Run("a linked worktree", func(t *testing.T) {
+		main := mainCheckout(t)
+		gitdir := filepath.Join(main, ".git", "worktrees", "wt")
+		must(t, os.MkdirAll(gitdir, 0o755))
+		wt := filepath.Join(t.TempDir(), "wt")
+		must(t, os.MkdirAll(wt, 0o755))
+		must(t, os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+gitdir+"\n"), 0o644))
+		got, ok := mainCheckoutWithoutGit(wt)
+		if !ok || got != main {
+			t.Errorf("main = %q, %v; want the main checkout %q", got, ok, main)
+		}
+	})
+
+	t.Run("a relative worktree gitdir", func(t *testing.T) {
+		main := mainCheckout(t)
+		gitdir := filepath.Join(main, ".git", "worktrees", "wt")
+		must(t, os.MkdirAll(gitdir, 0o755))
+		wt := filepath.Join(main, "wt")
+		must(t, os.MkdirAll(wt, 0o755))
+		must(t, os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: ../.git/worktrees/wt\n"), 0o644))
+		got, ok := mainCheckoutWithoutGit(wt)
+		if !ok || got != main {
+			t.Errorf("main = %q, %v; want %q", got, ok, main)
+		}
+	})
+
+	t.Run("something that is not a checkout", func(t *testing.T) {
+		if _, ok := mainCheckoutWithoutGit(t.TempDir()); ok {
+			t.Error("a directory with no .git was read as a checkout")
+		}
+	})
+
+	t.Run("a submodule gitdir is left to git", func(t *testing.T) {
+		super := mainCheckout(t)
+		gitdir := filepath.Join(super, ".git", "modules", "sub")
+		must(t, os.MkdirAll(gitdir, 0o755))
+		sub := filepath.Join(super, "sub")
+		must(t, os.MkdirAll(sub, 0o755))
+		must(t, os.WriteFile(filepath.Join(sub, ".git"), []byte("gitdir: "+gitdir+"\n"), 0o644))
+		if got, ok := mainCheckoutWithoutGit(sub); ok {
+			t.Errorf("main = %q; want git to decide the submodule", got)
+		}
+	})
+
+	t.Run("a gitdir override is left to git", func(t *testing.T) {
+		root := mainCheckout(t)
+		t.Setenv("GIT_DIR", filepath.Join(root, ".git"))
+		if got, ok := mainCheckoutWithoutGit(root); ok {
+			t.Errorf("main = %q; want git to honour GIT_DIR", got)
 		}
 	})
 }

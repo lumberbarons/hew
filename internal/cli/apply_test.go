@@ -430,6 +430,44 @@ func TestApplyRefusesMismatchedDigestOrRepo(t *testing.T) {
 	}
 }
 
+// The local backend binds a checkpoint to the tracker's stable id, not the
+// directory name App.Repo displays: two checkouts can share a name, and a
+// rename must not invalidate a resume.
+func TestApplyBindsStateToTheLocalTrackerIdentity(t *testing.T) {
+	f, app, opts := applySetup(t, applyFixture)
+	app.RepoKey = "local/one"
+	digest := fileDigest([]byte(applyFixture))
+	write := func(repo string) {
+		t.Helper()
+		state, err := json.Marshal(batchState{
+			Version: batchStateVersion,
+			Repo:    repo,
+			Digest:  digest,
+			Mapping: map[string]int{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(opts.StatePath, state, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("local/two")
+	err := app.Apply(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), `belongs to repository "local/two", not "local/one"`) {
+		t.Fatalf("err = %v, want the other checkout's checkpoint refused", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("API calls made despite a foreign checkpoint: %v", f.calls)
+	}
+
+	write("local/one")
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatalf("the tracker's own checkpoint did not resume: %v", err)
+	}
+}
+
 // Regression test for #81: a poisoned state file mapping a plan entry to an
 // existing unrelated issue must be rejected before wiring any parent or dependency edges.
 func TestApplyPoisonedStateCannotWireEdgesOnUnrelatedIssues(t *testing.T) {

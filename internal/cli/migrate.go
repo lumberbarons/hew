@@ -97,7 +97,7 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 	}
 
 	digest := fileDigest(data)
-	state, err := loadBatchState(opts.StatePath, a.Repo.String(), digest, "snapshot")
+	state, err := loadBatchState(opts.StatePath, a.stateRepo(), digest, "snapshot")
 	if err != nil {
 		return err
 	}

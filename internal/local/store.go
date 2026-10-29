@@ -16,6 +16,7 @@ package local
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -58,6 +59,11 @@ const (
 type Config struct {
 	Backend string `json:"backend"`
 	Version int    `json:"version"`
+	// ID is the tracker's stable identity, generated once when the tracker is
+	// created. Resume checkpoints bind to it rather than the checkout's
+	// directory name: two checkouts can share a name, and a rename must not
+	// invalidate a checkpoint kept outside the tracker.
+	ID string `json:"id,omitempty"`
 }
 
 // ReadConfig reads dir's config. A missing file satisfies errors.Is(err,
@@ -78,6 +84,16 @@ func ReadConfig(dir string) (Config, error) {
 	return cfg, nil
 }
 
+// newID returns a fresh tracker identity: random bytes, hex, so it names one
+// tracker without revealing anything about where it lives.
+func newID() (string, error) {
+	id := make([]byte, 16)
+	if _, err := rand.Read(id); err != nil {
+		return "", fmt.Errorf("creating a tracker id: %w", err)
+	}
+	return hex.EncodeToString(id), nil
+}
+
 // WriteConfig replaces dir's config.
 func WriteConfig(dir string, cfg Config) error {
 	cfg.Version = formatVersion
@@ -96,7 +112,13 @@ func Init(dir string) error {
 	}
 	for name, content := range map[string]func() ([]byte, error){
 		ignoreFile: func() ([]byte, error) { return []byte("*\n"), nil },
-		configFile: func() ([]byte, error) { return marshalLine(Config{Backend: BackendLocal, Version: formatVersion}) },
+		configFile: func() ([]byte, error) {
+			id, err := newID()
+			if err != nil {
+				return nil, err
+			}
+			return marshalLine(Config{Backend: BackendLocal, Version: formatVersion, ID: id})
+		},
 		issuesFile: func() ([]byte, error) { return (&data{}).encode() },
 	} {
 		path := filepath.Join(dir, name)

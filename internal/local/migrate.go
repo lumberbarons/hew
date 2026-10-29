@@ -212,7 +212,14 @@ func (f *Frozen) Seal(repo string, mapping map[int]int) error {
 	if err := writeFileAtomic(filepath.Join(f.dir, MigratedFile), raw); err != nil {
 		return err
 	}
-	return WriteConfig(f.dir, Config{Backend: BackendGitHub})
+	// Keep the id: the archive still names one tracker, and a config rewritten
+	// without it would lose that identity for no gain.
+	cfg, err := ReadConfig(f.dir)
+	if err != nil {
+		return err
+	}
+	cfg.Backend = BackendGitHub
+	return WriteConfig(f.dir, cfg)
 }
 
 // Release lets writers back in. Safe to call more than once.
