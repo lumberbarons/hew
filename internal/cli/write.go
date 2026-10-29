@@ -563,11 +563,13 @@ func validateTitle(title string) error {
 	return nil
 }
 
-// normalizeAreas returns the area names trimmed of surrounding whitespace, or a
-// usage error. A name that is blank after trimming is refused: GitHub rejects a
-// label with no visible name, and the local store would otherwise keep one that
-// renders as `( )` and breaks a later `migrate local`. Everything else is
-// checked against the trimmed name, so " P0 " is the priority label it names.
+// normalizeAreas returns the area names trimmed of surrounding whitespace and
+// de-duplicated, or a usage error. A name that is blank after trimming is
+// refused: GitHub rejects a label with no visible name, and the local store
+// would otherwise keep one that renders as `( )` and breaks a later
+// `migrate local`. Everything else is checked against the trimmed name, so
+// " P0 " is the priority label it names.
+//
 // The checks enforce GitHub's label length limit and reserve convention
 // labels: areas must neither change priority/type nor manufacture a claim. A
 // comma is refused too: the text renderer joins areas with it, so an area named
@@ -577,13 +579,16 @@ func validateTitle(title string) error {
 // `--area x,y` stays two areas. Removal is checked by validateAreaLabels, which
 // has no comma rule.
 func normalizeAreas(flag string, areas []string) ([]string, error) {
-	trimmed := make([]string, len(areas))
-	for i, area := range areas {
+	trimmed := make([]string, 0, len(areas))
+	for _, area := range areas {
 		area = strings.TrimSpace(area)
 		if area == "" {
 			return nil, usageErr("%s must not be blank", flag)
 		}
-		trimmed[i] = area
+		// Trimming can make two spellings one name; keep the first.
+		if !slices.Contains(trimmed, area) {
+			trimmed = append(trimmed, area)
+		}
 	}
 	for _, area := range trimmed {
 		if utf8.RuneCountInString(area) > 50 {

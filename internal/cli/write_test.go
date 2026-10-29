@@ -174,7 +174,7 @@ func writeAreaPlan(t *testing.T, areas []string) ApplyOpts {
 // that GitHub refuses, so every command that takes areas refuses it first.
 func TestAreaFlagsRejectBlankNames(t *testing.T) {
 	for name, area := range map[string]string{
-		"empty": "", "space": " ", "tabs": "\t\t", "unicode space": "  ",
+		"empty": "", "space": " ", "tabs": "\t\t", "unicode space": "\u00a0\u3000",
 	} {
 		t.Run(name, func(t *testing.T) {
 			eachBackend(t, func(t *testing.T, store gh.IssueStore) {
@@ -241,6 +241,20 @@ func TestAreaFlagsTrimSurroundingWhitespace(t *testing.T) {
 		}
 		if !reflect.DeepEqual(areasOf, want) {
 			t.Errorf("areas = %v, want %v", areasOf, want)
+		}
+
+		// Two spellings that trim to one name are one area, not a stacked pair.
+		if err := app.Create(ctx, CreateOpts{Title: "Twice", Type: "task", Areas: []string{"cli", " cli "}}); err != nil {
+			t.Fatal(err)
+		}
+		open, err = store.ListIssues(ctx, []gh.IssueState{gh.StateOpen})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, issue := range open {
+			if issue.Title == "Twice" && !reflect.DeepEqual(issue.Labels, []string{"P2", "task", "cli"}) {
+				t.Errorf("labels = %v, want one cli label", issue.Labels)
+			}
 		}
 
 		exitCode(t, app.Create(ctx, CreateOpts{Title: "T2", Type: "task", Areas: []string{" P0 "}}), ExitUsage)
