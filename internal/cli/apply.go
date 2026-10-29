@@ -89,6 +89,20 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	if err := a.verifyBatchState(ctx, state, conventions.ProvenanceApply, validKeys, "entry key"); err != nil {
 		return err
 	}
+	// Validate pending creates before any writes. Already-created entries
+	// may contain fields older releases accepted; re-gating them would
+	// strand a checkpoint whose source digest cannot be changed to repair it.
+	for _, e := range entries {
+		if _, created := state.Mapping[e.Key()]; created {
+			continue
+		}
+		if err := validateTitle(applyTitle(e)); err != nil {
+			return usageErr("line %d: %v", e.Line, err)
+		}
+		if err := validateAreas("areas", e.Areas); err != nil {
+			return usageErr("line %d: %v", e.Line, err)
+		}
+	}
 
 	// Same reasoning: a dangling provenance link is a typo, and finding it
 	// after half the plan is filed leaves those issues behind to clean up.
