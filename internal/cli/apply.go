@@ -69,7 +69,7 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	}
 
 	digest := fileDigest(data)
-	state, err := loadBatchState(opts.StatePath, a.Repo.String(), digest, "plan")
+	state, err := loadBatchState(opts.StatePath, a.stateRepo(), digest, "plan")
 	if err != nil {
 		return err
 	}

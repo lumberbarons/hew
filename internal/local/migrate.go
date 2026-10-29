@@ -108,14 +108,20 @@ func ReadSnapshot(dir string) (*Snapshot, error) {
 // requireLocal fails unless dir's config says the tracker is local, with the
 // same wording Open uses so every refusal reads alike.
 func requireLocal(dir string) error {
+	_, err := readLocalConfig(dir)
+	return err
+}
+
+// readLocalConfig is ReadConfig for a tracker that must still be local.
+func readLocalConfig(dir string) (Config, error) {
 	cfg, err := ReadConfig(dir)
 	if err != nil {
-		return err
+		return cfg, err
 	}
 	if cfg.Backend != BackendLocal {
-		return fmt.Errorf("%s tracks issues in %q, not locally", dir, cfg.Backend)
+		return cfg, fmt.Errorf("%s tracks issues in %q, not locally", dir, cfg.Backend)
 	}
-	return nil
+	return cfg, nil
 }
 
 // Frozen is a tracker held still for the length of a migration. Every writer
@@ -212,7 +218,14 @@ func (f *Frozen) Seal(repo string, mapping map[int]int) error {
 	if err := writeFileAtomic(filepath.Join(f.dir, MigratedFile), raw); err != nil {
 		return err
 	}
-	return WriteConfig(f.dir, Config{Backend: BackendGitHub})
+	// Keep the id: the archive still names one tracker, and a config rewritten
+	// without it would lose that identity for no gain.
+	cfg, err := ReadConfig(f.dir)
+	if err != nil {
+		return err
+	}
+	cfg.Backend = BackendGitHub
+	return WriteConfig(f.dir, cfg)
 }
 
 // Release lets writers back in. Safe to call more than once.

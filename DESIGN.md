@@ -491,7 +491,10 @@ have to agree before a mapping is used:
 
 - **Repository.** The file records `owner/name`; a mismatch is refused. Compared
   case-insensitively, since GitHub treats it that way and a differently-cased
-  `--repo` should not invalidate a real checkpoint.
+  `--repo` should not invalidate a real checkpoint. On the local backend it
+  records `local/<id>` instead, where the id is the tracker's own identity from
+  `.hew/config.json`: the checkout's directory name is neither unique (two
+  checkouts can share it) nor stable (a rename would invalidate its own state).
 - **Source digest.** A sha256 over the exact bytes of the plan or snapshot. Editing
   the source invalidates the checkpoint — deliberately: the mapping is keyed by
   entries whose meaning the edit may have changed.
@@ -557,9 +560,12 @@ agent silently duplicating half a plan.
     primer, `init` snippet and `pr` refusal follow it. No `.hew`, a `.hew` that is
     not a directory, a config naming another backend (a migrated repo keeps its
     issues as an archive) or a directory outside any git checkout all mean GitHub,
-    as before. Anything else — git failing for another reason, or a config that
-    exists but cannot be read — is an error, never a silent fall back to GitHub,
-    since that would send writes to the wrong tracker.
+    as before. Selection asks the filesystem first — a main checkout or linked
+    worktree whose `.hew` is absent cannot be local — so a repo that never opted
+    in pays no `git worktree list`; git answers whenever a `.hew` exists and for
+    layouts the shortcut cannot read. Anything else — git failing for another
+    reason, or a config that exists but cannot be read — is an error, never a
+    silent fall back to GitHub, since that would send writes to the wrong tracker.
 - **Testing**: unit tests against a fake API layer; golden files for renderer output.
   An integration smoke test against a real scratch repo (behind a build tag, run
   manually — it needs a token and mutates state, so it stays out of CI) is deferred
@@ -576,13 +582,19 @@ GitHub later is a one-way migration.
 
 - **Opting in.** `hew init --local` writes `.hew/config.json` naming the `local`
   backend and creates the store. It is idempotent and keeps existing issues, and
-  refuses a repo whose config names another backend. Backend selection is in
+  refuses a repo whose config names another backend. A bare `hew init` in a local
+  repo is the same command: it reports the tracker and the local CLAUDE.md
+  snippet rather than bootstrapping GitHub labels. `init --json` is one shape on
+  both backends (`backend`, `path`, `createdLabels`). Backend selection is in
   Architecture.
 - **Where it lives.** One `issues.jsonl` and a `config.json` in `.hew/` at the
   *main* checkout, so every linked worktree of a repository shares one tracker.
-  The directory carries its own `.gitignore`, so the repo's is untouched and
-  git never shows it — which also means it is untracked: `git clean -fdx` at the
-  main checkout deletes the only copy.
+  The config carries a random `id` generated when the tracker is created; batch
+  checkpoints bind to it, so two checkouts with the same directory name cannot
+  resume each other's runs and a rename keeps its own. The directory carries
+  its own `.gitignore`, so the repo's is untouched and git never shows it —
+  which also means it is untracked: `git clean -fdx` at the main checkout
+  deletes the only copy.
 - **File format.** One JSON object per line; a record's `_type` picks its shape
   (`meta`, `label`, and an untyped issue record). Relationships are stored once, on
   the issue that owns them (its parent, its blockers); sub-issues, ref states and

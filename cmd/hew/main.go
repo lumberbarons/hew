@@ -103,6 +103,9 @@ func buildLocalApp(cmd *ucli.Command, tracker string) (*appcli.App, error) {
 	app := newApp(cmd)
 	app.Client = store
 	app.Repo = gh.Repo{Owner: "local", Name: filepath.Base(filepath.Dir(tracker))}
+	// Checkpoints bind to the tracker's id, not the name above: the name is
+	// what every worktree reads alike, and two checkouts can share it.
+	app.RepoKey = "local/" + store.ID()
 	app.Local = true
 	return app, nil
 }

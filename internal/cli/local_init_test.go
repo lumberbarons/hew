@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -76,17 +77,66 @@ func TestPrimeCursorHookCarriesTheLocalPrimer(t *testing.T) {
 	}
 }
 
-func TestInitOnTheLocalBackendPrintsTheLocalSnippet(t *testing.T) {
-	app, out, _ := newApp(newFake())
-	app.Local = true
-	if err := app.Init(ctx); err != nil {
+// A bare init in a local repo does what `init --local` does: it reports the
+// tracker, instead of bootstrapping labels the local store already carries.
+func TestInitOnTheLocalBackendIsInitLocal(t *testing.T) {
+	main, _ := gitRepoWithWorktree(t)
+	t.Chdir(main)
+
+	bare, bareOut, _ := newApp(newFake())
+	bare.Local = true
+	if err := bare.Init(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), conventions.ClaudeSnippetLocal) {
-		t.Errorf("output missing the local snippet:\n%s", out.String())
+	if !strings.Contains(bareOut.String(), conventions.ClaudeSnippetLocal) {
+		t.Errorf("output missing the local snippet:\n%s", bareOut.String())
 	}
-	if strings.Contains(out.String(), "GitHub Issues") {
-		t.Errorf("local init still points at GitHub Issues:\n%s", out.String())
+	for _, banned := range []string{"GitHub Issues", "convention labels"} {
+		if strings.Contains(bareOut.String(), banned) {
+			t.Errorf("local init still prints %q:\n%s", banned, bareOut.String())
+		}
+	}
+
+	direct, directOut, _ := newApp(newFake())
+	if err := direct.InitLocal(""); err != nil {
+		t.Fatal(err)
+	}
+	if bareOut.String() != directOut.String() {
+		t.Errorf("bare init and init --local disagree:\nbare: %q\ndirect: %q", bareOut.String(), directOut.String())
+	}
+}
+
+// `init --json` is one shape on either backend: the same keys, carrying what
+// that backend created.
+func TestInitJSONHasOneShapeOnBothBackends(t *testing.T) {
+	github, ghOut, _ := newApp(newFake())
+	github.JSON = true
+	if err := github.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	main, _ := gitRepoWithWorktree(t)
+	localApp, localOut, _ := newApp(newFake())
+	localApp.JSON = true
+	if err := localApp.InitLocal(main); err != nil {
+		t.Fatal(err)
+	}
+
+	keys := func(t *testing.T, raw []byte) []string {
+		t.Helper()
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			t.Fatalf("%v:\n%s", err, raw)
+		}
+		got := make([]string, 0, len(obj))
+		for key := range obj {
+			got = append(got, key)
+		}
+		slices.Sort(got)
+		return got
+	}
+	if ghKeys, localKeys := keys(t, ghOut.Bytes()), keys(t, localOut.Bytes()); !slices.Equal(ghKeys, localKeys) {
+		t.Errorf("init --json shape differs: github has %v, local has %v", ghKeys, localKeys)
 	}
 }
 
@@ -144,12 +194,19 @@ func TestInitLocalJSON(t *testing.T) {
 	if err := app.InitLocal(main); err != nil {
 		t.Fatal(err)
 	}
-	var got struct{ Backend, Path string }
+	var got struct {
+		Backend       string
+		Path          string
+		CreatedLabels []string `json:"createdLabels"`
+	}
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("%v:\n%s", err, out.String())
 	}
 	if got.Backend != local.BackendLocal || got.Path != filepath.Join(main, local.DirName) {
 		t.Errorf("JSON = %+v", got)
+	}
+	if len(got.CreatedLabels) != 0 {
+		t.Errorf("createdLabels = %v; the local backend creates no labels", got.CreatedLabels)
 	}
 }
 

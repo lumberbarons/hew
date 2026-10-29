@@ -1577,6 +1577,8 @@ func TestInitJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got struct {
+		Backend       string
+		Path          string
 		CreatedLabels []string `json:"createdLabels"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
@@ -1584,6 +1586,9 @@ func TestInitJSON(t *testing.T) {
 	}
 	if len(got.CreatedLabels) != len(conventions.Labels) {
 		t.Errorf("JSON = %s", out.String())
+	}
+	if got.Backend != "github" || got.Path != "" {
+		t.Errorf("JSON = %+v; want the github backend with no local path", got)
 	}
 }
 

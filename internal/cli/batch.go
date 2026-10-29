@@ -92,6 +92,17 @@ func restartHint(path string) string {
 	return fmt.Sprintf("pass --state with a new path to start a fresh run (every issue the interrupted run already created will be created again), or delete %s", path)
 }
 
+// stateRepo is the identity a checkpoint binds to: the GitHub repository, or
+// the local tracker's stable id. The local backend cannot use Repo.String():
+// it is the checkout's directory name, which two checkouts can share and a
+// rename changes.
+func (a *App) stateRepo() string {
+	if a.RepoKey != "" {
+		return a.RepoKey
+	}
+	return a.Repo.String()
+}
+
 // loadBatchState reads a checkpoint file. A missing file is a fresh start; a
 // corrupt, unbound, or mismatched one aborts — treating it as empty would
 // duplicate every already-created issue, and using an unbound or mismatched

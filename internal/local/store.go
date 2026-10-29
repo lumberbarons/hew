@@ -16,6 +16,7 @@ package local
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -58,6 +59,11 @@ const (
 type Config struct {
 	Backend string `json:"backend"`
 	Version int    `json:"version"`
+	// ID is the tracker's stable identity, generated once when the tracker is
+	// created. Resume checkpoints bind to it rather than the checkout's
+	// directory name: two checkouts can share a name, and a rename must not
+	// invalidate a checkpoint kept outside the tracker.
+	ID string `json:"id,omitempty"`
 }
 
 // ReadConfig reads dir's config. A missing file satisfies errors.Is(err,
@@ -78,6 +84,16 @@ func ReadConfig(dir string) (Config, error) {
 	return cfg, nil
 }
 
+// newID returns a fresh tracker identity: random bytes, hex, so it names one
+// tracker without revealing anything about where it lives.
+func newID() (string, error) {
+	id := make([]byte, 16)
+	if _, err := rand.Read(id); err != nil {
+		return "", fmt.Errorf("creating a tracker id: %w", err)
+	}
+	return hex.EncodeToString(id), nil
+}
+
 // WriteConfig replaces dir's config.
 func WriteConfig(dir string, cfg Config) error {
 	cfg.Version = formatVersion
@@ -96,7 +112,13 @@ func Init(dir string) error {
 	}
 	for name, content := range map[string]func() ([]byte, error){
 		ignoreFile: func() ([]byte, error) { return []byte("*\n"), nil },
-		configFile: func() ([]byte, error) { return marshalLine(Config{Backend: BackendLocal, Version: formatVersion}) },
+		configFile: func() ([]byte, error) {
+			id, err := newID()
+			if err != nil {
+				return nil, err
+			}
+			return marshalLine(Config{Backend: BackendLocal, Version: formatVersion, ID: id})
+		},
 		issuesFile: func() ([]byte, error) { return (&data{}).encode() },
 	} {
 		path := filepath.Join(dir, name)
@@ -189,6 +211,7 @@ func identityPart(name string) string {
 type Store struct {
 	dir    string
 	viewer string
+	id     string
 	now    func() time.Time
 
 	// lockTimeout overrides how long a writer waits for the lock; zero means
@@ -213,7 +236,8 @@ var (
 // no longer says local: after migration the issues are an archive, and writing
 // to them would quietly fork the tracker from GitHub.
 func Open(dir, viewer string) (*Store, error) {
-	if err := requireLocal(dir); err != nil {
+	cfg, err := readLocalConfig(dir)
+	if err != nil {
 		return nil, err
 	}
 	if _, err := os.Stat(filepath.Join(dir, issuesFile)); err != nil {
@@ -226,7 +250,42 @@ func Open(dir, viewer string) (*Store, error) {
 		}
 	}
 	removeStaleTempFiles(dir)
-	return &Store{dir: dir, viewer: viewer, now: func() time.Time { return time.Now().UTC() }}, nil
+	s := &Store{dir: dir, viewer: viewer, id: cfg.ID, now: func() time.Time { return time.Now().UTC() }}
+	if s.id == "" {
+		if err := s.backfillID(context.Background()); err != nil {
+			return nil, err
+		}
+	}
+	return s, nil
+}
+
+// ID is the tracker's stable identity, the same from every checkout and
+// across a rename of the directory holding it.
+func (s *Store) ID() string { return s.id }
+
+// backfillID gives a tracker created before ids existed one. It runs under the
+// lock and re-reads the config, so concurrent opens settle on whichever id
+// landed first instead of each inventing their own.
+func (s *Store) backfillID(ctx context.Context) error {
+	unlock, err := s.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	cfg, err := readLocalConfig(s.dir)
+	if err != nil {
+		return err
+	}
+	if cfg.ID == "" {
+		if cfg.ID, err = newID(); err != nil {
+			return err
+		}
+		if err := WriteConfig(s.dir, cfg); err != nil {
+			return err
+		}
+	}
+	s.id = cfg.ID
+	return nil
 }
 
 func (s *Store) path() string { return filepath.Join(s.dir, issuesFile) }

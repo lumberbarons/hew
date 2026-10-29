@@ -54,6 +54,11 @@ type App struct {
 	// PRs is nil on a backend with no pull requests; `pr` refuses there.
 	PRs  gh.PullRequests
 	Repo gh.Repo
+	// RepoKey is the identity batch checkpoints bind to, when it differs from
+	// Repo.String() (the local backend: a stable tracker id, not the checkout's
+	// directory name, which two checkouts can share and a rename changes).
+	// Empty means Repo.String().
+	RepoKey string
 	// Local marks the local-only backend: the primer and init output are the
 	// local variants, which have no pull-request step.
 	Local  bool

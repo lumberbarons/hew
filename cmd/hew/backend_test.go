@@ -58,6 +58,43 @@ func localRepo(t *testing.T) (main, worktree string) {
 	return main, worktree
 }
 
+// gitCheckoutAt makes a plain checkout at parent/name, with no tracker. The
+// caller picks the name, which is what lets two unrelated repositories look
+// alike to a path-derived identity.
+func gitCheckoutAt(t *testing.T, parent, name string) string {
+	t.Helper()
+	dir := filepath.Join(parent, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "init", "--initial-branch=main")
+	runGit(t, dir, "-c", "user.email=t@example.com", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "seed")
+	return dir
+}
+
+// localIdentity is what a command run from dir binds its checkpoints to.
+func localIdentity(t *testing.T, dir string) string {
+	t.Helper()
+	t.Chdir(dir)
+	app := root()
+	identity := ""
+	findCommand(t, app, "list").Action = func(_ context.Context, cmd *ucli.Command) error {
+		built, err := buildApp(cmd)
+		if err != nil {
+			return err
+		}
+		if !built.Local {
+			t.Errorf("running in %s selected the GitHub backend", dir)
+		}
+		identity = built.RepoKey
+		return nil
+	}
+	if err := app.Run(context.Background(), []string{"hew", "list"}); err != nil {
+		t.Fatal(err)
+	}
+	return identity
+}
+
 // capture runs hew with args and returns what it wrote to stdout. buildApp
 // binds the real os.Stdout, so the test swaps it for a file.
 func capture(t *testing.T, args ...string) (string, error) {
@@ -289,5 +326,78 @@ func TestInitLocalRejectsRepo(t *testing.T) {
 	err := root().Run(context.Background(), []string{"hew", "init", "--local", "--repo", "octo/hello"})
 	if appcli.ExitCode(err) != appcli.ExitUsage {
 		t.Errorf("exit = %d, err = %v; want a usage error", appcli.ExitCode(err), err)
+	}
+}
+
+// A checkpoint has to tell one local tracker from another. The directory name
+// it used to use cannot: two unrelated checkouts called solar-controller are
+// ordinary, and a rename is not supposed to invalidate a resume.
+func TestLocalCheckpointIdentityIsUniqueAndSurvivesARename(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+
+	one := gitCheckoutAt(t, t.TempDir(), "solar-controller")
+	two := gitCheckoutAt(t, t.TempDir(), "solar-controller")
+	for _, dir := range []string{one, two} {
+		if err := local.Init(filepath.Join(dir, local.DirName)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	oneID, twoID := localIdentity(t, one), localIdentity(t, two)
+	if oneID == "" || twoID == "" {
+		t.Fatalf("checkpoint identities = %q and %q; want one per tracker", oneID, twoID)
+	}
+	if oneID == twoID {
+		t.Errorf("two checkouts with the same directory name share the identity %q", oneID)
+	}
+
+	renamed := filepath.Join(filepath.Dir(one), "solar-controller-renamed")
+	if err := os.Rename(one, renamed); err != nil {
+		t.Fatal(err)
+	}
+	if got := localIdentity(t, renamed); got != oneID {
+		t.Errorf("identity after rename = %q, want %q", got, oneID)
+	}
+}
+
+// Backend selection runs before every command, and a checkout that never
+// opted in has no .hew for it to find. Deciding that must not cost a git
+// subprocess: the GitHub path's own repository detection is the only one the
+// command needs, and GH_REPO makes even that free.
+func TestGitHubOnlyRepoSkipsGitForBackendSelection(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	main := gitCheckoutAt(t, t.TempDir(), "github-only")
+
+	bin := t.TempDir()
+	shim := "#!/bin/sh\necho \"unexpected git invocation: $*\" >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GH_REPO", "octo/hello")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Chdir(main)
+
+	app := root()
+	findCommand(t, app, "list").Action = func(_ context.Context, cmd *ucli.Command) error {
+		built, err := buildApp(cmd)
+		if err != nil {
+			return err
+		}
+		if built.Local {
+			t.Error("a repo with no .hew was read as local")
+		}
+		return nil
+	}
+	if err := app.Run(context.Background(), []string{"hew", "list"}); err != nil {
+		t.Fatal(err)
 	}
 }
