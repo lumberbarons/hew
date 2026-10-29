@@ -49,8 +49,9 @@ func globalFlags() []ucli.Flag {
 
 // buildApp picks the backend. --repo always means GitHub. Otherwise a
 // `.hew/config.json` at the main checkout that says local selects the local
-// store, and anything else — including no `.hew` at all — is GitHub exactly as
-// before.
+// store, and a missing `.hew` or a config naming github is GitHub exactly as
+// before. A `.hew` that looks like a local tracker without a usable config is
+// an error from Locate, never GitHub.
 func buildApp(cmd *ucli.Command) (*appcli.App, error) {
 	if cmd.String("repo") == "" {
 		tracker, isLocal, err := local.Locate("")

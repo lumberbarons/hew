@@ -2,6 +2,7 @@ package local
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -24,14 +25,16 @@ func mainDir(mainCheckout func(string) (string, error), dir string) (string, err
 }
 
 // Locate reports the tracker directory when the repository around dir is
-// configured to track issues locally. No `.hew/config.json` means the repo is
-// not local, and neither does a config that names another backend (a migrated
-// repo keeps its local issues as an archive), a `.hew` that is not a
-// directory, or a directory git says is not in a checkout at all — those are
-// left for the GitHub path to report in its own terms. Anything else that goes
-// wrong is an error: git failing for another reason, or a config that exists
-// but cannot be read. Guessing GitHub there would send writes to the wrong
-// tracker.
+// configured to track issues locally. No `.hew` at all means the repo is not
+// local, and neither does a config that names the `github` backend (a migrated
+// repo keeps its local issues as an archive), a `.hew` that is not a directory,
+// or a directory git says is not in a checkout at all — those are left for the
+// GitHub path to report in its own terms. Anything else that goes wrong is an
+// error, because guessing GitHub there would send writes to the wrong tracker:
+// git failing for another reason, a config that exists but cannot be read, a
+// config naming a backend this build does not know, and a `.hew` holding an
+// issues.jsonl or lock but no config, which is a local tracker that lost the
+// file saying so.
 func Locate(dir string) (trackerDir string, ok bool, err error) {
 	// Backend selection runs before every command, so answer it from the
 	// filesystem when the filesystem already knows there is nothing to find:
@@ -169,12 +172,33 @@ func locate(mainCheckout func(string) (string, error), dir string) (string, bool
 	cfg, err := ReadConfig(tracker)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return "", false, nil
+		return "", false, refuseOrphanedTracker(tracker)
 	case err != nil:
 		return "", false, err
 	}
-	if cfg.Backend != BackendLocal {
+	switch cfg.Backend {
+	case BackendLocal:
+		return tracker, true, nil
+	case BackendGitHub:
 		return "", false, nil
+	default:
+		return "", false, fmt.Errorf("%s names the backend %q, which is neither %q nor %q; correct it, or run `hew init --local` after deleting the file to keep the issues in %s",
+			filepath.Join(tracker, configFile), cfg.Backend, BackendLocal, BackendGitHub, issuesFile)
 	}
-	return tracker, true, nil
+}
+
+// refuseOrphanedTracker is the answer for a .hew without a config.json: nil
+// when there is nothing in it that only a local tracker writes, so the repo is
+// plain GitHub, and an error when an issues.jsonl or lock is there, because the
+// config is the one file that says "local" and losing it must not redirect the
+// tracker's writes to the repo's remote.
+func refuseOrphanedTracker(tracker string) error {
+	for _, name := range []string{issuesFile, lockFile} {
+		path := filepath.Join(tracker, name)
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf("%s exists but %s does not, so this looks like a local tracker that lost its config; refusing to fall back to GitHub. `hew init --local` rewrites the config and keeps the issues; if %s is a leftover to discard, delete the %s directory",
+				path, filepath.Join(tracker, configFile), name, tracker)
+		}
+	}
+	return nil
 }

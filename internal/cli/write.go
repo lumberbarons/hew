@@ -903,6 +903,10 @@ func (a *App) InitLocal(dir string) error {
 	}
 	return a.emitResult(initResult{Backend: local.BackendLocal, Path: tracker, CreatedLabels: []string{}}, func() {
 		a.printf("local tracker ready in %s\n", tracker)
+		// Nothing outside .hew records that this repo is local, so a deleted
+		// .hew (git clean -fdx) is indistinguishable from a repo that never
+		// opted in, and hew then targets the git remote's GitHub issues.
+		a.printf("Warning: .hew is untracked and is the only marker that this repo is local. If it is deleted (for example by `git clean -fdx` at the main checkout), hew targets the git remote's GitHub issues instead of failing.\n")
 		a.printClaudeSnippet(conventions.ClaudeSnippetLocal)
 	})
 }

@@ -564,9 +564,13 @@ agent silently duplicating half a plan.
     `local.Locate` asks the main checkout — so every linked worktree agrees — for
     `.hew/config.json`; a config saying `local` opens the local store, and the
     primer, `init` snippet and `pr` refusal follow it. No `.hew`, a `.hew` that is
-    not a directory, a config naming another backend (a migrated repo keeps its
-    issues as an archive) or a directory outside any git checkout all mean GitHub,
-    as before. Selection asks the filesystem first — a main checkout or linked
+    not a directory, a config naming `github` (a migrated repo keeps its issues as
+    an archive) or a directory outside any git checkout all mean GitHub, as
+    before. A `.hew` that carries evidence of a local tracker but not the config
+    that says so is refused instead: a `backend` this build does not know, and an
+    `issues.jsonl` or `lock` with no `config.json`, are errors naming the file and
+    the recovery (`hew init --local` rewrites a missing config and keeps the
+    issues). Selection asks the filesystem first — a main checkout or linked
     worktree whose `.hew` is absent cannot be local — so a repo that never opted
     in pays no `git worktree list`; git answers whenever a `.hew` exists and for
     layouts the shortcut cannot read. Anything else — git failing for another
@@ -601,6 +605,19 @@ GitHub later is a one-way migration.
   its own `.gitignore`, so the repo's is untouched and git never shows it —
   which also means it is untracked: `git clean -fdx` at the main checkout
   deletes the only copy.
+- **A wholly absent `.hew` falls back to GitHub — a recorded limitation, not an
+  oversight.** A repo that never opted in and a local repo whose `.hew` was
+  deleted (`git clean -fdx`, `rm -rf`) are indistinguishable from the checkout
+  alone, so a deleted tracker makes write commands target the remote's real
+  issues. A durable opt-in marker outside `.hew` (a `git config` key, a file under
+  `.git`) was considered and not added: it would be a second source of truth for
+  backend selection that must agree with `config.json` in every worktree, it would
+  not survive a fresh clone or re-clone — the very case where a repo should start
+  GitHub-only — and the loss it guards against already destroyed the tracker's
+  contents, which no marker restores. The limitation is stated where a local user
+  will meet it: `hew init --local` prints it, and the README says so next to the
+  `git clean -fdx` caveat. Revisit if a marker earns its keep, e.g. by also
+  guarding `hew migrate local`.
 - **File format.** One JSON object per line; a record's `_type` picks its shape
   (`meta`, `label`, and an untyped issue record). Relationships are stored once, on
   the issue that owns them (its parent, its blockers); sub-issues, ref states and

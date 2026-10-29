@@ -887,6 +887,93 @@ func TestLocateFindsOnlyAConfiguredLocalTracker(t *testing.T) {
 	})
 }
 
+// Evidence that a local tracker was meant must stop selection, not fall through
+// to GitHub: a write there lands on the remote's real issues. Each case goes
+// through Locate in a real checkout layout, the way buildApp reaches it.
+func TestLocateRefusesWhereALocalTrackerWasMeant(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	checkout := func(t *testing.T) (root, tracker string) {
+		t.Helper()
+		root, err := filepath.EvalSymlinks(t.TempDir())
+		must(t, err)
+		gitIn(t, root, "init", "--initial-branch=main")
+		tracker = filepath.Join(root, DirName)
+		must(t, os.Mkdir(tracker, 0o755))
+		return root, tracker
+	}
+
+	t.Run("an unknown backend names the config file", func(t *testing.T) {
+		root, tracker := checkout(t)
+		must(t, Init(tracker))
+		must(t, os.WriteFile(filepath.Join(tracker, configFile), []byte(`{"backend":"locla","version":1}`), 0o644))
+		got, ok, err := Locate(root)
+		if err == nil || ok || got != "" {
+			t.Fatalf("Locate = %q, %v, %v; want an error", got, ok, err)
+		}
+		for _, want := range []string{filepath.Join(tracker, configFile), `"locla"`, `"local"`, `"github"`} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q missing %q", err, want)
+			}
+		}
+	})
+	t.Run("a config with no backend is unknown too", func(t *testing.T) {
+		root, tracker := checkout(t)
+		must(t, os.WriteFile(filepath.Join(tracker, configFile), []byte(`{"version":1}`), 0o644))
+		if _, ok, err := Locate(root); err == nil || ok {
+			t.Errorf("Locate ok = %v, err = %v; want an error", ok, err)
+		}
+	})
+	t.Run("issues.jsonl without a config names the file and the recovery", func(t *testing.T) {
+		root, tracker := checkout(t)
+		must(t, Init(tracker))
+		must(t, os.Remove(filepath.Join(tracker, configFile)))
+		got, ok, err := Locate(root)
+		if err == nil || ok || got != "" {
+			t.Fatalf("Locate = %q, %v, %v; want an error", got, ok, err)
+		}
+		for _, want := range []string{filepath.Join(tracker, issuesFile), configFile, "hew init --local"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q missing %q", err, want)
+			}
+		}
+	})
+	t.Run("a lock without a config is refused", func(t *testing.T) {
+		root, tracker := checkout(t)
+		must(t, os.WriteFile(filepath.Join(tracker, lockFile), nil, 0o644))
+		err := func() error { _, _, err := Locate(root); return err }()
+		if err == nil || !strings.Contains(err.Error(), filepath.Join(tracker, lockFile)) {
+			t.Errorf("Locate err = %v; want one naming the lock file", err)
+		}
+	})
+	t.Run("a stray file in an otherwise empty .hew is still not local", func(t *testing.T) {
+		root, tracker := checkout(t)
+		must(t, os.WriteFile(filepath.Join(tracker, ignoreFile), []byte("*\n"), 0o644))
+		if got, ok, err := Locate(root); err != nil || ok || got != "" {
+			t.Errorf("Locate = %q, %v, %v; want not local", got, ok, err)
+		}
+	})
+	t.Run("a github config with its archive stays a quiet GitHub repo", func(t *testing.T) {
+		root, tracker := checkout(t)
+		must(t, Init(tracker))
+		must(t, WriteConfig(tracker, Config{Backend: BackendGitHub}))
+		if got, ok, err := Locate(root); err != nil || ok || got != "" {
+			t.Errorf("Locate = %q, %v, %v; want not local", got, ok, err)
+		}
+	})
+	t.Run("a config.json that cannot be read is an error", func(t *testing.T) {
+		root, tracker := checkout(t)
+		// A directory where config.json belongs: neither "missing" nor readable.
+		must(t, os.Mkdir(filepath.Join(tracker, configFile), 0o755))
+		if _, ok, err := Locate(root); err == nil || ok {
+			t.Errorf("Locate ok = %v, err = %v; want an error", ok, err)
+		}
+	})
+}
+
 // Backend selection runs before every command, so a checkout that never opted
 // in must be answered from the filesystem. These are the layouts the shortcut
 // is allowed to read; anything else has to fall through to git rather than be

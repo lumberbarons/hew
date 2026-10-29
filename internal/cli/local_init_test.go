@@ -165,6 +165,30 @@ func TestInitLocalCreatesTheTrackerAtTheMainCheckout(t *testing.T) {
 	}
 }
 
+// A repo whose .hew is deleted looks exactly like one that never had a local
+// tracker, so hew falls back to GitHub; init is where that is said, once.
+func TestInitLocalWarnsThatADeletedTrackerFallsBackToGitHub(t *testing.T) {
+	main, _ := gitRepoWithWorktree(t)
+	app, out, _ := newApp(newFake())
+	if err := app.InitLocal(main); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"git clean -fdx", "GitHub"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+
+	jsonApp, jsonOut, _ := newApp(newFake())
+	jsonApp.JSON = true
+	if err := jsonApp.InitLocal(main); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(jsonOut.String(), "git clean") {
+		t.Errorf("the warning leaked into --json output:\n%s", jsonOut.String())
+	}
+}
+
 func TestInitLocalIsIdempotentAndKeepsIssues(t *testing.T) {
 	main, _ := gitRepoWithWorktree(t)
 	app, _, _ := newApp(newFake())
