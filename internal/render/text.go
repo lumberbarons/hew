@@ -113,6 +113,11 @@ func annotations(i model.Issue) string {
 	return "  [" + strings.Join(parts, "; ") + "]"
 }
 
+// maxMetaWidth caps the padded meta column. One long area name would
+// otherwise pad every row of a list and push all titles right, spending
+// tokens on spaces; a row longer than the cap simply stops being aligned.
+const maxMetaWidth = 40
+
 func lines(w io.Writer, issues []model.Issue, opts lineOpts, s Style) {
 	numWidth, metaWidth := 0, 0
 	metas := make([]string, len(issues))
@@ -121,8 +126,8 @@ func lines(w io.Writer, issues []model.Issue, opts lineOpts, s Style) {
 		if n := len(strconv.Itoa(i.Number)); n > numWidth {
 			numWidth = n
 		}
-		if len(metas[idx]) > metaWidth {
-			metaWidth = len(metas[idx])
+		if n := len(metas[idx]); n > metaWidth && n <= maxMetaWidth {
+			metaWidth = n
 		}
 	}
 	for idx, i := range issues {

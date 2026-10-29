@@ -5,6 +5,7 @@ package model
 import (
 	"slices"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -175,6 +176,12 @@ func (i Issue) Areas() []string {
 		areas = append(areas, l)
 	}
 	return areas
+}
+
+// HasLabel reports whether the issue carries the label. Label names are
+// case-insensitive on GitHub, so the match is too.
+func (i Issue) HasLabel(name string) bool {
+	return slices.ContainsFunc(i.Labels, func(l string) bool { return strings.EqualFold(l, name) })
 }
 
 // IsEpic reports whether the issue has sub-issues. The "Epic: " title

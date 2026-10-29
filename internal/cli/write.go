@@ -553,11 +553,18 @@ func validateTitle(title string) error {
 }
 
 // validateAreas enforces GitHub's label length limit and reserves convention
-// labels: areas must neither change priority/type nor manufacture a claim.
+// labels: areas must neither change priority/type nor manufacture a claim. A
+// comma is refused too: the area flags split on it, and the text renderer
+// joins areas with it, so an area named "x,y" would be indistinguishable from
+// the two areas "x" and "y". Removal skips the comma check so a legacy label
+// created elsewhere can still be removed.
 func validateAreas(flag string, areas []string) error {
 	for _, area := range areas {
 		if utf8.RuneCountInString(area) > 50 {
 			return usageErr("%s must be at most 50 characters", flag)
+		}
+		if strings.Contains(area, ",") {
+			return usageErr("%s %q must not contain a comma; commas separate areas", flag, area)
 		}
 	}
 	return validateAreaLabels(flag, areas)

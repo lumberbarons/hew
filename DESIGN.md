@@ -133,6 +133,14 @@ primer so agents know what they're looking at:
   plus a warning.
 - Epic-ness = *has sub-issues*; the `Epic: ` title prefix is cosmetic. `ready`
   excludes any issue with sub-issues.
+- Label matching is case-insensitive, as it is on GitHub: `list --label upper`
+  finds an issue labelled `UPPER` on both backends, agreeing with the write path,
+  which already de-duplicates areas that way.
+- Area names must not contain a comma — `--area` splits on it, and the text
+  renderer joins areas with it, so `(x,y)` always means two areas. Names already
+  on GitHub with a comma can still be removed. In `list`-shaped text the meta
+  column is capped; a row whose areas overflow the cap goes unaligned rather than
+  padding every other row.
 - Bodies render as-is. The template is scaffolding for `create`, never retrofitted
   onto issues written by others.
 - Untriaged issues are excluded from every list-shaped read except `triage`

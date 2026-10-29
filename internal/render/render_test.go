@@ -84,6 +84,31 @@ func TestList(t *testing.T) {
 	checkGolden(t, "list", buf.Bytes())
 }
 
+// One long area name must not pad every other row: past the cap a row stops
+// being aligned, and the rest keep the width they would have had without it.
+func TestListLongAreaDoesNotWidenOtherRows(t *testing.T) {
+	issues := []model.Issue{
+		{Number: 1, Title: "Short", State: "OPEN", Labels: []string{"P2", "bug", "cli"}},
+		{
+			Number: 2, Title: "Long area", State: "OPEN",
+			Labels: []string{"P2", "bug", "an-extremely-long-area-name-that-goes-on-and-on"},
+		},
+		{Number: 3, Title: "Plain", State: "OPEN", Labels: []string{"P2", "task"}},
+	}
+	var buf bytes.Buffer
+	List(&buf, issues, Style{})
+	checkGolden(t, "list_long_area", buf.Bytes())
+
+	// "#1 " plus the capped column and its two-space gutter.
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if strings.Contains(line, "Short") || strings.Contains(line, "Plain") {
+			if idx := strings.Index(line, "  "); idx < 0 || len(line) > len("#1 ")+maxMetaWidth+2+len("Short") {
+				t.Errorf("row padded past the cap: %q", line)
+			}
+		}
+	}
+}
+
 func TestListWithAssignees(t *testing.T) {
 	issues := fixtureIssues()[:2]
 	issues[0].Assignees = []string{"lumberbarons"}
