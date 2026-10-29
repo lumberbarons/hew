@@ -340,6 +340,7 @@ func rewriteLocalRefs(text string, mapping map[int]int) string {
 		if matched < len(stack) {
 			// A container the line does not continue has ended, and takes
 			// any fence opened inside it along.
+			flush()
 			stack, fence = stack[:matched], ""
 		}
 		if fence != "" {
@@ -354,10 +355,17 @@ func rewriteLocalRefs(text string, mapping map[int]int) string {
 			if !ok {
 				break
 			}
+			// Inline code cannot continue into a new list item or quote.
+			flush()
 			stack, body, para = append(stack, c), after, false
 		}
 		opened, blank := opensFence(body), strings.TrimSpace(body) == ""
 		switch {
+		case blank:
+			// A marker-only line (such as ">") is a paragraph break too.
+			flush()
+			out.WriteString(line)
+			para = false
 		case opened != "":
 			flush()
 			fence, para = opened, false
