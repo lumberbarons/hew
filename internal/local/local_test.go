@@ -242,10 +242,14 @@ func TestDefaultViewerTellsWorktreesApart(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
+	// A developer's global config (signing, hooks, identity) must not reach
+	// the throwaway repo.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 	main, err := filepath.EvalSymlinks(t.TempDir())
 	must(t, err)
 	gitIn(t, main, "init", "--initial-branch=main")
-	gitIn(t, main, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "--allow-empty", "-m", "seed")
+	gitIn(t, main, "-c", "user.email=t@example.com", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "seed")
 	worktree := filepath.Join(t.TempDir(), "agent-two")
 	gitIn(t, main, "worktree", "add", "-b", "feat/two", worktree)
 

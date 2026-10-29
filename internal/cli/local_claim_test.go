@@ -31,18 +31,8 @@ func newLocalApp(store gh.IssueStore) (*App, *bytes.Buffer, *bytes.Buffer) {
 // and the second must be told to pick something else (exit 3), not to resume
 // what it never claimed (exit 5).
 func TestStartTellsWorktreesApartThroughTheLocalStore(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not installed")
-	}
-	main, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	gitIn(t, main, "init", "--initial-branch=main")
-	gitIn(t, main, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "--allow-empty", "-m", "seed")
-	first := filepath.Join(t.TempDir(), "agent-one")
+	main, first := gitRepoWithWorktree(t)
 	second := filepath.Join(t.TempDir(), "agent-two")
-	gitIn(t, main, "worktree", "add", "-b", "feat/one", first)
 	gitIn(t, main, "worktree", "add", "-b", "feat/two", second)
 
 	dir := filepath.Join(main, local.DirName)

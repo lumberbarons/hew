@@ -107,6 +107,12 @@ func TestSealRecordsTheMappingAndFlipsTheBackend(t *testing.T) {
 	if m.Repo != "o/r" || m.Mapping[a] != 41 || m.Mapping[b] != 57 || len(m.Mapping) != 2 {
 		t.Errorf("migrated = %+v", m)
 	}
+	if m.Version != formatVersion {
+		t.Errorf("migrated version = %d, want %d", m.Version, formatVersion)
+	}
+	if age := time.Since(m.MigratedAt); age < 0 || age > time.Minute {
+		t.Errorf("migrated_at = %v, want the moment of the seal", m.MigratedAt)
+	}
 	// The map is plain JSON an agent or human can read back.
 	var raw struct {
 		Mapping map[string]int `json:"mapping"`
@@ -118,6 +124,37 @@ func TestSealRecordsTheMappingAndFlipsTheBackend(t *testing.T) {
 	// The archive is left in place.
 	if !strings.Contains(readFile(t, filepath.Join(s.dir, issuesFile)), `"title":"A"`) {
 		t.Error("issues.jsonl no longer holds the archived issues")
+	}
+}
+
+// Seal writes the number map before it flips the backend: a process that dies
+// between the two leaves a tracker that is still local and can be migrated
+// again, where the other order would strand a migrated tracker with no record
+// of where its issues went. A map that cannot be written stands in for the
+// death, and the backend must not have moved.
+func TestSealLeavesTheTrackerLocalWhenTheMapCannotBeWritten(t *testing.T) {
+	s := newStore(t)
+	n := mustCreate(t, s, "A", "")
+	fr, err := Freeze(ctx, s.dir)
+	must(t, err)
+	defer fr.Release()
+	// A directory where migrated.json belongs makes the rename onto it fail.
+	must(t, os.Mkdir(filepath.Join(s.dir, MigratedFile), 0o755))
+
+	if err := fr.Seal("o/r", map[int]int{n: 1}); err == nil {
+		t.Fatal("Seal succeeded though the number map could not be written")
+	}
+	cfg, err := ReadConfig(s.dir)
+	must(t, err)
+	if cfg.Backend != BackendLocal {
+		t.Errorf("backend = %q after a failed Seal, want local so the migration can be rerun", cfg.Backend)
+	}
+
+	// The rerun the ordering exists for: clear the obstacle and seal again.
+	must(t, os.Remove(filepath.Join(s.dir, MigratedFile)))
+	must(t, fr.Seal("o/r", map[int]int{n: 1}))
+	if cfg, err := ReadConfig(s.dir); err != nil || cfg.Backend != BackendGitHub {
+		t.Errorf("config after the retry = %+v, %v; want github", cfg, err)
 	}
 }
 
@@ -196,6 +233,22 @@ func TestReadMigratedOfAnUnmigratedTracker(t *testing.T) {
 	}
 }
 
+func TestReadMigratedRejectsACorruptRecord(t *testing.T) {
+	for name, content := range map[string]string{
+		"not json":      "nope",
+		"unknown field": `{"version":1,"repo":"o/r","mapping":{},"surprise":1}`,
+		"bad mapping":   `{"version":1,"repo":"o/r","mapping":{"x":1}}`,
+	} {
+		s := newStore(t)
+		path := filepath.Join(s.dir, MigratedFile)
+		must(t, os.WriteFile(path, []byte(content), 0o644))
+		_, err := ReadMigrated(s.dir)
+		if err == nil || errors.Is(err, fs.ErrNotExist) || !strings.Contains(err.Error(), path) {
+			t.Errorf("%s: err = %v, want a decode error naming %s", name, err, path)
+		}
+	}
+}
+
 func TestWriterBlockedByAMigrationSaysSoWithinTheBoundedWait(t *testing.T) {
 	s := newStore(t)
 	fr, err := Freeze(ctx, s.dir)
@@ -205,6 +258,9 @@ func TestWriterBlockedByAMigrationSaysSoWithinTheBoundedWait(t *testing.T) {
 	var notice strings.Builder
 	s.notice = &notice
 	s.noticeAfter = 10 * time.Millisecond
+	// Rechecking far more often than the wait is long gives a notice that is
+	// not guarded against repeating many chances to repeat.
+	s.noticeRecheck = 5 * time.Millisecond
 	s.lockTimeout = 200 * time.Millisecond
 	start := time.Now()
 	_, err = s.CreateIssue(ctx, "x", "", nil)
@@ -214,6 +270,12 @@ func TestWriterBlockedByAMigrationSaysSoWithinTheBoundedWait(t *testing.T) {
 
 	if !strings.Contains(notice.String(), "migration is in progress") || !strings.Contains(notice.String(), fmt.Sprintf("pid %d", os.Getpid())) {
 		t.Errorf("stderr notice = %q, want it to say a migration is in progress and name it", notice.String())
+	}
+	if got := strings.Count(notice.String(), "migration is in progress"); got != 1 {
+		t.Errorf("notice said so %d times, want once: %q", got, notice.String())
+	}
+	if !strings.Contains(notice.String(), "waiting up to") {
+		t.Errorf("stderr notice = %q, want it to say how much longer the wait can last", notice.String())
 	}
 	if err == nil || !strings.Contains(err.Error(), "migration is in progress") || strings.Contains(err.Error(), "lsof") {
 		t.Errorf("err = %v, want a timeout that names the migration rather than telling the user to hunt for a holder", err)
