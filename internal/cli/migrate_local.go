@@ -337,9 +337,18 @@ func rewriteLocalRefs(text string, mapping map[int]int) string {
 		rest = rest[len(line):]
 
 		body, matched := continueContainers(line, stack)
+		var sibling byte
 		if matched < len(stack) {
+			sibling = stack[matched].marker
+			if para && fence == "" && continuesParagraph(body, sibling) {
+				// Paragraph continuations may omit quote markers or list
+				// indentation. Keep their containers for subsequent lines.
+				chunk.WriteString(line)
+				continue
+			}
 			// A container the line does not continue has ended, and takes
 			// any fence opened inside it along.
+			flush()
 			stack, fence = stack[:matched], ""
 		}
 		if fence != "" {
@@ -350,14 +359,22 @@ func rewriteLocalRefs(text string, mapping map[int]int) string {
 			continue
 		}
 		for !isThematicBreak(body) {
-			c, after, ok := containerStart(body)
+			c, after, ok := containerStart(body, para, sibling)
 			if !ok {
 				break
 			}
+			// Inline code cannot continue into a new list item or quote.
+			flush()
 			stack, body, para = append(stack, c), after, false
+			sibling = 0
 		}
 		opened, blank := opensFence(body), strings.TrimSpace(body) == ""
 		switch {
+		case blank:
+			// A marker-only line (such as ">") is a paragraph break too.
+			flush()
+			out.WriteString(line)
+			para = false
 		case opened != "":
 			flush()
 			fence, para = opened, false
@@ -379,6 +396,7 @@ func rewriteLocalRefs(text string, mapping map[int]int) string {
 type container struct {
 	quote  bool
 	indent int
+	marker byte // list bullet or ordered delimiter, to recognize sibling items
 }
 
 // continueContainers strips from line the markers and indentation of the
@@ -409,8 +427,10 @@ func continueContainers(line string, stack []container) (body string, matched in
 // containerStart reads a blockquote or list-item marker at the start of s, after
 // up to three spaces of indentation, and returns the container it opens and what
 // follows the marker. Five or more spaces after a list marker are one space of
-// separation and an indented code block.
-func containerStart(s string) (c container, after string, ok bool) {
+// separation and an indented code block. In a paragraph, a new list must have
+// nonempty content and an ordered list must start at 1; sibling items in an
+// existing list (identified by its marker) are exempt from those restrictions.
+func containerStart(s string, paragraph bool, sibling byte) (c container, after string, ok bool) {
 	trimmed := strings.TrimLeft(s, " ")
 	lead := len(s) - len(trimmed)
 	if lead > 3 || trimmed == "" {
@@ -431,11 +451,37 @@ func containerStart(s string) (c container, after string, ok bool) {
 	if tail != "" && !strings.ContainsRune(" \t\r\n", rune(tail[0])) {
 		return container{}, "", false
 	}
+	if paragraph && trimmed[marker-1] != sibling {
+		if strings.TrimSpace(tail) == "" {
+			return container{}, "", false
+		}
+		if marker > 1 {
+			n, _ := strconv.Atoi(trimmed[:marker-1]) // at most nine digits
+			if n != 1 {
+				return container{}, "", false
+			}
+		}
+	}
 	gap := markerGap(tail, lead+marker)
 	if gap > 4 || strings.TrimSpace(tail) == "" {
 		gap = min(gap, 1)
 	}
-	return container{indent: lead + marker + max(gap, 1)}, dropColumns(tail, gap), true
+	return container{indent: lead + marker + max(gap, 1), marker: trimmed[marker-1]}, dropColumns(tail, gap), true
+}
+
+// continuesParagraph distinguishes lazy continuation text from a new block at
+// the first unmatched container. A sibling list item also ends the paragraph.
+func continuesParagraph(body string, sibling byte) bool {
+	if strings.TrimSpace(body) == "" {
+		return false
+	}
+	if indentColumns(body) >= 4 {
+		// Indented code cannot interrupt a paragraph, and these markers
+		// are too deeply indented to start another kind of block.
+		return true
+	}
+	_, _, starts := containerStart(body, true, sibling)
+	return !endsParagraph(body) && opensFence(body) == "" && !starts
 }
 
 // endsParagraph reports whether body is a line that is not paragraph text and

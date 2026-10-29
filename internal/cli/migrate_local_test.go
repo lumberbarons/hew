@@ -589,6 +589,64 @@ func TestRewriteLocalRefs(t *testing.T) {
 	}
 }
 
+func TestRewriteLocalRefsInlineBlockBoundaries(t *testing.T) {
+	for name, tc := range map[string]struct{ in, want string }{
+		"sibling list items":       {"- stray ` #1\n- next ` #1", "- stray ` #101\n- next ` #101"},
+		"numbered list items":      {"1. stray ` #1\n2. next ` #1", "1. stray ` #101\n2. next ` #101"},
+		"nested list item":         {"- stray ` #1\n  - next ` #1", "- stray ` #101\n  - next ` #101"},
+		"leaving list item":        {"- stray ` #1\n# after ` #1", "- stray ` #101\n# after ` #101"},
+		"entering quote":           {"stray ` #1\n> next ` #1", "stray ` #101\n> next ` #101"},
+		"leaving quote":            {"> stray ` #1\n# after ` #1", "> stray ` #101\n# after ` #101"},
+		"quote paragraphs":         {"> stray ` #1\n>\n> next ` #1", "> stray ` #101\n>\n> next ` #101"},
+		"crlf quote paragraphs":    {"> stray ` #1\r\n> \r\n> next ` #1", "> stray ` #101\r\n> \r\n> next ` #101"},
+		"nested quote paragraphs":  {"> > stray ` #1\n> >\n> > next ` #1", "> > stray ` #101\n> >\n> > next ` #101"},
+		"quoted list items":        {"> - stray ` #1\n> - next ` #1", "> - stray ` #101\n> - next ` #101"},
+		"quote paragraphs in list": {"- > stray ` #1\n  >\n  > next ` #1", "- > stray ` #101\n  >\n  > next ` #101"},
+		"inline code in list":      {"- `#1` and #1", "- `#1` and #101"},
+		"multiline code in list":   {"- code `#1\n  #1` and #1", "- code `#1\n  #1` and #101"},
+		"inline code in quote":     {"> `#1` and #1", "> `#1` and #101"},
+		"multiline code in quote":  {"> code `#1\n> #1` and #1", "> code `#1\n> #1` and #101"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := rewriteLocalRefs(tc.in, map[int]int{1: 101}); got != tc.want {
+				t.Errorf("rewriteLocalRefs(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRewriteLocalRefsParagraphContinuations(t *testing.T) {
+	for name, tc := range map[string]struct{ in, want string }{
+		"lazy list":                 {"- code `#1\n#1` and #1", "- code `#1\n#1` and #101"},
+		"lazy quote":                {"> code `#1\n#1` and #1", "> code `#1\n#1` and #101"},
+		"lazy nested quote":         {"> > code `#1\n> #1` and #1", "> > code `#1\n> #1` and #101"},
+		"lazy quote in list":        {"- > code `#1\n#1` and #1", "- > code `#1\n#1` and #101"},
+		"partly indented list":      {"1. code `#1\n #1` and #1", "1. code `#1\n #1` and #101"},
+		"explicit after lazy quote": {"> code `#1\nlazy #1\n> #1` and #1", "> code `#1\nlazy #1\n> #1` and #101"},
+		"explicit after lazy list":  {"- code `#1\nlazy #1\n  #1` and #1", "- code `#1\nlazy #1\n  #1` and #101"},
+		"crlf lazy quote":           {"> code `#1\r\n#1` and #1", "> code `#1\r\n#1` and #101"},
+		"indented lazy heading":     {"> code `#1\n    # heading #1` and #1", "> code `#1\n    # heading #1` and #101"},
+		"indented lazy underline":   {"> code `#1\n    ===\n#1` and #1", "> code `#1\n    ===\n#1` and #101"},
+		"numbered prose":            {"text `#1\n2. #1` and #1", "text `#1\n2. #1` and #101"},
+		"parenthesized prose":       {"text `#1\n2) #1` and #1", "text `#1\n2) #1` and #101"},
+		"numbered prose in quote":   {"> code `#1\n> 2. #1` and #1", "> code `#1\n> 2. #1` and #101"},
+		"numbered prose in list":    {"- code `#1\n  2. #1` and #1", "- code `#1\n  2. #1` and #101"},
+		"lazy numbered prose":       {"> code `#1\n2. #1` and #1", "> code `#1\n2. #1` and #101"},
+		"different ordered marker":  {"1. code `#1\n2) #1` and #1", "1. code `#1\n2) #1` and #101"},
+		"empty bullet in prose":     {"text `#1\n+\n#1` and #1", "text `#1\n+\n#1` and #101"},
+		"first numbered item":       {"text ` #1\n1. next ` #1", "text ` #101\n1. next ` #101"},
+		"list after lazy line":      {"- stray ` #1\nlazy #1\n- next ` #1", "- stray ` #101\nlazy #101\n- next ` #101"},
+		"quote after lazy line":     {"> > stray ` #1\nlazy #1\n>\n> next ` #1", "> > stray ` #101\nlazy #101\n>\n> next ` #101"},
+		"numbered item after blank": {"text ` #1\n\n2. next ` #1", "text ` #101\n\n2. next ` #101"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := rewriteLocalRefs(tc.in, map[int]int{1: 101}); got != tc.want {
+				t.Errorf("rewriteLocalRefs(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMigrateLocalNamesWhyATrackerCannotBeMigrated(t *testing.T) {
 	_, app, opts := migrateLocalSetup(filepath.Join(t.TempDir(), local.DirName))
 	if err := app.MigrateLocal(ctx, opts); err == nil || !strings.Contains(err.Error(), "hew init --local") {
