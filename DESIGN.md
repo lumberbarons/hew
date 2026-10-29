@@ -600,7 +600,8 @@ GitHub later is a one-way migration.
   the issue that owns them (its parent, its blockers); sub-issues, ref states and
   rollups are derived on load, so the file cannot disagree with itself. Labels
   are stored, so the convention set is the same one GitHub carries. A `config.json`
-  or file written by a newer hew is refused rather than half-read.
+  or file written with a newer format version is refused rather than half-read; fields
+  an older build does not know, in either file, are read past and written back.
 - **Locking.** Every mutation takes an exclusive `flock` on `.hew/lock`, re-reads
   the file, applies the change and writes a temp file renamed into place, so
   concurrent agents in different worktrees never lose each other's writes and a

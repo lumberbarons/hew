@@ -349,8 +349,8 @@ func marshalLine(v any) ([]byte, error) {
 }
 
 // strictUnmarshal refuses unknown fields. It guards the small files that are
-// rewritten from scratch (config.json, the migration record); the issue file
-// carries unknown fields through instead.
+// rewritten from scratch (the migration record); config.json and the issue file
+// carry unknown fields through instead.
 func strictUnmarshal(raw []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()

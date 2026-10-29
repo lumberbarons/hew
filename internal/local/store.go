@@ -19,6 +19,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -64,22 +65,60 @@ type Config struct {
 	// directory name: two checkouts can share a name, and a rename must not
 	// invalidate a checkpoint kept outside the tracker.
 	ID string `json:"id,omitempty"`
+
+	// extra holds the fields this build does not know. A newer hew may add
+	// them without bumping the format version, so they are read past and
+	// written back rather than refused, as the records in issues.jsonl are.
+	extra extras
+}
+
+// UnmarshalJSON keeps the fields this build does not know, which the typed
+// decode would otherwise drop.
+func (c *Config) UnmarshalJSON(raw []byte) error {
+	type plain Config
+	var p plain
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return err
+	}
+	x, err := unknownFields(raw, p)
+	if err != nil {
+		return err
+	}
+	p.extra = x
+	*c = Config(p)
+	return nil
+}
+
+// MarshalJSON writes the fields UnmarshalJSON carried past, after the known ones.
+func (c Config) MarshalJSON() ([]byte, error) {
+	type plain Config
+	return marshalWithExtras(plain(c), c.extra)
 }
 
 // ReadConfig reads dir's config. A missing file satisfies errors.Is(err,
 // fs.ErrNotExist), which callers treat as "this repo is not local".
 func ReadConfig(dir string) (Config, error) {
 	var cfg Config
-	raw, err := os.ReadFile(filepath.Join(dir, configFile))
+	path := filepath.Join(dir, configFile)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return cfg, err
 	}
-	if err := strictUnmarshal(raw, &cfg); err != nil {
-		return cfg, fmt.Errorf("%s: %w", filepath.Join(dir, configFile), err)
+	// The version is read on its own first: a newer hew may change the shape
+	// of other fields, and that must surface as "upgrade", not a type error.
+	var head struct {
+		Version int `json:"version"`
 	}
-	if cfg.Version > formatVersion {
+	if err := json.Unmarshal(raw, &head); err != nil {
+		return cfg, fmt.Errorf("%s: %w", path, err)
+	}
+	if head.Version > formatVersion {
+		cfg.Version = head.Version
 		return cfg, fmt.Errorf("%s was written by a newer hew (format %d, this build reads %d)",
-			filepath.Join(dir, configFile), cfg.Version, formatVersion)
+			path, head.Version, formatVersion)
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return cfg, fmt.Errorf("%s: %w", path, err)
 	}
 	return cfg, nil
 }
