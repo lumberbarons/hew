@@ -50,16 +50,6 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	if err != nil {
 		return genericErr("parsing %s: %v", opts.File, err)
 	}
-	// Validate the whole plan before label bootstrapping or any creates: a
-	// bad later entry must leave neither issues nor checkpoints behind.
-	for _, e := range entries {
-		if err := validateTitle(applyTitle(e)); err != nil {
-			return usageErr("line %d: %v", e.Line, err)
-		}
-		if err := validateAreas("areas", e.Areas); err != nil {
-			return usageErr("line %d: %v", e.Line, err)
-		}
-	}
 	if len(entries) == 0 {
 		// An empty plan still answers in the shape the mode promises: a dry
 		// run keyed on dryRun/wouldCreate must parse this as it parses any other.
@@ -98,6 +88,20 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	// has to be able to show the failure the real run would hit (#81).
 	if err := a.verifyBatchState(ctx, state, conventions.ProvenanceApply, validKeys, "entry key"); err != nil {
 		return err
+	}
+	// Validate pending creates before any writes. Already-created entries
+	// may contain fields older releases accepted; re-gating them would
+	// strand a checkpoint whose source digest cannot be changed to repair it.
+	for _, e := range entries {
+		if _, created := state.Mapping[e.Key()]; created {
+			continue
+		}
+		if err := validateTitle(applyTitle(e)); err != nil {
+			return usageErr("line %d: %v", e.Line, err)
+		}
+		if err := validateAreas("areas", e.Areas); err != nil {
+			return usageErr("line %d: %v", e.Line, err)
+		}
 	}
 
 	// Same reasoning: a dangling provenance link is a typo, and finding it

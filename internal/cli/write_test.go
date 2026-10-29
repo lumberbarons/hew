@@ -1656,6 +1656,41 @@ func eachBackend(t *testing.T, run func(t *testing.T, store gh.IssueStore)) {
 	})
 }
 
+func TestSetRemovesOversizedLegacyArea(t *testing.T) {
+	eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+		area := strings.Repeat("a", 80)
+		work, err := store.CreateIssue(ctx, "Legacy issue", "body", []string{"P2", "bug", area})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app, _, _ := newLocalApp(store)
+		if err := app.Set(ctx, work.Number, SetOpts{RemoveAreas: []string{area}}); err != nil {
+			t.Fatalf("cannot remove legacy area: %v", err)
+		}
+		after, err := store.GetIssue(ctx, work.Number)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(after.Labels, []string{"P2", "bug"}) {
+			t.Fatalf("labels after removal = %v", after.Labels)
+		}
+		if f, ok := store.(*fakeClient); ok {
+			f.calls = nil
+		}
+		exitCode(t, app.Set(ctx, work.Number, SetOpts{AddAreas: []string{area}, Priority: "P0"}), ExitUsage)
+		if f, ok := store.(*fakeClient); ok {
+			assertOnlyReads(t, f)
+		}
+		after, err = store.GetIssue(ctx, work.Number)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(after.Labels, []string{"P2", "bug"}) {
+			t.Errorf("refused addition changed labels: %v", after.Labels)
+		}
+	})
+}
+
 func TestWriteFieldValidation(t *testing.T) {
 	cases := []struct {
 		name, title, area, message string

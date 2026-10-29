@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/model"
+	"github.com/lumberbarons/hew/internal/plan"
 )
 
 // applyFixture covers the plan shapes: an epic with a body, a child by
@@ -781,5 +783,83 @@ func TestApplyResumeSkipsCreatedEntriesDiscoveredFrom(t *testing.T) {
 	f.issues = slices.DeleteFunc(f.issues, func(i *model.Issue) bool { return i.Number == 7 })
 	if err := app.Apply(ctx, opts); err != nil {
 		t.Fatalf("resume refused over a source its created entry no longer needs: %v", err)
+	}
+}
+
+func TestApplyResumeSkipsCreatedEntriesFieldValidation(t *testing.T) {
+	for name, legacy := range map[string]string{
+		"multiline title": `{"id":"legacy","title":"First\nsecond","type":"task"}`,
+		"oversized area":  `{"id":"legacy","title":"First","type":"task","areas":["` + strings.Repeat("a", 80) + `"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+				app, out, _ := newLocalApp(store)
+				data := []byte(legacy + "\n" + `{"id":"next","title":"Next","type":"task"}` + "\n")
+				entries, err := plan.Parse(strings.NewReader(string(data)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				digest := fileDigest(data)
+				// Seed a genuine pre-upgrade issue and its bound checkpoint. The
+				// current create path must continue refusing these legacy fields.
+				created, err := store.CreateIssue(ctx, entries[0].Title, applyBodyWithProvenance(entries[0], digest), append([]string{"P2", "task"}, entries[0].Areas...))
+				if err != nil {
+					t.Fatal(err)
+				}
+				opts := ApplyOpts{File: filepath.Join(t.TempDir(), "plan.jsonl")}
+				if err := os.WriteFile(opts.File, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := saveBatchState(opts.File+".state.json", &batchState{
+					Version: batchStateVersion, Repo: app.stateRepo(), Digest: digest,
+					Mapping: map[string]int{"legacy": created.Number},
+				}); err != nil {
+					t.Fatal(err)
+				}
+				// A dry run can preview the pending entry without re-gating the
+				// already-created one, and must not create it or alter the checkpoint.
+				opts.DryRun = true
+				if f, ok := store.(*fakeClient); ok {
+					f.calls = nil
+				}
+				if err := app.Apply(ctx, opts); err != nil {
+					t.Fatalf("dry run rejected a checkpointed legacy entry: %v", err)
+				}
+				if f, ok := store.(*fakeClient); ok {
+					assertOnlyReads(t, f)
+				}
+				if mapping := readState(t, opts.File+".state.json").Mapping; len(mapping) != 1 {
+					t.Fatalf("dry run changed mapping: %v", mapping)
+				}
+				issues, err := store.ListIssues(ctx, []gh.IssueState{gh.StateOpen})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(issues) != 1 || issues[0].Number != created.Number {
+					t.Fatalf("dry run changed issues: %+v", issues)
+				}
+				opts.DryRun = false
+				for range 2 { // resume, then replay the finished plan
+					out.Reset()
+					if err := app.Apply(ctx, opts); err != nil {
+						t.Fatalf("resume rejected a checkpointed legacy entry: %v", err)
+					}
+					issues, err := store.ListIssues(ctx, []gh.IssueState{gh.StateOpen})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if len(issues) != 2 || !slices.ContainsFunc(issues, func(i model.Issue) bool { return i.Title == "Next" }) {
+						t.Fatalf("resume duplicated or omitted an issue: %+v", issues)
+					}
+					mapping := readState(t, opts.File+".state.json").Mapping
+					if len(mapping) != 2 || mapping["legacy"] != created.Number || mapping["next"] == 0 {
+						t.Fatalf("wrong mapping after resume: %v", mapping)
+					}
+				}
+				if !strings.Contains(out.String(), "0 created") {
+					t.Errorf("finished replay was not a no-op: %q", out.String())
+				}
+			})
+		})
 	}
 }

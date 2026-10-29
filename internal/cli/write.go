@@ -426,7 +426,9 @@ func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 	if err := validateAreas("--add-area", opts.AddAreas); err != nil {
 		return err
 	}
-	if err := validateAreas("--remove-area", opts.RemoveAreas); err != nil {
+	// Removal must remain available for oversized labels older local
+	// trackers accepted, so they can be repaired before migrating to GitHub.
+	if err := validateAreaLabels("--remove-area", opts.RemoveAreas); err != nil {
 		return err
 	}
 	// Read the replacement body before any mutation: a --body-file typo
@@ -536,6 +538,12 @@ func validateAreas(flag string, areas []string) error {
 		if utf8.RuneCountInString(area) > 50 {
 			return usageErr("%s must be at most 50 characters", flag)
 		}
+	}
+	return validateAreaLabels(flag, areas)
+}
+
+func validateAreaLabels(flag string, areas []string) error {
+	for _, area := range areas {
 		if _, ok := model.ParsePriority(area); ok {
 			return usageErr("%s %q is a priority label; use --priority", flag, area)
 		}
