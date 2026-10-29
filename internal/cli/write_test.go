@@ -1562,6 +1562,50 @@ func TestEpicCreateRefusesAMissingChild(t *testing.T) {
 	})
 }
 
+// TestEpicCreateRefusesAChildWithAParent: AddSubIssue refuses a child that
+// already belongs to another epic, and that check has to happen before the
+// epic is filed too — otherwise the predictable failure leaves the same stray
+// childless epic #232 is about.
+func TestEpicCreateRefusesAChildWithAParent(t *testing.T) {
+	eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+		parent, err := store.CreateIssue(ctx, "Existing epic", "", []string{"P2"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		child, err := store.CreateIssue(ctx, "Child", "", []string{"P2", "task"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.AddSubIssue(ctx, parent.Number, child.Number, false); err != nil {
+			t.Fatal(err)
+		}
+		before, err := store.ListIssues(ctx, []gh.IssueState{gh.StateOpen, gh.StateClosed})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app, _, _ := newLocalApp(store)
+		err = app.EpicCreate(ctx, EpicCreateOpts{Title: "Big", Children: []int{child.Number}})
+		if err == nil {
+			t.Fatal("epic create accepted a child that already has a parent")
+		}
+		if got := ExitCode(err); got != ExitGeneric {
+			t.Errorf("exit code = %d, want %d", got, ExitGeneric)
+		}
+		for _, want := range []string{fmt.Sprintf("#%d", child.Number), fmt.Sprintf("#%d", parent.Number)} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("err = %v, want it to name %s", err, want)
+			}
+		}
+		after, err := store.ListIssues(ctx, []gh.IssueState{gh.StateOpen, gh.StateClosed})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(after) != len(before) {
+			t.Errorf("refused epic create filed %d issue(s)", len(after)-len(before))
+		}
+	})
+}
+
 // A reference can disappear between the pre-check and the mutation, since
 // GitHub has no transaction spanning both. The residual failure still has to
 // name the issue that was created, so the operator can finish by hand.

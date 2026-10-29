@@ -58,25 +58,22 @@ func (a *App) Create(ctx context.Context, opts CreateOpts) error {
 		return err
 	}
 
+	// Every reference is resolved before the editor opens or the issue is
+	// created, so a typo leaves nothing behind. A closed issue is still a
+	// valid reference: discovery follows a close, and a closed blocker or
+	// parent is a real issue. A reference can still vanish between this read
+	// and the mutation — GitHub has no transaction spanning them — so the
+	// write paths keep naming the created issue on that residual failure.
 	if opts.DiscoveredFrom > 0 {
-		// Before the editor opens or the issue is created, so a typo leaves
-		// nothing behind. A closed source is fine: discovery follows a close.
-		if _, err := a.requireIssue(ctx, opts.DiscoveredFrom, "--discovered-from"); err != nil {
+		if _, err := a.requireIssues(ctx, "--discovered-from", []int{opts.DiscoveredFrom}); err != nil {
 			return err
 		}
 	}
-	// Dependency and parent references get the same pre-check, for the same
-	// reason: a typo must not leave a stray issue behind. A reference can
-	// still vanish between this read and the mutation — GitHub has no
-	// transaction spanning them — so the write paths keep naming the created
-	// issue on that residual failure.
-	for _, blocker := range opts.BlockedBy {
-		if _, err := a.requireIssue(ctx, blocker, "--blocked-by"); err != nil {
-			return err
-		}
+	if _, err := a.requireIssues(ctx, "--blocked-by", opts.BlockedBy); err != nil {
+		return err
 	}
 	if opts.Parent > 0 {
-		if _, err := a.requireIssue(ctx, opts.Parent, "--parent"); err != nil {
+		if _, err := a.requireIssues(ctx, "--parent", []int{opts.Parent}); err != nil {
 			return err
 		}
 	}
@@ -624,6 +621,24 @@ func (a *App) requireIssue(ctx context.Context, number int, flag string) (model.
 	return issue, nil
 }
 
+// requireIssues resolves the issues a reference flag names, in order, so a
+// typo fails before anything is written rather than leaving a reference that
+// points nowhere. The resolved issues are returned so a caller can apply a
+// rule beyond existence. Keeping the loop here is what stops the next
+// reference flag from repeating #232: the flag stays an argument instead of a
+// pre-check each command has to remember.
+func (a *App) requireIssues(ctx context.Context, flag string, numbers []int) ([]model.Issue, error) {
+	issues := make([]model.Issue, 0, len(numbers))
+	for _, number := range numbers {
+		issue, err := a.requireIssue(ctx, number, flag)
+		if err != nil {
+			return nil, err
+		}
+		issues = append(issues, issue)
+	}
+	return issues, nil
+}
+
 // mentionsIssue reports whether text already names #number as a reference of
 // this repository: not a longer number that merely starts with it, and not
 // the tail of another repository's owner/repo#number.
@@ -817,11 +832,17 @@ func (a *App) EpicCreate(ctx context.Context, opts EpicCreateOpts) error {
 	}
 	// Check the children before the editor opens or the epic is created: a
 	// typo must not leave a childless epic that looks like a triage mistake.
-	// A child that disappears before the attach keeps the partial-failure
-	// message below, which names the epic already filed.
-	for _, child := range opts.Children {
-		if _, err := a.requireIssue(ctx, child, "--children"); err != nil {
-			return err
+	// A child already in another epic is the same kind of bad reference —
+	// AddSubIssue refuses it, so catching it here is what keeps the epic from
+	// being filed first. A child that disappears before the attach keeps the
+	// partial-failure message below, which names the epic already filed.
+	children, err := a.requireIssues(ctx, "--children", opts.Children)
+	if err != nil {
+		return err
+	}
+	for _, child := range children {
+		if child.Parent != nil {
+			return genericErr("--children: #%d already has a parent (#%d); detach it first", child.Number, child.Parent.Number)
 		}
 	}
 	body, err := a.composeBody(bodySource{
