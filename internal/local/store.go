@@ -72,7 +72,24 @@ type Config struct {
 	extra extras
 }
 
-// MarshalJSON writes the fields ReadConfig carried past, after the known ones.
+// UnmarshalJSON keeps the fields this build does not know, which the typed
+// decode would otherwise drop.
+func (c *Config) UnmarshalJSON(raw []byte) error {
+	type plain Config
+	var p plain
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return err
+	}
+	x, err := unknownFields(raw, p)
+	if err != nil {
+		return err
+	}
+	p.extra = x
+	*c = Config(p)
+	return nil
+}
+
+// MarshalJSON writes the fields UnmarshalJSON carried past, after the known ones.
 func (c Config) MarshalJSON() ([]byte, error) {
 	type plain Config
 	return marshalWithExtras(plain(c), c.extra)
@@ -82,19 +99,26 @@ func (c Config) MarshalJSON() ([]byte, error) {
 // fs.ErrNotExist), which callers treat as "this repo is not local".
 func ReadConfig(dir string) (Config, error) {
 	var cfg Config
-	raw, err := os.ReadFile(filepath.Join(dir, configFile))
+	path := filepath.Join(dir, configFile)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return cfg, err
 	}
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return cfg, fmt.Errorf("%s: %w", filepath.Join(dir, configFile), err)
+	// The version is read on its own first: a newer hew may change the shape
+	// of other fields, and that must surface as "upgrade", not a type error.
+	var head struct {
+		Version int `json:"version"`
 	}
-	if cfg.extra, err = unknownFields(raw, cfg); err != nil {
-		return cfg, fmt.Errorf("%s: %w", filepath.Join(dir, configFile), err)
+	if err := json.Unmarshal(raw, &head); err != nil {
+		return cfg, fmt.Errorf("%s: %w", path, err)
 	}
-	if cfg.Version > formatVersion {
+	if head.Version > formatVersion {
+		cfg.Version = head.Version
 		return cfg, fmt.Errorf("%s was written by a newer hew (format %d, this build reads %d)",
-			filepath.Join(dir, configFile), cfg.Version, formatVersion)
+			path, head.Version, formatVersion)
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return cfg, fmt.Errorf("%s: %w", path, err)
 	}
 	return cfg, nil
 }
