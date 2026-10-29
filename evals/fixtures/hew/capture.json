@@ -1,6 +1,6 @@
 {
   "repo": "lumberbarons/hew",
-  "capturedAt": "2026-10-23T22:51:21Z",
+  "capturedAt": "2026-10-29T02:52:30Z",
   "hewVersion": "hew version dev",
   "openIssues": 27,
   "truncated": false,
@@ -220,17 +220,17 @@
       ]
     },
     {
-      "command": "show #57",
+      "command": "show #61",
       "perIssue": false,
       "hew": {
         "argv": [
           "hew",
           "show",
-          "57",
+          "61",
           "--repo",
           "lumberbarons/hew"
         ],
-        "file": "hew-show-57.txt"
+        "file": "hew-show-61.txt"
       },
       "baselines": [
         {
@@ -243,13 +243,13 @@
                 "gh",
                 "issue",
                 "view",
-                "57",
+                "61",
                 "--repo",
                 "lumberbarons/hew",
                 "--json",
                 "number,title,body,state,stateReason,createdAt,labels,assignees,comments"
               ],
-              "file": "gh-issue-view-57.json"
+              "file": "gh-issue-view-61.json"
             },
             {
               "argv": [
@@ -263,9 +263,9 @@
                 "-F",
                 "query=@cmd/tokens/queries/issue-deps.graphql",
                 "-F",
-                "number=57"
+                "number=61"
               ],
-              "file": "gh-graphql-issue-deps-57.json"
+              "file": "gh-graphql-issue-deps-61.json"
             }
           ]
         },
@@ -279,13 +279,13 @@
                 "gh",
                 "issue",
                 "view",
-                "57",
+                "61",
                 "--repo",
                 "lumberbarons/hew",
                 "--json",
                 "number,title,body,state,stateReason,createdAt,labels,assignees,comments"
               ],
-              "file": "gh-issue-view-57.json"
+              "file": "gh-issue-view-61.json"
             }
           ]
         }

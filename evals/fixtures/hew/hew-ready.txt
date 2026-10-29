@@ -4,13 +4,11 @@
 #61  P3 task         Tighten test gates: per-package coverage floor and shuffled test order
 #62  P3 enhancement  list --json costs more tokens than the raw GraphQL it replaces
 #70  P3 enhancement  pr warns when a bug's derived title names the defect rather than the fix
-#74  P3 enhancement  Test backend: run hew against ephemeral local state instead of GitHub
 #75  P3 enhancement  Code-span check treats a bare filename differently from a path
 #88  P3 enhancement  list and ready filter by priority, including ranges
 #90  P3 enhancement  list --label reports a label that matches nothing instead of an empty result
 #92  P3 task         Correct the documented CI coverage command
 #93  P3 task         Point exit-code documentation at its implementation
-#134 P3 enhancement  pr can close a declared set of issues with repeated --for
 #150 P3 enhancement  Look up deduplication keys in a batch without emitting issue bodies
 #156 P3 enhancement  Align flag names and shapes that collide or diverge across commands
 #159 P3 enhancement  ready and list share filters: area, priority, type, epic
@@ -18,6 +16,8 @@
 #161 P3 enhancement  Body authoring parity: set sections and --edit, pr --edit, stdin for --body-file
 #162 P3 enhancement  epic create accepts priority, area and discovered-from
 #163 P3 enhancement  --dry-run on the mutating commands that compose content
-#179 P3 bug          PR section warnings misjudge --body-file content
+#184 P3 task         Consolidate the Markdown fence scanners in conventions and cli
+#197 P3 task         Migration engine cycle check cannot see edges through unselected items
 #35  P4 task         Agentic accuracy eval: issues vs raw gh on a seeded fixture repo
 #77  P4 enhancement  start's closed refusal doesn't name the close state
+#215 P4 task         draft --check accepts text with none of the template sections

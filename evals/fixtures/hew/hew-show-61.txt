@@ -1,0 +1,20 @@
+#61 P3 task  Tighten test gates: per-package coverage floor and shuffled test order
+state: open  created: 2026-07-29
+
+### Where
+
+.testcoverage.yml, .github/workflows/ci.yml
+
+### Problem
+
+The coverage gate is a single 90% total over internal/, which masks per-package variance: internal/editor sits at 84.2% and internal/gh at 88.6%, propped up by 100% in conventions and git. A new, weakly-tested package can land without ever tripping the gate. Separately, the suite runs without -shuffle, so order-dependence between tests could creep in unnoticed — which is exactly the isolation hazard the review-tests advisory check is looking for.
+
+### Fix
+
+Set threshold.package in .testcoverage.yml (around 80) alongside the existing total: 90, so no single package can hide behind the well-tested ones without forcing anyone to chase the last few percent. Add -shuffle=on to the go test invocation in ci.yml; the suite already passes with it, so this locks in a property that holds today rather than fixing a break.
+
+### Done when
+
+- [ ] .testcoverage.yml sets a per-package threshold and CI fails when any package drops below it
+- [ ] The gate passes on main at the current numbers, where internal/editor at 84.2% is the floor
+- [ ] ci.yml runs go test with -shuffle=on and the suite passes
