@@ -682,12 +682,12 @@ func TestApplyPoisonedStateCannotWireEdgesOnUnrelatedIssues(t *testing.T) {
 }
 
 // assertOnlyReads fails if the run made any call other than the issue reads
-// verification itself performs — the precise claim "before any GitHub
+// verification itself performs (plus explicitly allowed read calls) — the precise claim "before any GitHub
 // mutation", which a per-call denylist cannot make.
-func assertOnlyReads(t *testing.T, f *fakeClient) {
+func assertOnlyReads(t *testing.T, f *fakeClient, otherReads ...string) {
 	t.Helper()
 	for _, call := range f.calls {
-		if !strings.HasPrefix(call, "GetIssue") {
+		if !strings.HasPrefix(call, "GetIssue") && !slices.Contains(otherReads, call) {
 			t.Errorf("call made before verification rejected the state: %s", call)
 		}
 	}

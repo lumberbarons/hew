@@ -1,6 +1,6 @@
 {
   "repo": "lumberbarons/solar-controller",
-  "capturedAt": "2026-10-29T02:53:10Z",
+  "capturedAt": "2026-10-29T22:54:58Z",
   "hewVersion": "hew version dev",
   "openIssues": 14,
   "truncated": false,
@@ -10,7 +10,7 @@
       "perIssue": true,
       "hew": {
         "argv": [
-          "hew",
+          "hew-235",
           "ready",
           "--repo",
           "lumberbarons/solar-controller"
@@ -69,7 +69,7 @@
       "perIssue": true,
       "hew": {
         "argv": [
-          "hew",
+          "hew-235",
           "list",
           "--repo",
           "lumberbarons/solar-controller"
@@ -128,7 +128,7 @@
       "perIssue": true,
       "hew": {
         "argv": [
-          "hew",
+          "hew-235",
           "list",
           "--json",
           "--repo",
@@ -188,7 +188,7 @@
       "perIssue": false,
       "hew": {
         "argv": [
-          "hew",
+          "hew-235",
           "prime",
           "--repo",
           "lumberbarons/solar-controller"
@@ -224,7 +224,7 @@
       "perIssue": false,
       "hew": {
         "argv": [
-          "hew",
+          "hew-235",
           "show",
           "119",
           "--repo",

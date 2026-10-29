@@ -1,5 +1,5 @@
 #61 P3 task  Tighten test gates: per-package coverage floor and shuffled test order
-state: open  created: 2026-07-29 UTC
+state: open  created: 2026-07-29 EDT
 
 ### Where
 

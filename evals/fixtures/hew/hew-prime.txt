@@ -29,21 +29,22 @@ start <n> [--priority Pn --show] (--show or --json includes the body, so skip sh
 pr [--for N --testing "..." --what "..." --why "..." --risk "..." --title "..." --ready] (draft PR for the claimed issue;
   body: What/Why from the issue, Testing = Before:/After: lines + checks run (section flags repeat → bullets), Risk = Reversibility:/Blast radius: lines; exactly one "Fixes #n";
   title defaults to feat:|fix:|chore: from the type — push the branch first) |
+release <n> [--force] (give up a claim; --force releases any owner) |
 close <n> --reason "..." [--completed | --duplicate-of M] | reopen <n> --reason "..." |
 block <n> --on <m> | unblock <n> --from <m> |
 epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n>] |
 apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew apply --help). All take --json.
 
-## Ready (23 of 27 open)
+## Ready (28 of 32 open)
 #167 P2 task         CLI surface snapshot: fail on flag and command removals
 #171 P2 task         Write the 1.0 compatibility policy
 #172 P2 task         Decide how conventions evolve after 1.0
 #61  P3 task         Tighten test gates: per-package coverage floor and shuffled test order
 #62  P3 enhancement  list --json costs more tokens than the raw GraphQL it replaces
-… 18 more: hew ready
+… 23 more: hew ready
 
 ## In progress (1)
-#214 P3 task  Decide whether start should refuse an issue with open blockers  @lumberbarons
+#235 P2 enhancement  Add a way to release a claim; claims on removed or moved worktrees are stranded  @lumberbarons
 
 ## Epics
 #154 P2  Epic: CLI flag consistency  3/10

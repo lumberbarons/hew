@@ -374,8 +374,9 @@ type Store struct {
 }
 
 var (
-	_ gh.IssueStore = (*Store)(nil)
-	_ gh.Claimer    = (*Store)(nil)
+	_ gh.IssueStore    = (*Store)(nil)
+	_ gh.Claimer       = (*Store)(nil)
+	_ gh.ClaimReleaser = (*Store)(nil)
 )
 
 // Open opens the tracker in dir as viewer. It refuses a directory whose config

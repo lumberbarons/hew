@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -245,5 +246,115 @@ func gitIn(t *testing.T, dir string, args ...string) {
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+}
+
+// A removed worktree leaves an unreachable identity, but its claim remains in
+// the shared tracker until explicitly released from a surviving checkout.
+func TestReleaseRecoversClaimAfterWorktreeRemove(t *testing.T) {
+	main, worktree := gitRepoWithWorktree(t)
+	dir := filepath.Join(main, local.DirName)
+	if err := local.Init(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HEW_USER", "")
+	t.Setenv("USER", "jim")
+	t.Chdir(worktree)
+	owner, err := local.Open(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := owner.CreateIssue(ctx, "Stranded work", "", []string{"P2", "task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerApp, _, _ := newLocalApp(owner)
+	if err := ownerApp.Start(ctx, created.Number, StartOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(main)
+	gitIn(t, main, "worktree", "remove", worktree)
+	survivor, err := local.Open(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, out, _ := newLocalApp(survivor)
+	exitCode(t, app.Start(ctx, created.Number, StartOpts{}), ExitClaimed)
+	if err := app.Release(ctx, created.Number, false); err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("unforced release: %v", err)
+	}
+	if err := app.Release(ctx, created.Number, true); err != nil {
+		t.Fatal(err)
+	}
+	got, err := survivor.GetIssue(ctx, created.Number)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Claimed() {
+		t.Fatalf("still claimed: %+v", got)
+	}
+	out.Reset()
+	if err := app.Ready(ctx, ReadyOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Stranded work") {
+		t.Fatalf("not ready: %s", out)
+	}
+	if err := app.Start(ctx, created.Number, StartOpts{}); err != nil {
+		t.Fatalf("fresh claim: %v", err)
+	}
+}
+
+type releaseRacingStore struct {
+	*local.Store
+	clear bool
+}
+
+func (s *releaseRacingStore) ReleaseIssueClaim(ctx context.Context, number int, login string, force bool) error {
+	if s.clear {
+		if err := s.Store.ReleaseIssueClaim(ctx, number, login, true); err != nil {
+			return err
+		}
+	} else if err := s.ClaimIssue(ctx, number, "rival", true); err != nil {
+		return err
+	}
+	return s.Store.ReleaseIssueClaim(ctx, number, login, force)
+}
+
+func TestReleaseRechecksLocalClaimUnderLock(t *testing.T) {
+	for _, clear := range []bool{false, true} {
+		t.Run(fmt.Sprintf("already released=%t", clear), func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), local.DirName)
+			if err := local.Init(dir); err != nil {
+				t.Fatal(err)
+			}
+			store, err := local.Open(dir, "me")
+			if err != nil {
+				t.Fatal(err)
+			}
+			created, err := store.CreateIssue(ctx, "Work", "", []string{"P2", "task"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.ClaimIssue(ctx, created.Number, "me", false); err != nil {
+				t.Fatal(err)
+			}
+			app, out, _ := newLocalApp(&releaseRacingStore{Store: store, clear: clear})
+			err = app.Release(ctx, created.Number, false)
+			if err == nil || out.Len() != 0 {
+				t.Fatalf("error = %v, output = %s", err, out)
+			}
+			got, err := store.GetIssue(ctx, created.Number)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if clear {
+				if got.Claimed() {
+					t.Fatalf("claim recreated: %+v", got)
+				}
+			} else if len(got.Assignees) != 1 || got.Assignees[0] != "rival" || !got.InProgress() {
+				t.Fatalf("concurrent claim disturbed: %+v", got)
+			}
+		})
 	}
 }

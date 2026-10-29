@@ -1,8 +1,8 @@
 {
   "repo": "lumberbarons/hew",
-  "capturedAt": "2026-10-29T02:52:30Z",
+  "capturedAt": "2026-10-29T22:55:45Z",
   "hewVersion": "hew version dev",
-  "openIssues": 27,
+  "openIssues": 32,
   "truncated": false,
   "entries": [
     {
@@ -10,7 +10,7 @@
       "perIssue": true,
       "hew": {
         "argv": [
-          "hew",
+          "hew-235",
           "ready",
           "--repo",
           "lumberbarons/hew"
@@ -69,7 +69,7 @@
       "perIssue": true,
       "hew": {
         "argv": [
-          "hew",
+          "hew-235",
           "list",
           "--repo",
           "lumberbarons/hew"
@@ -128,7 +128,7 @@
       "perIssue": true,
       "hew": {
         "argv": [
-          "hew",
+          "hew-235",
           "list",
           "--json",
           "--repo",
@@ -188,7 +188,7 @@
       "perIssue": false,
       "hew": {
         "argv": [
-          "hew",
+          "hew-235",
           "prime",
           "--repo",
           "lumberbarons/hew"
@@ -224,7 +224,7 @@
       "perIssue": false,
       "hew": {
         "argv": [
-          "hew",
+          "hew-235",
           "show",
           "61",
           "--repo",

@@ -15,7 +15,7 @@ func TestFixedArgumentsRejectSurplus(t *testing.T) {
 	for _, args := range [][]string{
 		{"prime", "extra"}, {"ready", "extra"}, {"list", "extra"},
 		{"show", "12", "13"}, {"create", "extra"}, {"draft", "extra"},
-		{"start", "12", "13"}, {"triage", "extra"}, {"set", "12", "13"},
+		{"start", "12", "13"}, {"release", "12", "13"}, {"triage", "extra"}, {"set", "12", "13"},
 		{"pr", "extra"}, {"close", "12", "13"}, {"reopen", "12", "13"},
 		{"block", "12", "13", "--on", "14"},
 		{"unblock", "12", "13", "--from", "14"},
@@ -40,7 +40,7 @@ func TestFixedArgumentsRejectSurplus(t *testing.T) {
 
 func TestFixedArgumentsRequirePositionals(t *testing.T) {
 	for _, path := range [][]string{
-		{"show"}, {"start"}, {"set"}, {"close"}, {"reopen"},
+		{"show"}, {"start"}, {"release"}, {"set"}, {"close"}, {"reopen"},
 		{"block", "--on", "12"}, {"unblock", "--from", "12"}, {"apply"},
 		{"hooks", "install"}, {"hooks", "remove"},
 	} {
@@ -62,7 +62,7 @@ func TestFixedArgumentsAcceptValidInput(t *testing.T) {
 		{[]string{"list"}, nil}, {[]string{"show"}, []string{"#12"}},
 		{[]string{"search"}, []string{"several", "search", "terms"}},
 		{[]string{"create"}, nil}, {[]string{"draft"}, nil},
-		{[]string{"start"}, []string{"12"}}, {[]string{"triage"}, nil},
+		{[]string{"start"}, []string{"12"}}, {[]string{"release"}, []string{"12", "--force"}}, {[]string{"triage"}, nil},
 		{[]string{"set"}, []string{"12"}}, {[]string{"pr"}, nil},
 		{[]string{"close"}, []string{"12"}}, {[]string{"reopen"}, []string{"12"}},
 		{[]string{"block"}, []string{"12", "--on", "13"}},

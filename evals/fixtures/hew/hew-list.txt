@@ -18,10 +18,15 @@
 #163 P3 enhancement  --dry-run on the mutating commands that compose content
 #184 P3 task         Consolidate the Markdown fence scanners in conventions and cli
 #197 P3 task         Migration engine cycle check cannot see edges through unselected items
+#237 P3 task         Settle claim and epic state when issues are closed
+#244 P3 task         Docs and landing page still describe hew as GitHub-only
+#254 P3 enhancement  Local `apply` and `migrate local` pause 500ms between writes
+#255 P3 enhancement  The unmarked-code warning fires on every `--where` path and tells the author to run a literal `hew set <n>`
 #35  P4 task         Agentic accuracy eval: issues vs raw gh on a seeded fixture repo
 #77  P4 enhancement  start's closed refusal doesn't name the close state
 #215 P4 task         draft --check accepts text with none of the template sections
-#214 P3 task         Decide whether start should refuse an issue with open blockers  [in progress @lumberbarons]
+#256 P4 task         Small CLI polish: no-op set, blocker wording, apply marker, close wording, flag defaults, title prefixes
+#235 P2 enhancement  Add a way to release a claim; claims on removed or moved worktrees are stranded  [in progress @lumberbarons]
 #173 P2 task         Cut v1.0.0  [blocked by #62 #154 #172 #171]
 #154 P2              Epic: CLI flag consistency  [epic 3/10]
 #170 P2              Epic: 1.0 readiness  [epic 0/5]
