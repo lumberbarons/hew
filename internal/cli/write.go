@@ -58,6 +58,14 @@ func (a *App) Create(ctx context.Context, opts CreateOpts) error {
 		return err
 	}
 
+	if opts.DiscoveredFrom > 0 {
+		// Before the editor opens or the issue is created, so a typo leaves
+		// nothing behind. A closed source is fine: discovery follows a close.
+		if _, err := a.requireIssue(ctx, opts.DiscoveredFrom, "--discovered-from"); err != nil {
+			return err
+		}
+	}
+
 	body, err := a.composeBody(bodySource{
 		issueType: opts.Type, sections: opts.Sections,
 		bodyFile: opts.BodyFile, edit: opts.Edit,

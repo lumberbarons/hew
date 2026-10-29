@@ -28,7 +28,7 @@ func applySetup(t *testing.T, fixture string) (*fakeClient, *App, ApplyOpts) {
 	if err := os.WriteFile(file, []byte(fixture), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	f := newFake(issue(42, "Existing dep", "P2", "task"))
+	f := newFake(issue(42, "Existing dep", "P2", "task"), issue(7, "Source", "P2", "task"))
 	app, _, _ := newApp(f)
 	return f, app, ApplyOpts{File: file, StatePath: filepath.Join(dir, "state.json")}
 }
@@ -111,9 +111,9 @@ func TestApplyDryRun(t *testing.T) {
 	if err := app.Apply(ctx, opts); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.calls) != 0 {
-		t.Errorf("dry run made API calls: %v", f.calls)
-	}
+	// Reads only: the dry run checks each discovered-from source exists, so
+	// it cannot vouch for a plan the real run would refuse.
+	assertOnlyReads(t, f)
 	if _, err := os.Stat(opts.StatePath); !os.IsNotExist(err) {
 		t.Error("dry run wrote state")
 	}
@@ -212,7 +212,7 @@ func TestApplyResumesAfterCreateFailure(t *testing.T) {
 	if err := app.Apply(ctx, opts); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.issues) != 4 { // #42 plus the three plan entries
+	if len(f.issues) != 5 { // #42 and #7 plus the three plan entries
 		t.Errorf("resume duplicated issues: %d total", len(f.issues))
 	}
 	state = readState(t, opts.StatePath).Mapping
@@ -685,5 +685,29 @@ func TestApplyJSON(t *testing.T) {
 	// Wired: two parent edges plus two blockers.
 	if got.Created != 3 || got.Wired != 4 || len(got.Mapping) != 3 {
 		t.Errorf("summary = %+v", got)
+	}
+}
+
+// TestApplyRefusesAMissingDiscoveredFrom covers #213 on the batch path: the
+// check runs before any write, on the dry run as well as the real one, so a
+// typo is found while fixing the plan is still free.
+func TestApplyRefusesAMissingDiscoveredFrom(t *testing.T) {
+	const missing = `{"title":"First","type":"task"}
+{"title":"Second","type":"bug","discovered-from":7}
+{"title":"Third","type":"bug","discovered-from":99}
+`
+	for _, dryRun := range []bool{true, false} {
+		t.Run(fmt.Sprintf("dry-run=%t", dryRun), func(t *testing.T) {
+			f, app, opts := applySetup(t, missing)
+			opts.DryRun = dryRun
+			err := app.Apply(ctx, opts)
+			if err == nil || !strings.Contains(err.Error(), "--discovered-from") || !strings.Contains(err.Error(), "#99") {
+				t.Fatalf("err = %v, want a --discovered-from refusal naming #99", err)
+			}
+			assertOnlyReads(t, f)
+			if _, statErr := os.Stat(opts.StatePath); statErr == nil {
+				t.Error("a refused plan still wrote a checkpoint")
+			}
+		})
 	}
 }

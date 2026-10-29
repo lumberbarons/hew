@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -151,7 +152,7 @@ func TestCreateBodyFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("### Where\n\nhere\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	f := newFake()
+	f := newFake(issue(9, "Source", "P2", "task"))
 	app, _, _ := newApp(f)
 	if err := app.Create(ctx, CreateOpts{Title: "T", Type: "bug", BodyFile: path, DiscoveredFrom: 9}); err != nil {
 		t.Fatal(err)
@@ -183,7 +184,7 @@ func TestCreateSections(t *testing.T) {
 }
 
 func TestCreateSectionsWithDiscoveredFrom(t *testing.T) {
-	f := newFake()
+	f := newFake(issue(7, "Source", "P2", "task"))
 	app, _, _ := newApp(f)
 	err := app.Create(ctx, CreateOpts{
 		Title: "T", Type: "bug", DiscoveredFrom: 7,
@@ -1632,10 +1633,9 @@ func TestCreateWarnsAboutUnmarkedCodeTextInABodyFile(t *testing.T) {
 	}
 }
 
-// closeDuplicateBackends runs the same scenario against the fake and the local
-// store: Close is written against gh.IssueStore, so the two must agree on what
-// a duplicate target has to be.
-func closeDuplicateBackends(t *testing.T, run func(t *testing.T, store gh.IssueStore)) {
+// eachBackend runs the same scenario against the fake and the local store:
+// commands are written against gh.IssueStore, so the two must agree.
+func eachBackend(t *testing.T, run func(t *testing.T, store gh.IssueStore)) {
 	t.Helper()
 	t.Run("fake", func(t *testing.T) { run(t, newFake()) })
 	t.Run("local", func(t *testing.T) {
@@ -1667,7 +1667,7 @@ func TestCloseDuplicateOfRefusesBadTargets(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			closeDuplicateBackends(t, func(t *testing.T, store gh.IssueStore) {
+			eachBackend(t, func(t *testing.T, store gh.IssueStore) {
 				work, err := store.CreateIssue(ctx, "Work", "", []string{"P2", "bug"})
 				if err != nil {
 					t.Fatal(err)
@@ -1714,7 +1714,7 @@ func TestCloseDuplicateOfNamesTheTarget(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			closeDuplicateBackends(t, func(t *testing.T, store gh.IssueStore) {
+			eachBackend(t, func(t *testing.T, store gh.IssueStore) {
 				dup, err := store.CreateIssue(ctx, "Dup", "", []string{"P2", "bug"})
 				if err != nil {
 					t.Fatal(err)
@@ -1742,4 +1742,52 @@ func TestCloseDuplicateOfNamesTheTarget(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestCreateDiscoveredFromRefusesAMissingIssue covers #213: the flag is a
+// provenance link, so a typo must fail before anything is filed rather than
+// leave an issue behind carrying a dangling reference.
+func TestCreateDiscoveredFromRefusesAMissingIssue(t *testing.T) {
+	eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+		app, _, _ := newLocalApp(store)
+		err := app.Create(ctx, CreateOpts{Title: "Follow-up", Type: "bug", DiscoveredFrom: 99})
+		if err == nil {
+			t.Fatal("create accepted a --discovered-from for an issue that does not exist")
+		}
+		if ExitCode(err) == 0 {
+			t.Errorf("exit code = 0 for %v", err)
+		}
+		all, err := store.ListIssues(ctx, []gh.IssueState{gh.StateOpen, gh.StateClosed})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(all) != 0 {
+			t.Errorf("refused create still filed %d issue(s): %v", len(all), all)
+		}
+	})
+}
+
+// Discovery often follows a close, so a closed source is a valid provenance.
+func TestCreateDiscoveredFromAcceptsAClosedIssue(t *testing.T) {
+	eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+		source, err := store.CreateIssue(ctx, "Source", "", []string{"P2", "task"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.CloseIssue(ctx, source.Number, gh.CloseCompleted); err != nil {
+			t.Fatal(err)
+		}
+		app, _, _ := newLocalApp(store)
+		if err := app.Create(ctx, CreateOpts{Title: "Follow-up", Type: "bug", DiscoveredFrom: source.Number}); err != nil {
+			t.Fatal(err)
+		}
+		all, err := store.ListIssues(ctx, []gh.IssueState{gh.StateOpen})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := fmt.Sprintf("Discovered while working on #%d", source.Number)
+		if len(all) != 1 || !strings.Contains(all[0].Body, want) {
+			t.Errorf("open issues = %v, want one whose body contains %q", all, want)
+		}
+	})
 }
