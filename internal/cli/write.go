@@ -407,13 +407,16 @@ type SetOpts struct {
 	Parent      int
 	NoParent    bool
 	Title       string
+	// TitleSet records that --title was passed, so an explicitly empty one is
+	// an error rather than the same thing as leaving the title alone.
+	TitleSet    bool
 	BodyFile    string
 	AllowClosed bool
 }
 
 func (o SetOpts) empty() bool {
 	return o.Priority == "" && o.Type == "" && len(o.AddAreas) == 0 &&
-		len(o.RemoveAreas) == 0 && o.Parent == 0 && !o.NoParent && o.Title == "" &&
+		len(o.RemoveAreas) == 0 && o.Parent == 0 && !o.NoParent && o.Title == "" && !o.TitleSet &&
 		o.BodyFile == ""
 }
 
@@ -430,6 +433,9 @@ func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 	// Validate every flag up front: Set applies several mutations in
 	// sequence, so a usage error discovered mid-way would exit 2 ("nothing
 	// happened") after earlier changes had already been written.
+	if opts.TitleSet && strings.TrimSpace(opts.Title) == "" {
+		return usageErr("--title must not be empty")
+	}
 	if err := validateTitle(opts.Title); err != nil {
 		return err
 	}

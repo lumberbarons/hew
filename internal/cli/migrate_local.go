@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -69,6 +70,17 @@ func (a *App) MigrateLocal(ctx context.Context, opts MigrateLocalOpts) error {
 		}
 		defer fr.Release()
 		frozen, snap = fr, fr.Snapshot
+	}
+
+	// A dry run with no target repository never contacts GitHub, which is also
+	// why it cannot vouch for a checkpoint: that has to be checked against the
+	// issues it maps. Refuse rather than list work a real run would skip.
+	targetless := opts.DryRun && a.Client == nil
+	if targetless {
+		if _, err := os.Stat(opts.StatePath); err == nil {
+			return usageErr("%s holds a checkpoint from an earlier run, and a dry run can only check it against GitHub: pass --repo", opts.StatePath)
+		}
+		return a.localMigrationPlan(localItems(snap), map[string]int{})
 	}
 
 	state, err := loadBatchState(opts.StatePath, a.stateRepo(), snap.Digest, "issues.jsonl")
@@ -260,6 +272,10 @@ func localLabels(snap *local.Snapshot) []gh.Label {
 	return out
 }
 
+// planLineLimit is how many per-issue lines a text dry run prints before it
+// summarises instead; --json always lists every issue.
+const planLineLimit = 20
+
 // localMigrationPlan reports what a real run would do, in the same shape
 // `migrate beads --dry-run` uses.
 func (a *App) localMigrationPlan(items []migrationItem, state map[string]int) error {
@@ -284,6 +300,19 @@ func (a *App) localMigrationPlan(items []migrationItem, state map[string]int) er
 	return a.emitResult(map[string]any{
 		"dryRun": true, "wouldMigrate": wouldMigrate, "alreadyMigrated": already,
 	}, func() {
+		if len(steps) > planLineLimit {
+			closing := 0
+			for _, e := range wouldMigrate {
+				if e.ThenClose {
+					closing++
+				}
+			}
+			a.printf("%d would be created, %d would be closed, %d already migrated\n",
+				len(wouldMigrate), closing, len(already))
+			a.printf("dry run: %d local issues would be migrated; per-issue lines are omitted above %d issues, use --json for the full plan\n",
+				len(items), planLineLimit)
+			return
+		}
 		for _, st := range steps {
 			if st.migrated != 0 {
 				a.printf("already migrated: %s → #%d\n", st.key, st.migrated)

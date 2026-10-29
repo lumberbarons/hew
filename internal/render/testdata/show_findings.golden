@@ -1,5 +1,5 @@
 #12 P?  Report pаypal
-state: open  created: 2026-07-02
+state: open  created: 2026-07-02 UTC
 text findings:
   title: contains confusable characters
   body: contains zero-width characters

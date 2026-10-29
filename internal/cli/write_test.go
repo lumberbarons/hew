@@ -628,6 +628,24 @@ func TestSetValidation(t *testing.T) {
 	exitCode(t, app.Set(ctx, 1, SetOpts{AllowClosed: true}), ExitUsage)
 }
 
+// TestSetRejectsAnExplicitlyEmptyTitle: --title "" was indistinguishable from
+// no --title, so it reported "nothing to change" instead of naming the flag.
+func TestSetRejectsAnExplicitlyEmptyTitle(t *testing.T) {
+	for _, title := range []string{"", "   "} {
+		f := newFake(issue(1, "Work", "P2", "bug"))
+		app, _, _ := newApp(f)
+		// Paired with a valid change, the bad title must still refuse the lot.
+		err := app.Set(ctx, 1, SetOpts{Priority: "P0", Title: title, TitleSet: true})
+		exitCode(t, err, ExitUsage)
+		if !strings.Contains(err.Error(), "--title") || strings.Contains(err.Error(), "nothing to change") {
+			t.Errorf("title %q: err = %v, want a --title usage error", title, err)
+		}
+		if got := f.byNumber(1); got.Title != "Work" || !slices.Contains(got.Labels, "P2") {
+			t.Errorf("title %q: refused set still mutated the issue: %+v", title, got)
+		}
+	}
+}
+
 func TestSetSwapsLabels(t *testing.T) {
 	f := newFake(issue(1, "Work", "P2", "bug", "old-area"))
 	app, out, _ := newApp(f)

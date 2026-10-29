@@ -38,6 +38,13 @@ func checkGolden(t *testing.T, name string, got []byte) {
 	}
 }
 
+// TestMain pins the zone dates render in, so goldens do not depend on the
+// machine running them.
+func TestMain(m *testing.M) {
+	time.Local = time.UTC
+	os.Exit(m.Run())
+}
+
 func ts(day int) time.Time {
 	return time.Date(2026, 7, day, 12, 0, 0, 0, time.UTC)
 }
@@ -176,6 +183,33 @@ func TestShow(t *testing.T) {
 	var buf bytes.Buffer
 	Show(&buf, i, nil, Style{})
 	checkGolden(t, "show", buf.Bytes())
+}
+
+// TestShowDatesUseTheLocalZoneAndNameIt: a 23:30 evening in a western zone is
+// already the next day in UTC; the date must be the reader's, with the zone
+// stated so it is never ambiguous.
+func TestShowDatesUseTheLocalZoneAndNameIt(t *testing.T) {
+	prev := time.Local
+	t.Cleanup(func() { time.Local = prev })
+	time.Local = time.FixedZone("PDT", -7*60*60)
+	late := time.Date(2026, 7, 7, 6, 30, 0, 0, time.UTC) // 23:30 on the 6th in PDT
+	i := model.Issue{
+		Number: 9, Title: "Late", State: "OPEN", CreatedAt: late, Labels: []string{"P2", "task"},
+		Comments: []model.Comment{{Author: "alice", CreatedAt: late, Body: "hi"}},
+	}
+	var buf bytes.Buffer
+	Show(&buf, i, nil, Style{})
+	out := buf.String()
+	if !strings.Contains(out, "created: 2026-07-06 PDT") {
+		t.Errorf("created date not local with zone:\n%s", out)
+	}
+	if strings.Contains(out, "2026-07-07") {
+		t.Errorf("a UTC date leaked into the output:\n%s", out)
+	}
+	// Comments share the zone the created: line names rather than repeating it.
+	if !strings.Contains(out, "@alice (2026-07-06)") {
+		t.Errorf("comment date should be local too:\n%s", out)
+	}
 }
 
 func TestShowClosedMinimal(t *testing.T) {

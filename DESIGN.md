@@ -280,7 +280,10 @@ obvious from a flag name.
   real account), wiring parents and blockers, and rewriting `#n` references in
   bodies and comments to the new numbers outside code: inline code spans, fenced
   blocks (including ones nested in list items and blockquotes), and indented
-  code blocks.
+  code blocks. `--dry-run` reads only `issues.jsonl`, so it needs no GitHub
+  target — it refuses only when a checkpoint exists, which can be vouched for
+  against GitHub alone — and its text plan collapses to a summary past twenty
+  issues (`--json` keeps every entry).
   Numbers are unknown until the issues exist, so bodies are created as written and
   edited once all are created; a body a person changed in between is left alone
   with a warning. The tracker is locked for the whole run, so nothing written
@@ -473,6 +476,11 @@ object is neither the text primer nor the data schema.
   requires a TTY, `TERM` not `dumb`, and `NO_COLOR` unset — `FORCE_COLOR=1`
   opts back in, for tests and pagers. `--json`, pipes, and every golden test
   stay byte-identical.
+- Dates in text output are the reader's local day, with the zone named where it
+  first appears (`created: 2026-10-29 EDT` in `show`; its comment dates share
+  it). A UTC date reads a day ahead for a late-evening user in a western zone.
+  `--json` keeps UTC timestamps, and the bodies `migrate` writes to GitHub keep
+  a UTC date, since they are a durable record read in any zone.
 - `--json` everywhere, with a flat schema (deps as number arrays, not
   `{nodes:[...]}` wrappers — hide GraphQL shapes from consumers). List-shaped
   output is NDJSON, one compact object per line: a truncated JSON array is
@@ -766,7 +774,7 @@ lumberbarons/solar-controller — 14 open issues:
 | `hew list` | 353 | 1172 | 3.3x | gh api graphql (open issues) |
 | `hew list --json` | 1607 | 1172 | 0.7x | gh api graphql (open issues) |
 | `hew prime` | 1101 | 1172 | 1.1x | gh api graphql (open issues) |
-| `hew show #119` | 430 | 590 | 1.4x | gh issue view --json + gh api graphql |
+| `hew show #119` | 431 | 590 | 1.4x | gh issue view --json + gh api graphql |
 
 Findings, including the ones that don't flatter the tool:
 

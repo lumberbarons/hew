@@ -226,7 +226,9 @@ func Show(w io.Writer, i model.Issue, children []model.Issue, s Style) {
 	if i.StateReason != "" {
 		state += " (" + strings.ToLower(i.StateReason) + ")"
 	}
-	line := fmt.Sprintf("state: %s  created: %s", SanitizeInline(state), i.CreatedAt.Format("2006-01-02"))
+	// Dates are the reader's local day, with the zone named once here; comment
+	// dates below share it. A UTC date reads a day ahead on a late evening.
+	line := fmt.Sprintf("state: %s  created: %s", SanitizeInline(state), i.CreatedAt.Local().Format("2006-01-02 MST"))
 	if len(i.Assignees) > 0 {
 		line += fmt.Sprintf("  assignee: @%s", SanitizeInline(strings.Join(i.Assignees, " @")))
 	}
@@ -255,7 +257,7 @@ func Show(w io.Writer, i model.Issue, children []model.Issue, s Style) {
 		fmt.Fprintln(w, s.dim(header))
 		for _, c := range i.Comments {
 			fmt.Fprintf(w, "  @%s (%s): %s\n", SanitizeInline(c.Author),
-				c.CreatedAt.Format("2006-01-02"), sanitizeBlock(strings.TrimSpace(c.Body)))
+				c.CreatedAt.Local().Format("2006-01-02"), sanitizeBlock(strings.TrimSpace(c.Body)))
 		}
 	}
 }
