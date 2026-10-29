@@ -1512,25 +1512,115 @@ func TestSetParentMissing(t *testing.T) {
 	}
 }
 
-func TestEpicCreateChildMissing(t *testing.T) {
-	f := newFake()
-	app, _, _ := newApp(f)
-	err := app.EpicCreate(ctx, EpicCreateOpts{Title: "Big", Children: []int{99}})
-	if err == nil || !strings.Contains(err.Error(), "attaching #99 failed") {
-		t.Errorf("err = %v", err)
+// TestCreateRefusesAMissingBlocker covers #232: a dependency edge names an
+// existing issue, so a typo must fail before the issue is filed rather than
+// leave a stray issue carrying a dangling edge.
+func TestCreateRefusesAMissingBlocker(t *testing.T) {
+	eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+		app, _, _ := newLocalApp(store)
+		err := app.Create(ctx, CreateOpts{Title: "T", Type: "bug", BlockedBy: []int{99}})
+		if err == nil {
+			t.Fatal("create accepted a --blocked-by issue that does not exist")
+		}
+		if got := ExitCode(err); got != ExitGeneric {
+			t.Errorf("exit code = %d, want %d", got, ExitGeneric)
+		}
+		assertNoIssues(t, store)
+	})
+}
+
+// TestCreateRefusesAMissingParent: --parent is the same kind of reference, and
+// a bad one must not leave an issue with no parent behind either.
+func TestCreateRefusesAMissingParent(t *testing.T) {
+	eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+		app, _, _ := newLocalApp(store)
+		err := app.Create(ctx, CreateOpts{Title: "T", Type: "bug", Parent: 99})
+		if err == nil {
+			t.Fatal("create accepted a --parent issue that does not exist")
+		}
+		if got := ExitCode(err); got != ExitGeneric {
+			t.Errorf("exit code = %d, want %d", got, ExitGeneric)
+		}
+		assertNoIssues(t, store)
+	})
+}
+
+// TestEpicCreateRefusesAMissingChild covers #232's third flag: a childless
+// epic is indistinguishable from a triage mistake and stays in the queue
+// forever, so --children is checked before the epic is filed.
+func TestEpicCreateRefusesAMissingChild(t *testing.T) {
+	eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+		app, _, _ := newLocalApp(store)
+		err := app.EpicCreate(ctx, EpicCreateOpts{Title: "Big", Children: []int{99}})
+		if err == nil {
+			t.Fatal("epic create accepted a --children issue that does not exist")
+		}
+		if got := ExitCode(err); got != ExitGeneric {
+			t.Errorf("exit code = %d, want %d", got, ExitGeneric)
+		}
+		assertNoIssues(t, store)
+	})
+}
+
+// A reference can disappear between the pre-check and the mutation, since
+// GitHub has no transaction spanning both. The residual failure still has to
+// name the issue that was created, so the operator can finish by hand.
+func TestCreateReferenceFailureAfterTheCheckNamesTheCreatedIssue(t *testing.T) {
+	cases := []struct {
+		name   string
+		fail   string
+		create func(*App) error
+		want   string
+	}{
+		{
+			"blocked-by", "AddBlockedBy",
+			func(a *App) error {
+				return a.Create(ctx, CreateOpts{Title: "T", Type: "bug", BlockedBy: []int{1}})
+			},
+			"created #101 but --blocked-by 1 failed",
+		},
+		{
+			"parent", "AddSubIssue",
+			func(a *App) error {
+				return a.Create(ctx, CreateOpts{Title: "T", Type: "bug", Parent: 1})
+			},
+			"created #101 but --parent 1 failed",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake(issue(1, "Reference", "P2", "task"))
+			f.failOn[tc.fail] = errors.New("boom")
+			app, _, _ := newApp(f)
+			err := tc.create(app)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want it to contain %q", err, tc.want)
+			}
+		})
 	}
 }
 
-func TestCreateBlockedByMissing(t *testing.T) {
-	f := newFake()
+func TestEpicCreateChildFailureAfterTheCheckNamesTheCreatedEpic(t *testing.T) {
+	f := newFake(issue(1, "Child", "P2", "task"))
+	f.failOn["AddSubIssue"] = errors.New("boom")
 	app, _, _ := newApp(f)
-	err := app.Create(ctx, CreateOpts{Title: "T", Type: "bug", BlockedBy: []int{99}})
-	if err == nil || !strings.Contains(err.Error(), "--blocked-by 99 failed") {
-		t.Errorf("err = %v", err)
+	err := app.EpicCreate(ctx, EpicCreateOpts{Title: "Big", Children: []int{1}})
+	want := "created epic #101 but attaching #1 failed"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %v, want it to contain %q", err, want)
 	}
-	err = app.Create(ctx, CreateOpts{Title: "T", Type: "bug", Parent: 99})
-	if err == nil || !strings.Contains(err.Error(), "--parent 99 failed") {
-		t.Errorf("err = %v", err)
+}
+
+// assertNoIssues is the "created nothing" half of a refused create: the
+// backend must hold no issue at all, open or closed.
+func assertNoIssues(t *testing.T, store gh.IssueStore) {
+	t.Helper()
+	all, err := store.ListIssues(ctx, []gh.IssueState{gh.StateOpen, gh.StateClosed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 0 {
+		t.Errorf("refused create still filed %d issue(s): %v", len(all), all)
 	}
 }
 

@@ -65,6 +65,21 @@ func (a *App) Create(ctx context.Context, opts CreateOpts) error {
 			return err
 		}
 	}
+	// Dependency and parent references get the same pre-check, for the same
+	// reason: a typo must not leave a stray issue behind. A reference can
+	// still vanish between this read and the mutation — GitHub has no
+	// transaction spanning them — so the write paths keep naming the created
+	// issue on that residual failure.
+	for _, blocker := range opts.BlockedBy {
+		if _, err := a.requireIssue(ctx, blocker, "--blocked-by"); err != nil {
+			return err
+		}
+	}
+	if opts.Parent > 0 {
+		if _, err := a.requireIssue(ctx, opts.Parent, "--parent"); err != nil {
+			return err
+		}
+	}
 
 	body, err := a.composeBody(bodySource{
 		issueType: opts.Type, sections: opts.Sections,
@@ -799,6 +814,15 @@ func (a *App) EpicCreate(ctx context.Context, opts EpicCreateOpts) error {
 	title := opts.Title
 	if !strings.HasPrefix(title, conventions.EpicTitlePrefix) {
 		title = conventions.EpicTitlePrefix + title
+	}
+	// Check the children before the editor opens or the epic is created: a
+	// typo must not leave a childless epic that looks like a triage mistake.
+	// A child that disappears before the attach keeps the partial-failure
+	// message below, which names the epic already filed.
+	for _, child := range opts.Children {
+		if _, err := a.requireIssue(ctx, child, "--children"); err != nil {
+			return err
+		}
 	}
 	body, err := a.composeBody(bodySource{
 		sections: opts.Sections, bodyFile: opts.BodyFile, edit: opts.Edit,
