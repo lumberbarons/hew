@@ -260,7 +260,9 @@ obvious from a flag name.
   included, keeping close reasons and comments (a lead line credits the original
   author and date, the author in a code span so a local handle never mentions a
   real account), wiring parents and blockers, and rewriting `#n` references in
-  bodies and comments to the new numbers outside code spans and fenced blocks.
+  bodies and comments to the new numbers outside code: inline code spans, fenced
+  blocks (including ones nested in list items and blockquotes), and indented
+  code blocks.
   Numbers are unknown until the issues exist, so bodies are created as written and
   edited once all are created; a body a person changed in between is left alone
   with a warning. The tracker is locked for the whole run, so nothing written
