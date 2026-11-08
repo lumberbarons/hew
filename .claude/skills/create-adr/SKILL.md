@@ -103,7 +103,7 @@ Edit the scaffolded file, replacing every placeholder with project-specific cont
 - **Decision Outcome**: which option won and *which drivers tipped the balance* — a reader should be able to tell whether changing a driver would invalidate this decision
 - **Consequences**: honest positives, negatives, and risks; if there are no negatives, you haven't thought hard enough
 - **Pros and Cons of the Options**: per-option analysis, including the rejected ones
-- **Implementation Notes**: how the decision cascades into code and operational policy — modules or services affected, invariants future changes must respect, and leading indicators that would prompt revisiting. Do not enumerate spec paths here; that coupling belongs on the spec side.
+- **Implementation Notes**: how the decision cascades into code and operational policy — modules or services affected, invariants future changes must respect, and leading indicators that would prompt revisiting.
 - **References**: links to discussions, PRs, issues, and prior ADRs, plus a markdown link to each cited research document with a few words on what it established. Where a driver or consequence rests on a specific finding, name it in the text (`RES-0004 F2`) so a later reader can check the claim at its source
 
 > [!NOTE]

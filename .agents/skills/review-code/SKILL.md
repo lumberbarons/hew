@@ -12,7 +12,7 @@ Review the code in scope through two lenses: **design** (how the code will fare 
 
 You already know what bad design looks like — a function with two unrelated reasons to change, business rules interleaved with transport parsing, a constructor that reaches out and builds its own dependency, an API that must be called in an order nothing enforces, a name that describes a category instead of an action, an error path that collapses three different failures into one. Apply that judgement directly and thoroughly; reading the code closely is the bulk of the value here.
 
-What follows is only the local policy you could not infer. In an earlier design-review benchmark, a 249-line version scored 78.4% across four fixtures against 94.5% for a 97-line version, with five times the variance. Those measurements predate the two-lens rubric; they support keeping instructions focused on local policy rather than restating review criteria.
+What follows is only the local policy you could not infer.
 
 ## Arguments
 

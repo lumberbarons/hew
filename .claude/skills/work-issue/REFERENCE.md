@@ -51,14 +51,6 @@ run touched, which is a single entry unless `--batch` was given.
 | `tdd` | `applied`, or `not_applicable` with the reason in `gate` (config, docs, migration, wiring). |
 | `skipped` | Why candidates were passed over. A run reporting `no_ready_work` with a non-zero `claimed` count is describing a stall, not a drained backlog. |
 
-`status` exists because four different situations produce zero PRs and mean opposite things.
-See the table in SKILL.md; the failure mode it guards against is a scheduled run reporting a
-finished backlog when the CLI has actually been unauthenticated for a week.
-
-`integration_failed` is the one status that carries open PRs, so a caller must not treat it as a
-run to retry. Nothing about re-running changes the result — two issues filed as independent are
-coupled, and only a human reading the pair resolves that.
-
 ## Quality gates
 
 Step 6 runs every check the project defines — tests, linters, formatters, type checkers, builds —
@@ -179,54 +171,3 @@ opened draft PR #63 → Fixes #39
 
 The issue stays open. The merge closes it, which is the point — the work went through review
 instead of around it.
-
-### The same run, one tick later
-
-```bash
-$ hew ready
-#40 P3 enhancement  Reopen command symmetric with close
-```
-
-Claiming #40 fails with exit 3 because @someone-else already holds it:
-
-```
-#40 already claimed (assigned to @someone-else); pick the next ready item or --force
-```
-
-Not an error condition — the lock did its job. Move to the next candidate. With nothing else
-ready, the run reports `not_eligible` with `skipped.claimed: 1`, rather than `no_ready_work`.
-The distinction matters: one says the backlog is finished, the other says something else is
-holding it, and only one of them should make anyone comfortable.
-
-### A batch of three
-
-`work-issue --batch` against a queue of ten. Sizing the first three candidates: #42 names
-two paths and three Done-when items, #47 one path and two items, #51 two paths and four items.
-None is large, so the ceiling stays at 3.
-
-Each is worked exactly as above — branched from `origin/main`, gated alone, pushed, PR opened.
-Then Step 8:
-
-```bash
-$ git checkout -B integration/batch-42-51 origin/main
-$ git merge --no-ff fix/42-write-commands-guard-closed
-$ git merge --no-ff fix/47-close-reports-state
-$ git merge --no-ff fix/51-start-honours-priority
-
-$ go build ./... && go test ./...
---- FAIL: TestStart_UntriagedRequiresPriority
-```
-
-Nothing conflicted — the three fixes touch different files. #51 made `start` read priority before
-claiming; #42 made the write path refuse closed issues *before* any read. Each is correct against
-its own `### Done when`, and the order they compose in is not something either issue specified.
-
-The three PRs stay open. The coupling is filed fresh:
-
-```bash
-$ hew create --type bug --title "start on a closed issue fails before the priority check" \
-    --discovered-from 42 --discovered-from 51 --priority P2 ...
-```
-
-Status is `integration_failed`, `reason` names the pair and the failing test. Not `failed` — all
-three issues were delivered, and re-running the batch would reproduce this exactly.

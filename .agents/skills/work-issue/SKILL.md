@@ -121,21 +121,16 @@ a child gets skipped or misordered. The listing can include closed children: fil
 yourself** and take the top one. A progress summary without blockers is not enough to select a
 child.
 
-Sorting explicitly matters here in a way it does not above: `hew ready` is documented as
-priority-sorted so taking its first entry is enough, while an epic's child listing carries no
-such guarantee.
-Trusting its order would let an epic whose children were filed out of priority order get worked
-out of priority order, and nothing downstream would ever flag it.
+Sort explicitly here: `hew ready` is priority-sorted, but an epic's child listing carries no such
+guarantee.
 
 Report the epic's progress, work exactly one child, and leave the epic open; the next invocation
 walks to the next child. If every child is closed, the epic is finished and a human should close
 it — say so rather than closing it yourself.
 
-`--batch` does not change that, and the reason is worth stating so nobody expects otherwise: a
-child's blockers clear when its PR *merges*, not when this run pushes it. In a dependency chain
-the second child is therefore still blocked for the entire run, and a batch aimed at an epic would
-work one child and then correctly find nothing eligible. Children with no dependency between them
-are ordinary ready issues and reach a batch through `hew ready` on their own merits.
+`--batch` does not change that: a child's blockers clear when its PR *merges*, not when this run
+pushes it, so a batch aimed at an epic would work one child and find nothing else eligible.
+Children with no dependency between them reach a batch through `hew ready` on their own merits.
 
 **Eligibility.** Skip and move to the next candidate when:
 
@@ -156,15 +151,11 @@ size each from its body:
 > An issue whose `### Where` names more than three paths, or whose `### Done when` carries more
 > than five items, is large. Work it alone and stop — it is the batch.
 
-The bound has to be set in advance because the skill cannot measure its own remaining context.
-There is no readout it can consult, and an agent compacts its context rather than failing, so a
-run that takes on too much does not error — it quietly loses detail. What it loses first is the end of
-the run, which is exactly where the integration pass lives. A combined verification performed
-against a compacted context is worse than none, because it reports a check nobody actually made.
-
-So size from what the tracker already carries. `### Where` counts the files that will be read
-and `### Done when` counts the tests that will be written and run; those are the two things that
-actually spend the run. Counting them is deterministic, which estimating is not.
+The bound is set in advance because the skill cannot measure its own remaining context, and a run
+that takes on too much compacts rather than errors — losing the end of the run first, which is where
+the integration pass lives. So size from what the tracker already carries: `### Where` counts the
+files that will be read and `### Done when` the tests that will be written and run. Counting is
+deterministic; estimating is not.
 
 Queue order decides the batch — resist grouping by area to cluster likely conflicts, or spreading
 across areas to avoid them. Determinism is worth more here than either, and Step 8 finds what it
@@ -364,20 +355,16 @@ The primer covers what `hew pr` composes and that the branch has to be pushed fi
 is the one thing it cannot infer from the tracker, so supply it: a reviewer opening a draft PR
 wants to know what was actually verified, not to reconstruct it from the diff.
 
-Write the commands, test names, and paths in it as code spans. hew warns about unmarked code
-text in composed bodies, but the reason to bother is that the PR body is the one thing here
-written for a human in a browser rather than an agent in a terminal — and `go test -race ./...`
-set in proportional prose loses exactly the characters that carry its meaning. The same applies
-to any issue you file for discovered work.
+Write the commands, test names, and paths in it as code spans — the PR body is read by a human in a
+browser, where `go test -race ./...` in proportional prose loses the characters that carry its
+meaning. The same applies to any issue you file for discovered work.
 
 On a local tracker there is nothing to push and no PR to open. Commit the work on the issue
 branch, confirm the tree is clean, and stop: that branch is the delivery. Say in the report what
 `--testing` would have said.
 
-Commit conventions are in [REFERENCE.md](REFERENCE.md). The short version: conventional subject
-matching the branch prefix, and `Refs #<n>` rather than a second `Fixes #<n>` — the PR body
-already carries the one closing reference, and a duplicate in a commit closes the issue on merge
-by a path the reviewer did not see.
+Commit conventions are in [REFERENCE.md](REFERENCE.md): a conventional subject matching the branch
+prefix, and `Refs #<n>` rather than `Fixes #<n>`.
 
 Do not run `hew close`.
 
@@ -432,9 +419,6 @@ The run's status becomes `integration_failed` — every issue delivered, and the
 not hold. That is a different fact from `failed`, where an issue never reached a PR at all, and
 collapsing the two would report a fixable coupling as a broken change.
 
-A green pass is worth stating plainly too: it is the evidence that these fixes were genuinely
-independent, which is the assumption every separate PR in the batch is resting on.
-
 ## Step 9 — Report
 
 Say what happened in terms the next run — or a human reading a job log — can act on. On a local
@@ -486,18 +470,11 @@ in a question has to end in a reported outcome instead. The `status` field carri
 | `error` | The run could not start: not authenticated, not a git repository, dirty working tree. |
 
 Four of these end with zero PRs and mean entirely different things — a drained backlog is
-success, an unauthenticated CLI is an outage, and a queue of issues claimed by a dead agent is a
-stall that will never clear itself. A caller that collapses them reports a broken pipeline as a
-finished one, silently, until someone notices the PRs stopped arriving. Which is why `reason` is
-required whenever `status` is not `delivered`.
+success, an unauthenticated CLI is an outage, and issues claimed by a dead agent are a stall that
+will never clear itself — so `reason` is required whenever `status` is not `delivered`.
 
-`integration_failed` is the one that breaks that pattern, and deliberately: the PRs exist and are
-individually sound, so it is not a stalled run to be retried. It is a signal that two issues were
-filed as independent and are not. Retrying changes nothing; reviewing the pair does.
+`integration_failed` is not a retry: the PRs exist and are individually sound, and re-running
+reproduces it. Two issues were filed as independent and are not; review the pair.
 
-One issue per invocation is still the default, for the same reason the claim is a lock: each tick
-takes exactly one item, a bad change costs one reviewable PR rather than ten, and the queue drains
-at a rate a human can keep up with. `--batch` trades some of that for a combined verification the
-single-issue path cannot offer, and its ceiling is what keeps the trade bounded — which is why
-there is no flag for an unbounded run. A queue drained without one degrades exactly where it can
-least afford to, and reports a green integration pass it never really made.
+One issue per invocation is the default, and `--batch` has a ceiling with no unbounded mode: past
+it the integration pass degrades into a check nobody actually made.

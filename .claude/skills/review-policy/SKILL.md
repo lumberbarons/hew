@@ -108,7 +108,7 @@ Each subagent prompt MUST include:
 
 1. The ADR file path(s) it is reviewing against — instruct it to read them in full
 2. The diff scope (either the actual diff, or paths + a note to obtain the diff via `git diff <base>...HEAD`)
-3. The **Finding Categories** section from this skill — copy it verbatim
+3. The **Philosophy — what counts as a finding** section from this skill — copy it verbatim
 4. The **Severity** section from this skill — copy it verbatim
 5. The explicit instruction: **"You are reviewing the change only against the ADR(s) you were given. Do not flag issues unrelated to these ADRs. Do not grade code quality, tests, or style."**
 6. The explicit instruction: **"Every finding must cite: (a) the ADR id, (b) the specific section or claim in the ADR the finding traces to, and (c) the file:line in the change. If you cannot supply all three, omit the finding."**

@@ -199,14 +199,3 @@ their call, not something this skill does.
   where one finding is what the spec relies on
 - More than about eight stories or twenty-five tasks — that is two features
 - Cutting a branch, filing issues, or writing code from this skill
-
-## Maintaining the script
-
-```bash
-python3 -m unittest discover "$(dirname "$LIGHTSPEC")"
-```
-
-The skeleton and the checker define the same format in two places. The tests
-pin them together: a fresh skeleton must fail the check for its `<FILL: ...>`
-markers and nothing else, and `reference/example-spec.md` must pass. Change the
-format in `scripts/lightspec.py` and those two tests tell you what else moved.

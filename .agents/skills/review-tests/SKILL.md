@@ -12,7 +12,7 @@ Review the tests in scope for quality issues.
 
 You already know what a bad test looks like — assertions that cannot fail, shared state that leaks between cases, a spy that records a value nothing ever inspects, a name that tells a CI reader nothing, an error path nobody exercised. Apply that judgement directly and thoroughly; reading the tests closely is the bulk of the value here.
 
-What follows is only the local policy you could not infer. Prescribing the review itself made reviews no better and measurably slower: a 221-line version of this skill scored identically to this one across four fixtures while spending 22% more tokens, because attention went to restating criteria instead of reading the tests.
+What follows is only the local policy you could not infer.
 
 ## Arguments
 

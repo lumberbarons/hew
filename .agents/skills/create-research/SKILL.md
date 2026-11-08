@@ -170,25 +170,3 @@ the next step, which will cite this document by id; if it was feeding a feature,
 The document is left at `status: draft`. Change it to `complete` only when the user
 confirms it. Then stop: do not write the ADR or the spec, and do not make the change the
 research points at.
-
-## Anti-patterns
-
-- A research question that is a decision or a topic in disguise
-- Sources recalled from memory, or links never opened
-- A confidence applied to the whole document instead of to each claim
-- Findings that restate the question, or topics where a claim belongs
-- Conclusions that choose, or that go beyond what the findings support
-- An empty Open Questions when something was clearly left unsettled
-- Forecasting the ADRs or specs that will build on this document, or linking a spec
-  (add ADR ids to `related` only for ADRs that exist)
-
-## Maintaining the script
-
-```bash
-python3 -m unittest discover "$(dirname "$RESEARCH")"
-```
-
-The skeleton and the checker define the same format in two places. The tests pin them
-together: a fresh skeleton must fail the check for its `<FILL: ...>` markers and nothing
-else, and `reference/example-research.md` must pass. Change the format in
-`scripts/research.py` and those two tests tell you what else moved.
