@@ -1,2 +1,0 @@
-// route definitions
-module.exports = {};
