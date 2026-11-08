@@ -8,3 +8,6 @@ coverage.out
 .opencode/plugins/worktree.ts
 .codex/worktrees
 .opencode/worktree/
+
+# APM dependencies
+apm_modules/
