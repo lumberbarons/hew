@@ -1,0 +1,10 @@
+{
+  "name": "pipeline",
+  "scripts": {
+    "ingest": "node src/ingest.js",
+    "transform": "node src/transform.js",
+    "load": "node src/load.js",
+    "backfill": "node src/backfill.js",
+    "verify": "node src/verify.js"
+  }
+}

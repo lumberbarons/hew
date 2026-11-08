@@ -1,0 +1,42 @@
+{
+  "skill_name": "review-docs",
+  "baseline": "no skill (null), plus a 49-line lean variant \u2014 see README.md",
+  "evals": [
+    {
+      "id": 0,
+      "name": "legacy-index-consolidation",
+      "prompt": "review the docs in {FIXTURES}/legacy",
+      "expected_output": "Recognises the two exhaustive CLAUDE.md index tables as a single systemic pattern per file rather than one finding per derivable row. Does not demand more index coverage.",
+      "files": [
+        "fixtures/legacy"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "enumeration-drift",
+      "prompt": "review the docs in {FIXTURES}/enumeration",
+      "expected_output": "Cross-references the README env var table against .env.example (3 documented, 6 real) and the commands list against package.json scripts (3 documented, 5 real). Names the source file it diffed against.",
+      "files": [
+        "fixtures/enumeration"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "lean-docs-no-false-positives",
+      "prompt": "review the docs in {FIXTURES}/lean",
+      "expected_output": "Stays quiet. The table-free CLAUDE.md of commands and invariants is correct, and the README already has prerequisites, expected output, and troubleshooting. Should not invent findings or demand an index table.",
+      "files": [
+        "fixtures/lean"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "messy-mixed-defects-and-traps",
+      "prompt": "review the docs in {FIXTURES}/messy",
+      "expected_output": "Finds the real defects (npm run setup absent from package.json, broken docs/DEPLOY.md link, services list documenting 2 of 4) without touching MEMORY.md, without escalating anything to P1, and treating the unfinished Dockerfile as a docs defect only insofar as the README promises it works.",
+      "files": [
+        "fixtures/messy"
+      ]
+    }
+  ]
+}

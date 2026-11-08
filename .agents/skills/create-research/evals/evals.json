@@ -1,0 +1,94 @@
+{
+  "skill_name": "create-research",
+  "evals": [
+    {
+      "id": 0,
+      "name": "codebase-question",
+      "prompt": "Our billing team keeps saying jobqueue never loses an invoice job. I'm not convinced. The repo is at {REPO}. Can you research what actually happens to a job if a worker process dies halfway through running it, and write it up as a research doc in the repo? Don't change any code.",
+      "expected_output": "A new docs/research/0002-*.md at status draft that passes the checker. Findings: dequeue uses BLPOP, which removes the job before the handler runs, so a worker crash loses it (High/Medium, cited to jobqueue/queue.py and worker.py); retries only cover handler exceptions, so the README's at-least-once claim does not hold for a crash. Sources are repo files. No code changed, no ADR written.",
+      "files": [
+        "fixtures/jobqueue"
+      ],
+      "assertions": [
+        "A new research document exists at docs/research/0002-<slug>.md, numbered after the existing 0001, and 0001 is untouched",
+        "`research.py check` exits 0 on the new document",
+        "A finding states that a job is lost when the worker dies after dequeuing it, because dequeue (BLPOP) removes the job from Redis before the handler runs",
+        "That finding is rated High or Medium and cites jobqueue/queue.py or jobqueue/worker.py as a codebase source",
+        "The document says the README's at-least-once delivery claim does not hold for a worker crash, noting that retries only cover exceptions raised by the handler",
+        "Every source is a repo file that exists, an experiment that was actually run, or an external page the run actually opened; none is an invented URL",
+        "The new document's frontmatter status is draft",
+        "No file outside docs/research was created or modified: no code change and no ADR",
+        "The Conclusions do not choose a fix; any remedy is offered as what the evidence supports, or the choice is left to an ADR"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "decision-in-disguise",
+      "prompt": "We're deciding whether to move jobqueue (repo at {REPO}) from Redis to SQS. Research it and tell us which one we should go with, and we'll record whatever you pick.",
+      "expected_output": "A research document comparing how the current Redis implementation and SQS behave against the job-loss concern, with the research question phrased as something that can be answered by looking. Conclusions give a recommendation at most and say the choice belongs in an ADR. No ADR is written. Claims about SQS are cited to something actually opened or rated Low.",
+      "files": [
+        "fixtures/jobqueue"
+      ],
+      "assertions": [
+        "A new research document exists in docs/research and `research.py check` exits 0 on it",
+        "No new ADR was created: docs/adr still holds only 0001",
+        "The Research Question asks what is true (for example how the two compare on job loss for this workload), not which one to choose",
+        "The Method states plainly whether external sources (documentation or the web) were consulted",
+        "Every finding about SQS either cites an external source with an accessed date or is rated Low; none is rated High on the strength of recall alone",
+        "A finding records the current Redis behaviour from the repo: a job is lost if the worker dies after dequeuing it",
+        "The Conclusions, at most, make a recommendation, and say that making the choice belongs in an ADR",
+        "The final report names create-adr (or an ADR) as the next step for the choice"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "already-answered",
+      "prompt": "Repo at {REPO}. Before the monthly Redis patching next week, can you look into whether jobs sitting in the queue survive a Redis restart? Write it up.",
+      "expected_output": "No new document. The run finds docs/research/0001 already answers the question, redis.conf has not changed since, so it is still fresh; it reports that document and its key finding and leaves it untouched.",
+      "files": [
+        "fixtures/jobqueue"
+      ],
+      "assertions": [
+        "No new file was created in docs/research: it still holds only 0001",
+        "The response identifies docs/research/0001-queued-jobs-survive-redis-restart.md (RES-0001) as already answering the question",
+        "The response relays the answer: pending jobs survive a clean restart, and a hard crash can lose up to about a second of enqueues",
+        "The response says the existing research is still current, because redis.conf has not changed since it was written (its Revisit When condition has not been met)",
+        "RES-0001 was not modified"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "stale-supersede",
+      "prompt": "Repo at {REPO}. I switched redis.conf to `appendonly no` last week to cut disk IO. The research doc on whether queued jobs survive a Redis restart was written before that. Redo the research so our docs are right.",
+      "setup": "In the copied repo, change redis.conf so that `appendonly yes` reads `appendonly no`. Everything else is unchanged.",
+      "expected_output": "A new docs/research/0002-*.md with supersedes: [RES-0001] that finds pending jobs no longer survive a restart (persistence off: appendonly no, save empty). RES-0001 gets status superseded and superseded-by: [RES-0002], with its findings and conclusions left as written. Both documents pass the checker.",
+      "files": [
+        "fixtures/jobqueue"
+      ],
+      "assertions": [
+        "A new research document exists at docs/research/0002-<slug>.md and `research.py check` exits 0 on it",
+        "The new document lists RES-0001 in its `supersedes` frontmatter",
+        "RES-0001 now has status superseded and RES-0002 in its `superseded-by`, and `research.py check` exits 0 on it",
+        "RES-0001's Findings, Conclusions and Sources are byte-for-byte unchanged; only its status and superseded-by lines differ",
+        "A finding in the new document says pending jobs are not kept across a Redis restart now that appendonly is no (and save is empty), rated High, citing redis.conf",
+        "The new document's Revisit When names a concrete condition (for example any change to persistence settings), not just None"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "topic-not-question",
+      "prompt": "Repo at {REPO}. Can you do some research on caching for us? We'll want it written up in docs.",
+      "expected_output": "No document is scaffolded. The run recognises 'caching' is a topic, not a question, and asks at most three focused questions in one round, each with concrete options and a recommended first option, grounded in what this repo is (invoice jobs on Redis).",
+      "files": [
+        "fixtures/jobqueue"
+      ],
+      "assertions": [
+        "No research document was created: docs/research still holds only 0001",
+        "The response asks the user to narrow the request, rather than producing a survey of caching approaches",
+        "The response asks at most three questions",
+        "Each question offers concrete options, with a recommended option first, rather than being open-ended",
+        "At least one question or option refers to something specific to this repo (for example the invoice jobs, Redis, or the queue) rather than caching in general"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "orchestrator",
+  "scripts": {
+    "dev": "node src/index.js",
+    "test": "vitest",
+    "lint": "eslint src"
+  },
+  "dependencies": { "ioredis": "^5.4.1", "express": "^4.19.2" }
+}

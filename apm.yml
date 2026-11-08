@@ -1,0 +1,21 @@
+name: hew
+version: 1.0.0
+description: APM project for hew
+author: lumberbarons
+# Which agent platforms to deploy to.
+# Resolution order: --target flag > this field > auto-detect from filesystem.
+# Accepted values: agent-skills, antigravity, claude, codex, copilot, cursor, gemini, grok-build, hermes, kiro, opencode, vscode, windsurf
+targets:
+  - claude
+  - codex
+  - opencode
+dependencies:
+  apm:
+    - lumberbarons/lumber-mart/plugins/critique
+    - lumberbarons/lumber-mart/plugins/decisions
+    - lumberbarons/lumber-mart/plugins/lightspec
+    - lumberbarons/lumber-mart/plugins/hew
+    - lumberbarons/lumber-mart/plugins/work-epic
+  mcp: []
+includes: auto
+scripts: {}

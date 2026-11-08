@@ -1,0 +1,4 @@
+What `hew show <n>` prints for the closed issues:
+
+#96   closed as completed (fixed by #97, merged)
+#310  closed as not planned: "tests of this shape are acceptable in cart; not worth the churn"

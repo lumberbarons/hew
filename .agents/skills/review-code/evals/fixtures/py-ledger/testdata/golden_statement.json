@@ -1,0 +1,9 @@
+{
+  "account": "acct-7",
+  "balance": -1,
+  "entries": [
+    {"seq": 3, "amount": -5000, "ref": "inv-3"},
+    {"seq": 2, "amount": 4999, "ref": "inv-2"},
+    {"seq": 1, "amount": 0, "ref": "inv-1"}
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "name": "recon",
+  "scripts": { "dev": "node src/server.js", "test": "jest" }
+}

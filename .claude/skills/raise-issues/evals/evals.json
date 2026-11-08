@@ -1,0 +1,22 @@
+{
+  "skill_name": "raise-issues",
+  "evals": [
+    {
+      "id": 0,
+      "name": "dedup-judgement-review-target",
+      "prompt": "Apply raise-issues' dedup step (Step 3) to two plans against a tracker snapshot. `hew` is not available: {FIXTURES}/dedup-judgement/issues.ndjson is what `hew list --json --bodies --state all` prints, and closures.txt is what `hew show` prints for the closed issues. Plan 1, plan-review-of-118.jsonl, holds findings from a review of the PR that fixes #118 (as if run with --reviewed-issue 118, PR #121). Plan 2, plan-product-review.jsonl, holds findings from a review of product code with no review target. For every plan line decide file, skip, file as a regression, or suppress, name the issue that decided it, and give a one-line reason. Do not file anything.",
+      "expected_output": "Plan 1: line 1 filed (the key matches #118, but #118 is the finding the PR fixes, not a finding about the fix), line 2 skipped as already tracked by #150, line 3 filed (same key as #150 but a different file and problem). Plan 2: line 1 skipped (#200 describes it; its review-of is ignored with no review target), line 2 filed as a regression with discovered-from 96, line 3 suppressed (#310 closed as not planned), line 4 filed (the only nearby key, #320, is a different, longer key).",
+      "files": ["fixtures/dedup-judgement"],
+      "assertions": [
+        "Plan 1 line 1 (Store.Exec still hands out the raw transaction) is filed, not skipped on the strength of #118 sharing its key, because #118 is the issue the reviewed PR fixes and carries no review-of naming #118",
+        "Plan 1 line 2 (Index row types leak out of the store package) is skipped as already tracked by #150",
+        "Plan 1 line 3 (Reconciler reaches into index internals) is filed, not skipped on the strength of #150 sharing its key, because #150 concerns a different file and a different problem",
+        "Plan 2 line 1 (Authorization header written to logs) is skipped as already tracked by #200, even though #200 carries a review-of for a different issue",
+        "Plan 2 line 2 (error wraps drop the cause chain) is filed as a regression with discovered-from 96, not skipped and not filed without the link",
+        "Plan 2 line 3 (Cart tests assert the value they just set) is suppressed because #310 was closed as not planned",
+        "Plan 2 line 4 (Server setup does too much) is filed; the only related issue, #320, has a different and longer key (internal/http/handler) and is not a match",
+        "Every plan line gets a decision, the deciding issue number where there is one, and a reason"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+- Jim prefers pnpm over npm here
+- The staging cluster is at 10.0.4.12

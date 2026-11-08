@@ -1,0 +1,91 @@
+{
+  "skill_name": "review-o11y",
+  "baseline": "no skill at all, plus the 249-line v1 skill and a lean variant carrying only local policy — see README.md",
+  "evals": [
+    {
+      "id": 0,
+      "name": "go-payments-pii-and-levels",
+      "prompt": "review the logging and error messages in {FIXTURES}/go-payments",
+      "expected_output": "Catches the Authorization-header dump and the logged card number as P1, ERROR firing on 4xx user-input paths, the %s/.Error() wraps that drop the cause chain, the silent retry loop, and the absent correlation ids — while treating refund.go's capitalization and `uid` drift as consistency findings against the detected slog/snake_case baseline, not as bugs.",
+      "files": ["fixtures/go-payments"],
+      "assertions": [
+        "Flags the fmt.Printf dump of r.Header in middleware/logging.go, which writes the Authorization bearer token to stdout on every request, at P1",
+        "Flags card_no logged as a structured field in checkout.go:45 (full PAN exposure) at P1",
+        "Flags slog.Error used on expected user-input paths (bad JSON, missing card, order not found) that return 4xx, explaining that it poisons the ERROR alert channel",
+        "Flags the wraps that drop the cause chain — fmt.Errorf with %s/.Error() in repo/orders.go and stripe/client.go — noting errors.Is/errors.As stop working",
+        "Flags withRetry in stripe/client.go for retrying without logging any attempt, hiding a flaking dependency",
+        "Flags the absence of any correlation id (request_id/trace_id) at the middleware or handler boundaries",
+        "Flags MarkPaid in repo/orders.go logging a failure at INFO while also returning the error — wrong level, and the failure is double-owned",
+        "Flags fmt.Printf in middleware/logging.go as an outlier against the dominant slog structured-logging convention",
+        "Flags refund.go's 'Could not decode refund request.' style (capitalized, trailing period) as drift from the dominant lowercase no-period convention, and identifies it as a consistency/descriptive finding rather than a correctness bug",
+        "Flags `uid` in refund.go as field-name drift from `user_id` used elsewhere",
+        "Does NOT demand logs inside pure helpers or the doCharge/doRefund stubs — missing-log findings are confined to I/O boundaries",
+        "Repeated instances of one pattern (the ERROR-on-user-input sites, the %s wrap sites) are collapsed into single findings listing all locations, not one finding per site",
+        "Report follows REFERENCE.md: an 'N files reviewed, M issues found' summary line, a Detected conventions block, and H3 findings tagged [P1]/[P2]/[P3] with Location lines",
+        "Total findings do not exceed 10, with a truncation note if any were cut"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "py-worker-credentials-and-silence",
+      "prompt": "can you do an observability review of the python worker at {FIXTURES}/py-worker/worker — I want to know if our logging and error messages are any good",
+      "expected_output": "Catches the credential leaks in auth.py (password and api_key at INFO, raw token at DEBUG) as P1, the tautological messages, the silent cache fallback and silent retry loop, the dropped exception chain on the save path, and startup config that is never recorded.",
+      "files": ["fixtures/py-worker"],
+      "assertions": [
+        "Flags the login log in auth.py that emits password and api_key at P1",
+        "Flags the verify() debug log that emits the raw token at P1, and does not excuse it on the grounds that DEBUG is usually disabled",
+        "Flags 'processing failed' in job.py as tautological — it names no job, user, or cause, and the caught exception is discarded",
+        "Flags the TimeoutError branch in job.py that silently falls back to the cache, leaving degraded mode invisible",
+        "Flags the RuntimeError raised in job.py's save path without `from e`, dropping the cause chain",
+        "Flags the retry loop in _load_user that swallows ConnectionError without logging any attempt",
+        "Flags 'something went wrong' in _load_user as an unactionable message",
+        "Flags main.py for reading DATABASE_URL, CACHE_URL and BATCH_SIZE at startup without logging the resolved configuration",
+        "Flags either 'Login Failed.' as capitalization/punctuation drift from the codebase's lowercase messages, or the use of bare `Exception` in place of a typed error, or both",
+        "Does NOT file missing-log findings against the pure stub methods in cache.py, or demand logging inside every helper",
+        "Report follows REFERENCE.md: an 'N files reviewed, M issues found' summary line, a Detected conventions block, and H3 findings tagged [P1]/[P2]/[P3] with Location lines",
+        "Total findings do not exceed 10, with a truncation note if any were cut"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "ts-api-mixed-loggers-and-drift",
+      "prompt": "review observability for {FIXTURES}/ts-api/src — check logging consistency, log levels, and error message quality",
+      "expected_output": "Catches both token leaks in middleware/auth.ts as P1, the console.log/winston split as one collapsed consistency finding, ERROR on the 404 and validation paths, the tautological throw in createOrder, and the field-name drift — while leaving cancelOrder's WARN-then-fallback alone, since that is the correct treatment of a degraded-mode branch.",
+      "files": ["fixtures/ts-api"],
+      "assertions": [
+        "Flags the console.log in middleware/auth.ts that prints the full Authorization header at P1",
+        "Flags the winston info log in middleware/auth.ts that emits the bearer token as a structured field at P1",
+        "Flags console.log used alongside winston (middleware/auth.ts, server.ts) as a single collapsed consistency finding rather than one per site",
+        "Flags the catch block in middleware/auth.ts that logs the error and rethrows it, double-reporting one failure",
+        "Flags `throw new Error(\"failed\")` in routes/orders.ts as tautological and as dropping the underlying cause",
+        "Flags logger.error on the 404 user-not-found path in routes/users.ts as wrong-level for an expected outcome",
+        "Flags logger.error on the missing-email validation path in routes/users.ts as wrong-level",
+        "Flags the field-name drift across routes — userId, user_id and uid used for the same concept",
+        "Flags the verb-form split between 'failed to create user' and 'could not save user' against the detected dominant form",
+        "Flags the absence of a correlation id (requestId/traceId) at the middleware or handler boundaries",
+        "Flags at least one missing log at an outbound I/O boundary (saveUser, loadUser, insertOrder, loadOrder or refund)",
+        "Does NOT flag cancelOrder's logger.warn-then-fall-back-to-cache as a defect — a logged degraded-mode branch is the correct pattern",
+        "Report follows REFERENCE.md: an 'N files reviewed, M issues found' summary line, a Detected conventions block, and H3 findings tagged [P1]/[P2]/[P3] with Location lines",
+        "Total findings do not exceed 10, with a truncation note if any were cut"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "ts-clean-restraint",
+      "prompt": "review observability for {FIXTURES}/ts-clean/src",
+      "expected_output": "Stays quiet. Correlation ids are bound per request, every log is structured, secrets are redacted at the logger, retries and the give-up are logged, 4xx paths log at info, failures are owned once at the terminal error handler, wrapped errors keep their cause and are serialized with errWithCause, aborted requests still produce an access-log line, and startup config is recorded. Correct output is zero findings, or at most one P3.",
+      "files": ["fixtures/ts-clean"],
+      "assertions": [
+        "Reports zero findings, or at most one finding and that finding is P3",
+        "Reports no P1 and no P2 findings",
+        "Does NOT flag lib/money.ts for having no logging — the helpers are pure and their callers report failures",
+        "Does NOT flag insertInvoice/loadInvoice for wrapping and rethrowing without logging — the terminal error handler owns the report, and logging there too would double-report",
+        "Does NOT flag getInvoice for lacking its own try/catch — route() forwards rejections to errorHandler, which logs once with requestId bound",
+        "Does NOT flag the debug-level success log in clients/billing.ts as noise, nor the info-level 400/404 logs as wrong-level",
+        "Does NOT flag camelCase field names or the pino logger as a convention problem — the codebase is uniform on both",
+        "Does NOT claim secrets are leaked: password and cardNumber are redacted at the logger and no log statement emits a credential",
+        "Says plainly that the codebase is soundly instrumented rather than manufacturing findings to fill a report"
+      ]
+    }
+  ]
+}

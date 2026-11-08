@@ -1,0 +1,77 @@
+{
+  "skill_name": "review-tests",
+  "baseline": "no skill at all, plus a 66-line lean variant carrying only local policy — see README.md",
+  "evals": [
+    {
+      "id": 0,
+      "name": "go-orders-isolation-and-dead-assertions",
+      "prompt": "review the tests in {FIXTURES}/go-orders",
+      "expected_output": "Catches the package-level testDB that makes TestSaveOrder_Duplicate depend on TestSaveOrder running first (P1), the error-only assertion in TestPlaceOrder, the fakeNotifier fields nothing reads, the vague TestHandler name, and CancelOrder's total absence of coverage — without claiming ApplyDiscount is uncovered, since TestPlaceOrder_AppliesVolumeDiscount flows through it.",
+      "files": ["fixtures/go-orders"],
+      "assertions": [
+        "Flags the package-level testDB shared via TestMain as an isolation defect, naming the order dependence between TestSaveOrder and TestSaveOrder_Duplicate",
+        "Rates the testDB order dependence P1 (it causes interference today, not merely a fragile-state hazard)",
+        "Flags TestPlaceOrder for asserting only that err is nil while never inspecting the returned Order",
+        "Flags the fakeNotifier recording reasons/lastID that no assertion ever reads (dead expectation)",
+        "Flags CancelOrder as exported production code with no test exercising it",
+        "Flags TestHandler as a name that does not communicate the scenario under test",
+        "Does NOT claim ApplyDiscount is uncovered — it is exercised transitively by TestPlaceOrder_AppliesVolumeDiscount",
+        "Reports no more than one P1 finding",
+        "Report follows REFERENCE.md: an 'N files reviewed, M issues found' header line and H3 findings tagged [P1]/[P2]/[P3] with a Location line",
+        "Every finding carries a concrete, file-readable 'done when' criterion",
+        "Total findings do not exceed 10"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "ts-api-pattern-collapsing",
+      "prompt": "review the tests in {FIXTURES}/ts-api",
+      "expected_output": "Collapses the module-scope globalThis.fetch replacement across user/order/session.test.ts into one pattern finding rather than three; flags the toBeDefined tautology as P1 and the substring body match as failing to verify the payload; leaves the sound format.test.ts alone.",
+      "files": ["fixtures/ts-api"],
+      "assertions": [
+        "Flags `expect(mockFetch).toBeDefined()` in user.test.ts as a test that cannot fail, rated P1",
+        "Reports the module-scope globalThis.fetch replacement as ONE collapsed finding listing the affected files, not as a separate finding per file",
+        "Flags the `expect(body).toContain('\\\"status\\\":\\\"ok\\\"')` assertion for verifying only a constant instead of decoding the payload and checking userId/sku/qty",
+        "Flags refreshSession as exported production code with no test exercising it",
+        "Raises no finding against format.test.ts, which is parametrized and covers its boundaries",
+        "Reports no more than one P1 finding",
+        "Report follows REFERENCE.md: an 'N files reviewed, M issues found' header line and H3 findings tagged [P1]/[P2]/[P3] with a Location line",
+        "Every finding carries a concrete, file-readable 'done when' criterion",
+        "Total findings do not exceed 10"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "py-clean-no-false-positives",
+      "prompt": "review the tests in {FIXTURES}/py-clean",
+      "expected_output": "Stays quiet. The suite parametrizes valid, invalid and boundary rates, asserts on returned values, tests both error branches, and shares only read-only reference data. Correct output is zero findings, or at most one P3.",
+      "files": ["fixtures/py-clean"],
+      "assertions": [
+        "Reports zero findings, or at most one finding and that finding is P3",
+        "Reports no P1 and no P2 findings",
+        "Does NOT flag the session-scoped known_rates fixture or the KNOWN_RATES constant as a shared mutable state hazard — both are read-only",
+        "Does NOT flag _round_half_up as a coverage gap above P3; it is internal and exercised through convert",
+        "Says plainly that the suite is sound rather than manufacturing findings to fill a report"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "py-mixed-severity-and-cap",
+      "prompt": "review the tests in {FIXTURES}/py-mixed",
+      "expected_output": "Separates real falsifiability defects (module-level _cache order dependence, the skipped refund test leaving refund unverified, an apply_tax assertion that reimplements the production formula, FakeTransport fields nothing asserts, test_1's name and non-assertion) from low-value noise, keeps severities anchored, and does not review the deliberately malformed testdata/ JSON.",
+      "files": ["fixtures/py-mixed"],
+      "assertions": [
+        "Flags the module-level _cache making test_build_invoice_uses_cached_invoice_customer depend on a prior test, rated P1",
+        "Flags that refund's only test is skipped, leaving exported refund behaviour unverified",
+        "Flags test_apply_tax_accepts_valid_rates for asserting against `int(1000 * rate)`, which reimplements the production formula rather than pinning expected values",
+        "Flags FakeTransport recording last_subject/last_body that no assertion reads (dead expectation)",
+        "Flags test_1 for its uninformative name, its `assert inv is not None`, or both",
+        "Raises no finding against testdata/broken_invoice.json — it is deliberately malformed test input, not a test",
+        "If the time.sleep(1) test is flagged at all, it is rated no higher than P3",
+        "Reports no more than one P1 finding",
+        "Report follows REFERENCE.md: an 'N files reviewed, M issues found' header line and H3 findings tagged [P1]/[P2]/[P3] with a Location line",
+        "Total findings do not exceed 10, with a truncation footer if any were cut"
+      ]
+    }
+  ]
+}

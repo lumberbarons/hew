@@ -1,0 +1,6 @@
+{
+  "customer": "acme",
+  "lines": [{"sku": "widget", "qty": -3, "unit_cents": "not-a-number"}],
+  "total_cents": null,
+  "status": "issued",,
+}

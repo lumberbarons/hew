@@ -1,0 +1,4 @@
+rate = 9
+window_secs = 10
+burst = 3
+ban_secs = 30
