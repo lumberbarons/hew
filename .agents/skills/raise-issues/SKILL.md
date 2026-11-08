@@ -1,6 +1,6 @@
 ---
 name: raise-issues
-description: File review findings as GitHub issues using the hew CLI, deduplicated by a stable review key so re-running a review does not re-file tracked work. Use after any critique review skill (review-code, review-tests, review-docs, review-o11y, review-portability) or with a findings file, and whenever the user says "raise these", "file these findings", "turn this review into issues", "create issues for these", or runs a review inside an automated loop.
+description: File review findings as GitHub issues using the hew CLI, deduplicated by a stable review key so re-running a review does not re-file tracked work. Use after any review skill (review-code, review-tests, review-docs, review-portability) or with a findings file, and whenever the user says "raise these", "file these findings", "turn this review into issues", "create issues for these", or runs a review inside an automated loop.
 ---
 
 # Raise Issues
@@ -56,12 +56,14 @@ The key is what makes a second run recognise its own earlier work:
 review-key: <skill>/<pattern>/<scope>
 ```
 
-- **`skill`** — `o11y`, `tests`, `docs`, `code`, or `portability`. Normalize the legacy
+- **`skill`** — `tests`, `docs`, `code`, or `portability`. Normalize the legacy
   `skills` identity to `portability` for new keys; the dedup step also searches legacy keys.
+  `o11y` belongs to a retired review: pass it through unchanged for old findings files and
+  match existing `o11y/` keys, but no current review emits it.
 - **`pattern`** — comes from the review itself when the findings file carries one, and must be
   passed through unchanged; re-spelling a slug here orphans every issue already filed under the
   original. Only when a finding arrives without one, pick from the vocabulary in the relevant
-  critique skill's `REFERENCE.md`.
+  review skill's `REFERENCE.md`.
 - **`scope`** — **derive this mechanically**: the deepest directory that contains every
   affected file, or the file path itself when there is exactly one. Do not choose it by
   judgement. Two runs that anchor the same finding at `internal/http` and

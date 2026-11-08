@@ -4,7 +4,8 @@ Slug handling, file shapes, and a worked example for `raise-issues`.
 
 ## Review identities
 
-The canonical `skill` values are `code`, `tests`, `docs`, `o11y`, and `portability`.
+The canonical `skill` values are `code`, `tests`, `docs`, and `portability`. The retired `o11y`
+review no longer ships; its keys on existing issues still match and are passed through unchanged.
 The older `skills` value aliases `portability`. Normalize that alias in new plans, and search
 both `portability/<pattern>/<scope>` and `skills/<pattern>/<scope>` before filing a portability
 finding. Existing stored review keys stay unchanged, including when refreshing issue bodies.
@@ -12,9 +13,9 @@ Apply the normal open/completed/declined match rules to either spelling.
 
 ## Pattern slugs
 
-The `pattern` component of a review key is not defined here. Each critique review skill owns the
-vocabulary for its own domain, in its `REFERENCE.md` — `review-o11y` names logging anti-patterns,
-`review-tests` names test-quality ones, and so on. The reviewer picks the slug, because the
+The `pattern` component of a review key is not defined here. Each review skill owns the
+vocabulary for its own domain, in its `REFERENCE.md` — `review-portability` names harness-coupling
+patterns, `review-tests` names test-quality ones, and so on. The reviewer picks the slug, because the
 reviewer is what knows which root cause it just identified.
 
 That leaves this skill with one rule rather than a list: **pass the slug through unchanged.**

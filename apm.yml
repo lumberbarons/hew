@@ -15,7 +15,6 @@ dependencies:
     - lumberbarons/lumber-mart/plugins/decisions
     - lumberbarons/lumber-mart/plugins/lightspec
     - lumberbarons/lumber-mart/plugins/hew
-    - lumberbarons/lumber-mart/plugins/work-epic
   mcp: []
 includes: auto
 scripts: {}

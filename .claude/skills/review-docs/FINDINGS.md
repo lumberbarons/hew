@@ -1,6 +1,6 @@
 # Findings File
 
-The machine-readable output every critique skill writes when given `--json <path>`. The markdown
+The machine-readable output every review skill writes when given `--json <path>`. The markdown
 report is unchanged and remains the default; this file is additive, for pipelines that would
 otherwise have to parse prose.
 
@@ -8,7 +8,7 @@ otherwise have to parse prose.
 
 ```json
 {
-  "skill": "o11y",
+  "skill": "code",
   "status": "reviewed",
   "scope": "internal/http",
   "files_reviewed": 11,
@@ -32,7 +32,7 @@ otherwise have to parse prose.
 
 | Field | Notes |
 |---|---|
-| `skill` | `code`, `tests`, `docs`, `o11y`, or `portability` |
+| `skill` | `code`, `tests`, `docs`, or `portability` |
 | `status` | `reviewed`, `no_scope`, or `error` — see below |
 | `reason` | Required when `status` is not `reviewed`; the stderr message or why nothing was in scope |
 | `scope` | The path or branch range actually reviewed |
