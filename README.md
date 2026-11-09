@@ -25,6 +25,13 @@ curl -fsSL https://lumberbarons.github.io/hew/install.sh | bash
 Installs to `~/.local/bin` (override with `INSTALL_DIR`); never uses sudo.
 Linux and macOS (x86_64 and arm64) only — elsewhere, use `go install` below.
 
+It installs the latest release; set `HEW_VERSION` (`1.2.3` or `v1.2.3`) to pin
+one instead. The variable has to reach `bash`, not `curl`:
+
+```sh
+curl -fsSL https://lumberbarons.github.io/hew/install.sh | HEW_VERSION=1.2.3 bash
+```
+
 Or, with a Go toolchain — the minimum is the `go` directive in `go.mod`, which
 tracks the latest patched release:
 

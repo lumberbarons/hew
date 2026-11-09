@@ -745,7 +745,9 @@ GitHub later is a one-way migration.
   over commit prefixes (`feat:`/`fix:`/`docs:`/...), which we already write.
 - **install.sh** at the repo root, usable as
   `curl -fsSL https://lumberbarons.github.io/hew/install.sh | bash`:
-  detects OS/arch via `uname`, resolves the latest release through the GitHub API,
+  detects OS/arch via `uname`, resolves the latest release through the GitHub API
+  (or, when `HEW_VERSION` is set, takes that version as the tag and skips the API
+  call; the value is validated as a semver because it lands in a URL),
   downloads the matching archive, verifies it against the checksums file, and
   installs to `$HOME/.local/bin` (`INSTALL_DIR` overrides; never sudo), printing a
   PATH hint when needed. `go install .../cmd/hew@latest` remains the
