@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Installs the latest hew release binary to $HOME/.local/bin (override
-# with INSTALL_DIR). Never uses sudo.
+# with INSTALL_DIR). Never uses sudo. Set HEW_VERSION (1.2.3 or v1.2.3)
+# to install that release instead of the latest.
 #
 #   curl -fsSL https://lumberbarons.github.io/hew/install.sh | bash
+#   curl -fsSL https://lumberbarons.github.io/hew/install.sh | HEW_VERSION=1.2.3 bash
 set -euo pipefail
 
 REPO="lumberbarons/hew"
@@ -27,13 +29,24 @@ case "$arch" in
     ;;
 esac
 
-release_json=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest")
-tag=$(printf '%s' "$release_json" | grep -m1 '"tag_name"' | cut -d'"' -f4)
-if [ -z "$tag" ]; then
-  echo "cannot resolve the latest release of $REPO" >&2
-  exit 1
+if [ -n "${HEW_VERSION:-}" ]; then
+  # A pinned version skips the releases API entirely (and its unauthenticated
+  # rate limit). The value lands in a URL, so reject anything but a semver.
+  version="${HEW_VERSION#v}"
+  if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$'; then
+    echo "invalid HEW_VERSION: $HEW_VERSION (expected e.g. 1.2.3 or v1.2.3)" >&2
+    exit 1
+  fi
+  tag="v$version"
+else
+  release_json=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest")
+  tag=$(printf '%s' "$release_json" | grep -m1 '"tag_name"' | cut -d'"' -f4)
+  if [ -z "$tag" ]; then
+    echo "cannot resolve the latest release of $REPO" >&2
+    exit 1
+  fi
+  version="${tag#v}"
 fi
-version="${tag#v}"
 
 archive="hew_${version}_${os}_${arch}.tar.gz"
 base="https://github.com/$REPO/releases/download/$tag"
@@ -42,8 +55,14 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 echo "downloading hew $tag ($os/$arch)..."
-curl -fsSL -o "$tmp/$archive" "$base/$archive"
-curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt"
+if ! curl -fsSL -o "$tmp/$archive" "$base/$archive"; then
+  echo "cannot download hew $tag for $os/$arch from $base (is $version a published release?)" >&2
+  exit 1
+fi
+if ! curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt"; then
+  echo "cannot download checksums.txt for hew $tag from $base" >&2
+  exit 1
+fi
 
 (
   cd "$tmp"
