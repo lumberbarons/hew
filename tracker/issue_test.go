@@ -56,7 +56,11 @@ func TestIssueSchemaMatchesRenderer(t *testing.T) {
 		}
 		for n := range got.NumField() {
 			g, w := got.Field(n), want.Field(n)
-			if g.Name != w.Name || g.Tag != w.Tag || g.Type.Kind() != w.Type.Kind() {
+			// Comments deliberately use package-specific names; their fields
+			// are checked separately below. Every other type must match exactly.
+			typesMatch := g.Type == w.Type ||
+				(g.Type == reflect.TypeFor[[]Comment]() && w.Type == reflect.TypeFor[[]render.CommentJSON]())
+			if g.Name != w.Name || g.Tag != w.Tag || !typesMatch {
 				t.Errorf("field %d: %v, want %v", n, g, w)
 			}
 		}
