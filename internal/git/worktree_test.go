@@ -179,6 +179,10 @@ func TestRemoteURLReadsTheOriginFromTheGivenDirectory(t *testing.T) {
 	if _, err := remoteURL(r, ""); err != nil {
 		t.Fatal(err)
 	}
+	want = []string{"git", "remote", "get-url", "origin"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("empty dir command = %v, want %v", got, want)
+	}
 }
 
 func TestRemoteURLTreatsAMissingOriginAsNoRemote(t *testing.T) {

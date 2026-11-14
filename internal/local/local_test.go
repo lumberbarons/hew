@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -497,8 +498,46 @@ func TestOpenWithOptionsSendsMigrationNoticesToTheInjectedWriter(t *testing.T) {
 	}
 }
 
-// A nil writer must not fall back to stderr: the tracker's Open relies on it.
+// A nil writer must become a discard writer, not the stderr fallback the
+// Store uses when it is constructed without one.
 func TestOpenWithOptionsDiscardsNoticesWithoutAWriter(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), DirName)
+	must(t, Init(dir))
+	s, err := OpenWithOptions(dir, Options{Viewer: "me"})
+	must(t, err)
+	if s.notice != io.Discard {
+		t.Errorf("notice writer = %v, want io.Discard", s.notice)
+	}
+}
+
+// A caller's cancelled context must abandon the initial lock wait instead of
+// blocking for the full lock timeout.
+func TestOpenWithOptionsHonoursACancelledContext(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), DirName)
+	must(t, Init(dir))
+	cfg, err := ReadConfig(dir)
+	must(t, err)
+	cfg.ID = ""
+	must(t, WriteConfig(dir, cfg))
+	fr, err := Freeze(ctx, dir)
+	must(t, err)
+	defer fr.Release()
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	start := time.Now()
+	_, err = OpenWithOptions(dir, Options{Viewer: "me", Context: cancelled})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("OpenWithOptions took %v, want it to abandon the lock wait", took)
+	}
+}
+
+// Open keeps the CLI's stderr notice: only OpenWithOptions discards a nil
+// writer.
+func TestOpenKeepsTheStderrNotice(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), DirName)
 	must(t, Init(dir))
 	cfg, err := ReadConfig(dir)
@@ -512,26 +551,29 @@ func TestOpenWithOptionsDiscardsNoticesWithoutAWriter(t *testing.T) {
 	orig := os.Stderr
 	stderr, err := os.CreateTemp(t.TempDir(), "stderr")
 	must(t, err)
+	defer func() { _ = stderr.Close() }()
 	os.Stderr = stderr
 	defer func() { os.Stderr = orig }()
 
-	done := make(chan struct{})
+	done := make(chan error, 1)
 	go func() {
-		// No notice can signal the check, so let the waiter pass the notice
-		// delay before releasing the lock.
-		time.Sleep(700 * time.Millisecond)
-		fr.Release()
-		close(done)
+		_, err := Open(dir, "me")
+		done <- err
 	}()
-	_, err = OpenWithOptions(dir, Options{Viewer: "me"})
-	<-done
-	must(t, err)
-	must(t, stderr.Close())
-	raw, err := os.ReadFile(stderr.Name())
-	must(t, err)
-	if strings.Contains(string(raw), "migration is in progress") {
-		t.Errorf("a nil writer fell back to stderr: %q", raw)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		raw, err := os.ReadFile(stderr.Name())
+		must(t, err)
+		if strings.Contains(string(raw), "migration is in progress") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no migration notice on stderr")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	fr.Release()
+	must(t, <-done)
 }
 
 func TestViewerForFallsBackToALoginAndQualifiesAWorktree(t *testing.T) {
@@ -567,6 +609,10 @@ func TestViewerForFallsBackToALoginAndQualifiesAWorktree(t *testing.T) {
 // The exported identity rule takes the login and the worktree root the caller
 // resolved: no environment, no checkout, no cwd.
 func TestViewerForQualifiesAWorktreeWithoutReadingTheEnvironment(t *testing.T) {
+	// A ViewerFor that consulted either variable would return these instead of
+	// the explicit login below.
+	t.Setenv("HEW_USER", "env-actor")
+	t.Setenv("USER", "env-login")
 	for _, tc := range []struct {
 		name     string
 		login    string

@@ -157,14 +157,18 @@ func TestOpenUsesTheWorktreeNotTheWorkingDirectoryOrHEWUser(t *testing.T) {
 	t.Setenv("HEW_USER", "env-actor")
 	t.Setenv("USER", "jim")
 	t.Chdir(t.TempDir())
+	ctx := context.Background()
 
-	tr, err := Open(context.Background(), Config{Worktree: worktrees[0]})
+	tr, err := Open(ctx, Config{Worktree: worktrees[0]})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := "jim-agent-two-" + shortDigest(worktrees[0])
 	if got := tr.Identity(); got != want {
 		t.Errorf("Identity = %q, want %q (HEW_USER must not decide it)", got, want)
+	}
+	if got, _ := tr.store.(*local.Store).Viewer(ctx); got != want {
+		t.Errorf("store viewer = %q, want %q; the tracker and its store must agree", got, want)
 	}
 	if tr.Backend() != BackendLocal {
 		t.Errorf("Backend = %q, want local", tr.Backend())
@@ -176,6 +180,9 @@ func TestOpenUsesTheWorktreeNotTheWorkingDirectoryOrHEWUser(t *testing.T) {
 	}
 	if got := explicit.Identity(); got != "worker" {
 		t.Errorf("explicit Identity = %q, want worker", got)
+	}
+	if got, _ := explicit.store.(*local.Store).Viewer(ctx); got != "worker" {
+		t.Errorf("explicit store viewer = %q, want worker", got)
 	}
 }
 
@@ -202,22 +209,33 @@ func TestTwoWorktreesAreDistinctClaimants(t *testing.T) {
 
 	storeOne := one.store.(*local.Store)
 	storeTwo := two.store.(*local.Store)
+	actorOne, err := storeOne.Viewer(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actorTwo, err := storeTwo.Viewer(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actorOne != one.Identity() || actorTwo != two.Identity() {
+		t.Errorf("store viewers = %q, %q; tracker identities = %q, %q", actorOne, actorTwo, one.Identity(), two.Identity())
+	}
 	issue, err := storeOne.CreateIssue(ctx, "Contended", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := storeOne.ClaimIssue(ctx, issue.Number, one.Identity(), false); err != nil {
+	if err := storeOne.ClaimIssue(ctx, issue.Number, actorOne, false); err != nil {
 		t.Fatalf("first claim: %v", err)
 	}
-	if err := storeTwo.ClaimIssue(ctx, issue.Number, two.Identity(), false); !errors.Is(err, gh.ErrClaimConflict) {
+	if err := storeTwo.ClaimIssue(ctx, issue.Number, actorTwo, false); !errors.Is(err, gh.ErrClaimConflict) {
 		t.Fatalf("second claim = %v, want a claim conflict", err)
 	}
 	read, err := storeTwo.GetIssue(ctx, issue.Number)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(read.Assignees) != 1 || read.Assignees[0] != one.Identity() {
-		t.Errorf("assignees = %v, want the first claimant %q", read.Assignees, one.Identity())
+	if len(read.Assignees) != 1 || read.Assignees[0] != actorOne {
+		t.Errorf("assignees = %v, want the first claimant %q", read.Assignees, actorOne)
 	}
 }
 
@@ -233,16 +251,36 @@ func TestAsIsACheapCloneSharingTheStore(t *testing.T) {
 	if x.Identity() != "worker-x" || y.Identity() != "worker-y" || base.Identity() != "base" {
 		t.Errorf("identities = %q, %q, %q; want worker-x, worker-y, base", x.Identity(), y.Identity(), base.Identity())
 	}
+	for name, tc := range map[string]struct {
+		tracker *Tracker
+		want    string
+	}{
+		"base":     {base, "base"},
+		"worker-x": {x, "worker-x"},
+		"worker-y": {y, "worker-y"},
+	} {
+		if got, _ := tc.tracker.store.(*local.Store).Viewer(ctx); got != tc.want {
+			t.Errorf("%s store viewer = %q, want %q", name, got, tc.want)
+		}
+	}
 	if x.store.(*local.Store).ID() != base.store.(*local.Store).ID() {
 		t.Error("As opened a different tracker, want the shared one")
 	}
-	// A write through the clone is visible through the receiver.
+	// A write through the clone is visible through the receiver, attributed to
+	// the clone's claimant rather than the receiver's.
 	issue, err := x.store.(*local.Store).CreateIssue(ctx, "Shared", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := base.store.(*local.Store).GetIssue(ctx, issue.Number); err != nil {
-		t.Errorf("receiver cannot see the clone's issue: %v", err)
+	if err := x.store.(*local.Store).Comment(ctx, issue.Number, "from worker-x"); err != nil {
+		t.Fatal(err)
+	}
+	read, err := base.store.(*local.Store).GetIssue(ctx, issue.Number)
+	if err != nil {
+		t.Fatalf("receiver cannot see the clone's issue: %v", err)
+	}
+	if len(read.Comments) != 1 || read.Comments[0].Author != "worker-x" {
+		t.Errorf("comments = %+v, want the clone's claimant as author", read.Comments)
 	}
 	if base.As("") != base || base.As("base") != base {
 		t.Error("As with no change should return the receiver")
@@ -337,6 +375,37 @@ func TestOpenRequiresAWorktree(t *testing.T) {
 	var invalid *InvalidInputError
 	if !errors.As(err, &invalid) || invalid.Field != "worktree" {
 		t.Errorf("err = %v, want an InvalidInputError for worktree", err)
+	}
+}
+
+// Open forwards its context to the local store's initial lock wait, so a
+// caller's cancelled context does not sit behind a 15s lock timeout.
+func TestOpenHonoursACancelledContext(t *testing.T) {
+	main, _ := repoWithWorktrees(t)
+	dir := initLocalTracker(t, main)
+	cfg, err := local.ReadConfig(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ID = ""
+	if err := local.WriteConfig(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	frozen, err := local.Freeze(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer frozen.Release()
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	_, err = Open(cancelled, Config{Worktree: main})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("Open took %v, want it to abandon the lock wait", took)
 	}
 }
 
@@ -444,7 +513,7 @@ func TestOpenGitHubUsesTheExplicitRepoAndLogin(t *testing.T) {
 		got = repo
 		return &fakeStore{login: "octocat"}, nil
 	})
-	tr, err := Open(context.Background(), Config{Worktree: t.TempDir(), Repo: "owner/name"})
+	tr, err := Open(context.Background(), Config{Worktree: t.TempDir(), Repo: "owner/name", Actor: "worker"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +521,7 @@ func TestOpenGitHubUsesTheExplicitRepoAndLogin(t *testing.T) {
 		t.Errorf("repo = %s, want owner/name", got)
 	}
 	if tr.Backend() != BackendGitHub || tr.Identity() != "octocat" {
-		t.Errorf("tracker = {%q, %q}, want the GitHub login", tr.Backend(), tr.Identity())
+		t.Errorf("tracker = {%q, %q}, want the GitHub login, not the requested actor", tr.Backend(), tr.Identity())
 	}
 	// As is a no-op on GitHub: the claim identity is the authenticated login.
 	if tr.As("worker").Identity() != "octocat" {
@@ -478,8 +547,8 @@ func TestOpenGitHubDetectsTheRepoFromTheOriginRemote(t *testing.T) {
 
 func TestOpenGitHubRejectsAnUnusableRepo(t *testing.T) {
 	for name, cfg := range map[string]Config{
-		"malformed": {Worktree: t.TempDir(), Repo: "nope"},
-		"no remote": {Worktree: t.TempDir()},
+		"malformed":      {Worktree: t.TempDir(), Repo: "nope"},
+		"not a checkout": {Worktree: t.TempDir()},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Open(context.Background(), cfg)
@@ -491,14 +560,46 @@ func TestOpenGitHubRejectsAnUnusableRepo(t *testing.T) {
 	}
 }
 
+// A real checkout with no origin remote is a different branch from a
+// directory that is not a checkout at all.
+func TestOpenGitHubRejectsARepositoryWithNoOrigin(t *testing.T) {
+	main, _ := repoWithWorktrees(t)
+	_, err := Open(context.Background(), Config{Worktree: main})
+	var invalid *InvalidInputError
+	if !errors.As(err, &invalid) || invalid.Field != "repo" || !strings.Contains(err.Error(), "origin") {
+		t.Errorf("err = %v, want an InvalidInputError naming the missing origin remote", err)
+	}
+}
+
 func TestOpenGitHubMapsAuthFailures(t *testing.T) {
+	cause := errors.New("credentials expired")
 	replaceGitHub(t, func(gh.Repo) (gh.IssueStore, error) {
-		return nil, &gh.AuthError{Err: errors.New("credentials expired")}
+		return nil, &gh.AuthError{Err: cause}
 	})
 	_, err := Open(context.Background(), Config{Worktree: t.TempDir(), Repo: "owner/name"})
 	var auth *AuthError
 	if !errors.As(err, &auth) {
-		t.Errorf("err = %v, want the library's AuthError", err)
+		t.Fatalf("err = %v, want the library's AuthError", err)
+	}
+	if !errors.Is(err, cause) {
+		t.Errorf("err = %v, want the backend cause retained", err)
+	}
+}
+
+// The Viewer call is the second place an auth failure can surface; it must be
+// mapped the same way as client construction.
+func TestOpenGitHubMapsViewerAuthFailures(t *testing.T) {
+	cause := errors.New("token expired")
+	replaceGitHub(t, func(gh.Repo) (gh.IssueStore, error) {
+		return &fakeStore{err: &gh.AuthError{Err: cause}}, nil
+	})
+	_, err := Open(context.Background(), Config{Worktree: t.TempDir(), Repo: "owner/name"})
+	var auth *AuthError
+	if !errors.As(err, &auth) {
+		t.Fatalf("err = %v, want the library's AuthError", err)
+	}
+	if !errors.Is(err, cause) {
+		t.Errorf("err = %v, want the Viewer cause retained", err)
 	}
 }
 
@@ -506,8 +607,19 @@ func TestOpenGitHubPassesThroughOtherErrors(t *testing.T) {
 	boom := errors.New("client construction failed")
 	replaceGitHub(t, func(gh.Repo) (gh.IssueStore, error) { return nil, boom })
 	_, err := Open(context.Background(), Config{Worktree: t.TempDir(), Repo: "owner/name"})
-	if !errors.Is(err, boom) {
+	if err != boom {
 		t.Errorf("err = %v, want the client failure unchanged", err)
+	}
+}
+
+func TestOpenGitHubPassesThroughViewerErrors(t *testing.T) {
+	boom := errors.New("viewer failed")
+	replaceGitHub(t, func(gh.Repo) (gh.IssueStore, error) {
+		return &fakeStore{err: boom}, nil
+	})
+	_, err := Open(context.Background(), Config{Worktree: t.TempDir(), Repo: "owner/name"})
+	if err != boom {
+		t.Errorf("err = %v, want the Viewer failure unchanged", err)
 	}
 }
 
