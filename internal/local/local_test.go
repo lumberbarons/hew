@@ -414,6 +414,126 @@ func TestOpenDefaultsTheViewer(t *testing.T) {
 	}
 }
 
+// As is the in-process spelling of HEW_USER: one open tracker, several
+// claimants, each sharing the same file and lock.
+func TestStoreAsSharesTheTrackerAndChangesOnlyTheClaimant(t *testing.T) {
+	s := newStore(t)
+	n := mustCreate(t, s, "Shared", "")
+	clone := s.As("other")
+	if got, _ := clone.Viewer(ctx); got != "other" {
+		t.Errorf("clone viewer = %q, want other", got)
+	}
+	if got, _ := s.Viewer(ctx); got != "me" {
+		t.Errorf("receiver viewer = %q, want me", got)
+	}
+	if clone.ID() != s.ID() {
+		t.Errorf("clone id = %q, want the shared %q", clone.ID(), s.ID())
+	}
+	// A write through the clone is visible through the receiver: they are one
+	// tracker, not a copy.
+	must(t, clone.Comment(ctx, n, "from the clone"))
+	issue, err := s.GetIssue(ctx, n)
+	must(t, err)
+	if len(issue.Comments) != 1 || issue.Comments[0].Author != "other" {
+		t.Errorf("comments = %+v, want the clone's comment", issue.Comments)
+	}
+	if s.As("") != s || s.As("me") != s {
+		t.Error("As with no change should return the receiver")
+	}
+}
+
+// noticeWriter hands each notice to the test as it is written, so the test can
+// release the lock only after the notice it is asserting on arrived.
+type noticeWriter chan string
+
+func (w noticeWriter) Write(p []byte) (int, error) {
+	w <- string(p)
+	return len(p), nil
+}
+
+// A library caller owns its output: notices go to the writer it injected, and
+// a nil writer discards them rather than falling back to stderr.
+func TestOpenWithOptionsSendsMigrationNoticesToTheInjectedWriter(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), DirName)
+	must(t, Init(dir))
+	// A tracker without an id backfills one under the lock, which is the
+	// initial write that can wait behind a migration.
+	cfg, err := ReadConfig(dir)
+	must(t, err)
+	cfg.ID = ""
+	must(t, WriteConfig(dir, cfg))
+
+	fr, err := Freeze(ctx, dir)
+	must(t, err)
+	defer fr.Release()
+
+	orig := os.Stderr
+	stderr, err := os.CreateTemp(t.TempDir(), "stderr")
+	must(t, err)
+	os.Stderr = stderr
+	defer func() { os.Stderr = orig }()
+
+	notices := make(chan string, 1)
+	done := make(chan error, 1)
+	go func() {
+		_, err := OpenWithOptions(dir, Options{Viewer: "me", Notice: noticeWriter(notices)})
+		done <- err
+	}()
+	select {
+	case got := <-notices:
+		if !strings.Contains(got, "migration is in progress") {
+			t.Errorf("notice = %q, want the migration", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no migration notice")
+	}
+	fr.Release()
+	must(t, <-done)
+	must(t, stderr.Close())
+	raw, err := os.ReadFile(stderr.Name())
+	must(t, err)
+	if strings.Contains(string(raw), "migration is in progress") {
+		t.Errorf("notice reached stderr: %q", raw)
+	}
+}
+
+// A nil writer must not fall back to stderr: the tracker's Open relies on it.
+func TestOpenWithOptionsDiscardsNoticesWithoutAWriter(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), DirName)
+	must(t, Init(dir))
+	cfg, err := ReadConfig(dir)
+	must(t, err)
+	cfg.ID = ""
+	must(t, WriteConfig(dir, cfg))
+	fr, err := Freeze(ctx, dir)
+	must(t, err)
+	defer fr.Release()
+
+	orig := os.Stderr
+	stderr, err := os.CreateTemp(t.TempDir(), "stderr")
+	must(t, err)
+	os.Stderr = stderr
+	defer func() { os.Stderr = orig }()
+
+	done := make(chan struct{})
+	go func() {
+		// No notice can signal the check, so let the waiter pass the notice
+		// delay before releasing the lock.
+		time.Sleep(700 * time.Millisecond)
+		fr.Release()
+		close(done)
+	}()
+	_, err = OpenWithOptions(dir, Options{Viewer: "me"})
+	<-done
+	must(t, err)
+	must(t, stderr.Close())
+	raw, err := os.ReadFile(stderr.Name())
+	must(t, err)
+	if strings.Contains(string(raw), "migration is in progress") {
+		t.Errorf("a nil writer fell back to stderr: %q", raw)
+	}
+}
+
 func TestViewerForFallsBackToALoginAndQualifiesAWorktree(t *testing.T) {
 	env := func(vars map[string]string) func(string) string {
 		return func(k string) string { return vars[k] }
@@ -439,6 +559,28 @@ func TestViewerForFallsBackToALoginAndQualifiesAWorktree(t *testing.T) {
 			got, err := viewerFor(env(tc.env), at(tc.worktree))
 			if err != nil || got != tc.want {
 				t.Errorf("= %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// The exported identity rule takes the login and the worktree root the caller
+// resolved: no environment, no checkout, no cwd.
+func TestViewerForQualifiesAWorktreeWithoutReadingTheEnvironment(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		login    string
+		worktree string
+		want     string
+	}{
+		{"main checkout", "jim", "", "jim"},
+		{"linked worktree", "jim", "/w/agent-two", "jim-agent-two-" + shortDigest("/w/agent-two")},
+		{"no login", "", "", "local"},
+		{"no login in a worktree", "", "/w/agent-two", "local-agent-two-" + shortDigest("/w/agent-two")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ViewerFor(tc.login, tc.worktree); got != tc.want {
+				t.Errorf("ViewerFor(%q, %q) = %q, want %q", tc.login, tc.worktree, got, tc.want)
 			}
 		})
 	}

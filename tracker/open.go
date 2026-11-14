@@ -1,0 +1,176 @@
+package tracker
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"github.com/cli/go-gh/v2/pkg/repository"
+
+	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/git"
+	"github.com/lumberbarons/hew/internal/local"
+)
+
+// Config configures Open.
+type Config struct {
+	// Worktree is the directory the caller works from. Open answers every
+	// path and worktree question from it and never reads the process working
+	// directory.
+	Worktree string
+	// Repo is the GitHub repository as owner/name. Empty means detect it from
+	// the worktree's origin remote. Ignored by a local tracker.
+	Repo string
+	// Actor is the claimant identity. Empty means the backend's default: the
+	// OS login qualified by the worktree on a local tracker, the authenticated
+	// login on GitHub. As(actor) changes it after Open.
+	Actor string
+	// Notice receives lock-wait and migration notices. Nil discards them; the
+	// tracker never writes to stderr.
+	Notice io.Writer
+}
+
+// Tracker is an open tracker: one backend, one worktree, and the identity
+// claims are made as. As shares the open store; a Tracker is otherwise not
+// copied.
+type Tracker struct {
+	backend Backend
+	store   gh.IssueStore
+	actor   string
+}
+
+// Open opens the tracker for cfg.Worktree. The backend is detected once, from
+// that directory, and pinned for the life of the Tracker: a local tracker
+// deleted underneath a long-lived process is not silently replaced by the
+// repository's GitHub issues.
+func Open(ctx context.Context, cfg Config) (*Tracker, error) {
+	if cfg.Worktree == "" {
+		return nil, &InvalidInputError{Field: "worktree", Reason: "must name the directory to work from"}
+	}
+	target, err := Detect(cfg.Worktree)
+	if err != nil {
+		return nil, err
+	}
+	if target.Backend == BackendLocal {
+		return openLocal(ctx, cfg, target)
+	}
+	return openGitHub(ctx, cfg, target)
+}
+
+// openLocal opens the tracker with the actor the caller named, or the OS login
+// qualified by the worktree when none was given. The identity never comes from
+// HEW_USER: that is the CLI's spelling of the same thing.
+func openLocal(ctx context.Context, cfg Config, target Target) (*Tracker, error) {
+	actor := cfg.Actor
+	if actor == "" {
+		var err error
+		if actor, err = defaultActor(cfg.Worktree); err != nil {
+			return nil, err
+		}
+	}
+	store, err := local.OpenWithOptions(target.Dir, local.Options{
+		Viewer:  actor,
+		Notice:  cfg.Notice,
+		Context: ctx,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &Tracker{backend: BackendLocal, store: store, actor: actor}, nil
+}
+
+// openGitHub builds the client and reads the authenticated login, which is the
+// only claim identity GitHub has. cfg.Actor is deliberately ignored.
+func openGitHub(ctx context.Context, cfg Config, target Target) (*Tracker, error) {
+	repo, err := cfg.githubRepo(target)
+	if err != nil {
+		return nil, err
+	}
+	store, err := newGitHub(repo)
+	if err != nil {
+		return nil, asAuthError(err)
+	}
+	login, err := store.Viewer(ctx)
+	if err != nil {
+		return nil, asAuthError(err)
+	}
+	return &Tracker{backend: BackendGitHub, store: store, actor: login}, nil
+}
+
+// newGitHub builds the GitHub client. Tests replace it to avoid credentials
+// and the network.
+var newGitHub = func(repo gh.Repo) (gh.IssueStore, error) { return gh.New(repo) }
+
+// githubRepo resolves the GitHub repository from the explicit spec, or from
+// the origin remote of the worktree's main checkout.
+func (c Config) githubRepo(target Target) (gh.Repo, error) {
+	if c.Repo != "" {
+		owner, name, ok := strings.Cut(c.Repo, "/")
+		if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+			return gh.Repo{}, &InvalidInputError{Field: "repo", Reason: `must be "owner/name"`}
+		}
+		return gh.Repo{Owner: owner, Name: name}, nil
+	}
+	if target.MainCheckout == "" {
+		return gh.Repo{}, &InvalidInputError{Field: "repo", Reason: "must be owner/name when the worktree is not a git checkout"}
+	}
+	remote, err := git.RemoteURL(target.MainCheckout)
+	if err != nil {
+		return gh.Repo{}, err
+	}
+	if remote == "" {
+		return gh.Repo{}, &InvalidInputError{Field: "repo", Reason: "must be owner/name when the repository has no origin remote"}
+	}
+	parsed, err := repository.Parse(remote)
+	if err != nil {
+		return gh.Repo{}, &InvalidInputError{Field: "repo", Reason: fmt.Sprintf("cannot read an owner/name from the origin remote %q", remote)}
+	}
+	return gh.Repo{Owner: parsed.Owner, Name: parsed.Name}, nil
+}
+
+// defaultActor is the identity rule with the worktree explicit: the OS login,
+// qualified by the linked worktree containing dir. HEW_USER is not consulted.
+func defaultActor(dir string) (string, error) {
+	root, err := git.LinkedWorktree(dir)
+	if err != nil {
+		return "", err
+	}
+	return local.ViewerFor(os.Getenv("USER"), root), nil
+}
+
+// asAuthError turns the GitHub client's auth failure into the library's typed
+// error, so a consumer matches one type on either side of the boundary.
+func asAuthError(err error) error {
+	var auth *gh.AuthError
+	if errors.As(err, &auth) {
+		return &AuthError{Err: auth.Err}
+	}
+	return err
+}
+
+// Backend reports the backend Open selected.
+func (t *Tracker) Backend() Backend { return t.backend }
+
+// Identity reports the claimant identity claims are made as: the actor given
+// to Open or As on a local tracker, the authenticated login on GitHub.
+func (t *Tracker) Identity() string { return t.actor }
+
+// As returns a tracker whose claims are made as actor, sharing this tracker's
+// open store. It is a cheap clone; the receiver is unchanged. On GitHub the
+// claim identity is the authenticated login, so As returns a tracker whose
+// Identity is still that login. An empty actor, or the current identity,
+// returns the receiver.
+func (t *Tracker) As(actor string) *Tracker {
+	if actor == "" || actor == t.actor {
+		return t
+	}
+	clone := *t
+	if store, ok := t.store.(*local.Store); ok {
+		clone.store = store.As(actor)
+		clone.actor = actor
+	}
+	return &clone
+}

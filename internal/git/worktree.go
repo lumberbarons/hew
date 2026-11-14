@@ -119,3 +119,30 @@ func IsNotRepo(err error) bool {
 	var exit *exec.ExitError
 	return errors.As(err, &exit) && bytes.Contains(exit.Stderr, []byte("not a git repository"))
 }
+
+// RemoteURL returns the URL of the repository's origin remote as seen from
+// dir (the working directory when empty). It is empty when there is no origin
+// remote, and an error when git cannot answer for another reason.
+func RemoteURL(dir string) (string, error) { return remoteURL(run, dir) }
+
+func remoteURL(r runner, dir string) (string, error) {
+	args := []string{"remote", "get-url", "origin"}
+	if dir != "" {
+		args = append([]string{"-C", dir}, args...)
+	}
+	out, err := r("git", args...)
+	if err != nil {
+		if noSuchRemote(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("cannot read the origin remote: %w", describeFailure(err))
+	}
+	return out, nil
+}
+
+// noSuchRemote reports whether git refused because the repository has no
+// origin remote, which is a state rather than a failure.
+func noSuchRemote(err error) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && bytes.Contains(exit.Stderr, []byte("No such remote"))
+}

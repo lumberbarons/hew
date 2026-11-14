@@ -301,6 +301,22 @@ func DefaultViewer() (string, error) {
 	return viewerFor(os.Getenv, func() (string, error) { return git.LinkedWorktree("") })
 }
 
+// ViewerFor returns the claimant identity for login working in worktree, the
+// root path of a linked worktree (empty for the main checkout): the bare login
+// in the main checkout, and the login qualified with the worktree's tag in a
+// linked worktree. An empty login reads as "local". It reads no environment;
+// DefaultViewer supplies login and worktree from HEW_USER, USER and the
+// checkout.
+func ViewerFor(login, worktree string) string {
+	if login == "" {
+		login = "local"
+	}
+	if worktree == "" {
+		return login
+	}
+	return login + "-" + worktreeTag(worktree)
+}
+
 // viewerFor is the identity rule with the environment and checkout injected,
 // so its fallbacks and qualification are testable without either. worktree
 // returns the linked worktree's root path, empty for the main checkout; it is
@@ -309,18 +325,11 @@ func viewerFor(getenv func(string) string, worktree func() (string, error)) (str
 	if v := getenv("HEW_USER"); v != "" {
 		return v, nil
 	}
-	login := getenv("USER")
-	if login == "" {
-		login = "local"
-	}
 	root, err := worktree()
 	if err != nil {
 		return "", fmt.Errorf("cannot tell which agent this is (set HEW_USER to name it): %w", err)
 	}
-	if root == "" {
-		return login, nil
-	}
-	return login + "-" + worktreeTag(root), nil
+	return ViewerFor(getenv("USER"), root), nil
 }
 
 // worktreeTag names a linked worktree for an assignee handle: its directory
@@ -379,10 +388,30 @@ var (
 	_ gh.ClaimReleaser = (*Store)(nil)
 )
 
-// Open opens the tracker in dir as viewer. It refuses a directory whose config
-// no longer says local: after migration the issues are an archive, and writing
-// to them would quietly fork the tracker from GitHub.
+// Options configures OpenWithOptions.
+type Options struct {
+	// Viewer is the claimant identity. Empty means DefaultViewer, which reads
+	// HEW_USER and the process working directory.
+	Viewer string
+	// Notice receives lock-wait and migration notices. Nil discards them;
+	// OpenWithOptions never falls back to stderr.
+	Notice io.Writer
+	// Context bounds the initial lock a tracker without an id takes while it
+	// backfills one. Nil means context.Background().
+	Context context.Context
+}
+
+// Open opens the tracker in dir as viewer, reporting lock waits on stderr. It
+// refuses a directory whose config no longer says local: after migration the
+// issues are an archive, and writing to them would quietly fork the tracker
+// from GitHub.
 func Open(dir, viewer string) (*Store, error) {
+	return OpenWithOptions(dir, Options{Viewer: viewer, Notice: os.Stderr})
+}
+
+// OpenWithOptions is Open with the identity, notice destination and context
+// injected, for a caller that must not read the environment or write to stderr.
+func OpenWithOptions(dir string, opts Options) (*Store, error) {
 	cfg, err := readLocalConfig(dir)
 	if err != nil {
 		return nil, err
@@ -393,16 +422,24 @@ func Open(dir, viewer string) (*Store, error) {
 	case !present:
 		return nil, missingIssuesError(filepath.Join(dir, issuesFile))
 	}
+	viewer := opts.Viewer
 	if viewer == "" {
-		var err error
 		if viewer, err = DefaultViewer(); err != nil {
 			return nil, err
 		}
 	}
 	removeStaleTempFiles(dir)
-	s := &Store{dir: dir, viewer: viewer, id: cfg.ID, now: func() time.Time { return time.Now().UTC() }}
+	notice := opts.Notice
+	if notice == nil {
+		notice = io.Discard
+	}
+	s := &Store{dir: dir, viewer: viewer, id: cfg.ID, notice: notice, now: func() time.Time { return time.Now().UTC() }}
 	if s.id == "" {
-		if err := s.backfillID(context.Background()); err != nil {
+		ctx := opts.Context
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if err := s.backfillID(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -412,6 +449,18 @@ func Open(dir, viewer string) (*Store, error) {
 // ID is the tracker's stable identity, the same from every checkout and
 // across a rename of the directory holding it.
 func (s *Store) ID() string { return s.id }
+
+// As returns a store that claims as viewer, sharing this store's tracker, id
+// and lock. The receiver is unchanged. An empty or unchanged viewer returns
+// the receiver.
+func (s *Store) As(viewer string) *Store {
+	if viewer == "" || viewer == s.viewer {
+		return s
+	}
+	clone := *s
+	clone.viewer = viewer
+	return &clone
+}
 
 // backfillID gives a tracker created before ids existed one. It runs under the
 // lock and re-reads the config, so concurrent opens settle on whichever id
