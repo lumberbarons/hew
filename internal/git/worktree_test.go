@@ -162,6 +162,71 @@ func TestMainCheckoutFromALinkedWorktreeFindsTheMainCheckout(t *testing.T) {
 	}
 }
 
+func TestRemoteURLReadsTheOriginFromTheGivenDirectory(t *testing.T) {
+	var got []string
+	r := func(name string, args ...string) (string, error) {
+		got = append([]string{name}, args...)
+		return "git@github.com:owner/name.git", nil
+	}
+	url, err := remoteURL(r, "/work/wt")
+	if err != nil || url != "git@github.com:owner/name.git" {
+		t.Errorf("= %q, %v", url, err)
+	}
+	want := []string{"git", "-C", "/work/wt", "remote", "get-url", "origin"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("command = %v, want %v", got, want)
+	}
+	if _, err := remoteURL(r, ""); err != nil {
+		t.Fatal(err)
+	}
+	want = []string{"git", "remote", "get-url", "origin"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("empty dir command = %v, want %v", got, want)
+	}
+}
+
+func TestRemoteURLTreatsAMissingOriginAsNoRemote(t *testing.T) {
+	r := func(string, ...string) (string, error) {
+		return "", &exec.ExitError{Stderr: []byte("error: No such remote 'origin'")}
+	}
+	if url, err := remoteURL(r, ""); err != nil || url != "" {
+		t.Errorf("= %q, %v; want no remote", url, err)
+	}
+}
+
+func TestRemoteURLReportsOtherGitFailures(t *testing.T) {
+	r := func(string, ...string) (string, error) {
+		return "", &exec.ExitError{Stderr: []byte("fatal: not a git repository")}
+	}
+	if _, err := remoteURL(r, ""); err == nil || !strings.Contains(err.Error(), "not a git repository") {
+		t.Errorf("err = %v, want the git failure wrapped", err)
+	}
+}
+
+func TestRemoteURLFromARealCheckout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolateGit(t)
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v: %s", args, err, out)
+		}
+	}
+	git("init", "--initial-branch=main")
+	if url, err := RemoteURL(dir); err != nil || url != "" {
+		t.Errorf("no origin = %q, %v; want empty", url, err)
+	}
+	git("remote", "add", "origin", "git@github.com:owner/name.git")
+	if url, err := RemoteURL(dir); err != nil || url != "git@github.com:owner/name.git" {
+		t.Errorf("origin = %q, %v", url, err)
+	}
+}
+
 func TestIsNotRepoSeparatesNoCheckoutFromOtherGitFailures(t *testing.T) {
 	notRepo := fmt.Errorf("cannot find the main checkout: %w",
 		&exec.ExitError{Stderr: []byte("fatal: not a git repository (or any of the parent directories): .git")})
