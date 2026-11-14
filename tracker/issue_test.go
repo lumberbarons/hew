@@ -49,13 +49,25 @@ func TestIssueJSONMatchesRenderer(t *testing.T) {
 
 func TestIssueSchemaMatchesRenderer(t *testing.T) {
 	// Check optional fields such as Next even when ToJSON does not set them.
+	// Unexported fields carry rendering data and never reach JSON, so they
+	// are outside the schema this test pins.
+	exported := func(t reflect.Type) []reflect.StructField {
+		var out []reflect.StructField
+		for n := range t.NumField() {
+			if f := t.Field(n); f.PkgPath == "" {
+				out = append(out, f)
+			}
+		}
+		return out
+	}
 	check := func(got, want reflect.Type) {
 		t.Helper()
-		if got.NumField() != want.NumField() {
-			t.Fatalf("%s has %d fields, want %d", got, got.NumField(), want.NumField())
+		gf, wf := exported(got), exported(want)
+		if len(gf) != len(wf) {
+			t.Fatalf("%s has %d exported fields, want %d", got, len(gf), len(wf))
 		}
-		for n := range got.NumField() {
-			g, w := got.Field(n), want.Field(n)
+		for n := range gf {
+			g, w := gf[n], wf[n]
 			// Comments deliberately use package-specific names; their fields
 			// are checked separately below. Every other type must match exactly.
 			typesMatch := g.Type == w.Type ||
