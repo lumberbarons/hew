@@ -21,12 +21,19 @@ type Config struct {
 	// path and worktree question from it and never reads the process working
 	// directory.
 	Worktree string
+	// Backend optionally pins the backend. Empty means use the backend Detect
+	// finds. BackendGitHub opens GitHub even when the worktree has a local
+	// tracker (the CLI's --repo); BackendLocal refuses to fall back to GitHub
+	// when the tracker is gone.
+	Backend Backend
 	// Repo is the GitHub repository as owner/name. Empty means detect it from
-	// the worktree's origin remote. Ignored by a local tracker.
+	// a github.com origin remote. Ignored by a local tracker.
 	Repo string
 	// Actor is the claimant identity. Empty means the backend's default: the
 	// OS login qualified by the worktree on a local tracker, the authenticated
-	// login on GitHub. As(actor) changes it after Open.
+	// login on GitHub. Ignored on GitHub, where every claim is the
+	// authenticated login; read Identity to see the effective claimant.
+	// As(actor) changes it after Open on a local tracker.
 	Actor string
 	// Notice receives lock-wait and migration notices. Nil discards them; the
 	// tracker never writes to stderr.
@@ -43,18 +50,35 @@ type Tracker struct {
 }
 
 // Open opens the tracker for cfg.Worktree. The backend is detected once, from
-// that directory, and pinned for the life of the Tracker: a local tracker
-// deleted underneath a long-lived process is not silently replaced by the
-// repository's GitHub issues.
+// that directory, unless cfg.Backend pins it, and is fixed for the life of the
+// Tracker: a local tracker deleted underneath a long-lived process is not
+// silently replaced by the repository's GitHub issues.
 func Open(ctx context.Context, cfg Config) (*Tracker, error) {
 	if cfg.Worktree == "" {
 		return nil, &InvalidInputError{Field: "worktree", Reason: "must name the directory to work from"}
+	}
+	switch cfg.Backend {
+	case "", BackendLocal, BackendGitHub:
+	default:
+		return nil, &InvalidInputError{Field: "backend", Reason: fmt.Sprintf("unknown backend %q", cfg.Backend)}
+	}
+	if cfg.Backend == BackendGitHub && cfg.Repo != "" {
+		// An explicit GitHub target needs no detection: --repo always means
+		// GitHub, even in a checkout with a local tracker or a damaged config.
+		return openGitHub(ctx, cfg, Target{Backend: BackendGitHub})
 	}
 	target, err := Detect(cfg.Worktree)
 	if err != nil {
 		return nil, err
 	}
-	if target.Backend == BackendLocal {
+	backend := cfg.Backend
+	if backend == "" {
+		backend = target.Backend
+	}
+	if backend == BackendLocal {
+		if target.Backend != BackendLocal {
+			return nil, &InvalidInputError{Field: "backend", Reason: fmt.Sprintf("no local tracker in %s", cfg.Worktree)}
+		}
 		return openLocal(ctx, cfg, target)
 	}
 	return openGitHub(ctx, cfg, target)
@@ -124,11 +148,32 @@ func (c Config) githubRepo(target Target) (gh.Repo, error) {
 	if remote == "" {
 		return gh.Repo{}, &InvalidInputError{Field: "repo", Reason: "must be owner/name when the repository has no origin remote"}
 	}
+	if !remoteIsURL(remote) {
+		return gh.Repo{}, &InvalidInputError{Field: "repo", Reason: fmt.Sprintf("origin %q is not a URL; set Repo explicitly", remote)}
+	}
 	parsed, err := repository.Parse(remote)
 	if err != nil {
 		return gh.Repo{}, &InvalidInputError{Field: "repo", Reason: fmt.Sprintf("cannot read an owner/name from the origin remote %q", remote)}
 	}
+	if parsed.Host != "github.com" {
+		return gh.Repo{}, &InvalidInputError{Field: "repo", Reason: fmt.Sprintf("origin %q is a %q remote, not github.com; set Repo explicitly", remote, parsed.Host)}
+	}
 	return gh.Repo{Owner: parsed.Owner, Name: parsed.Name}, nil
+}
+
+// remoteIsURL reports whether a git remote is a URL rather than a path on
+// disk. repository.Parse accepts a bare owner/name as a spec, which would turn
+// a local-path remote into a repository the caller never named.
+func remoteIsURL(remote string) bool {
+	if strings.HasPrefix(remote, "git@") {
+		return true
+	}
+	for _, scheme := range []string{"ssh:", "git+ssh:", "git:", "http:", "git+https:", "https:"} {
+		if strings.HasPrefix(remote, scheme) {
+			return true
+		}
+	}
+	return false
 }
 
 // defaultActor is the identity rule with the worktree explicit: the OS login,

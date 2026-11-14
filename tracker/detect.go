@@ -30,9 +30,13 @@ type Target struct {
 }
 
 // Detect reports which backend owns the repository containing dir and where
-// its state lives. It reads the filesystem and git; it never reads the process
-// working directory or the environment.
+// its state lives. The worktree is dir, never the process working directory.
+// It reads the filesystem and git; git's own environment (GIT_DIR and
+// friends) is inherited, as it is for any git command.
 func Detect(dir string) (Target, error) {
+	if dir == "" {
+		return Target{}, &InvalidInputError{Field: "dir", Reason: "must name the directory to inspect"}
+	}
 	trackerDir, _, isLocal, err := local.LocateConfig(dir)
 	if err != nil {
 		return Target{}, err

@@ -340,6 +340,87 @@ func TestOpenRequiresAWorktree(t *testing.T) {
 	}
 }
 
+func TestDetectRequiresADirectory(t *testing.T) {
+	_, err := Detect("")
+	var invalid *InvalidInputError
+	if !errors.As(err, &invalid) || invalid.Field != "dir" {
+		t.Errorf("err = %v, want an InvalidInputError for dir", err)
+	}
+}
+
+func TestOpenRejectsAnUnknownBackend(t *testing.T) {
+	_, err := Open(context.Background(), Config{Worktree: t.TempDir(), Backend: "svn"})
+	var invalid *InvalidInputError
+	if !errors.As(err, &invalid) || invalid.Field != "backend" {
+		t.Errorf("err = %v, want an InvalidInputError for backend", err)
+	}
+}
+
+// --repo always means GitHub, even in a checkout with a local tracker.
+func TestOpenForcesGitHubOverALocalTracker(t *testing.T) {
+	main, _ := repoWithWorktrees(t)
+	initLocalTracker(t, main)
+	gitRun(t, main, "remote", "add", "origin", "git@github.com:owner/name.git")
+	var got gh.Repo
+	replaceGitHub(t, func(repo gh.Repo) (gh.IssueStore, error) {
+		got = repo
+		return &fakeStore{login: "octocat"}, nil
+	})
+	tr, err := Open(context.Background(), Config{Worktree: main, Backend: BackendGitHub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Backend() != BackendGitHub || got.String() != "owner/name" {
+		t.Errorf("tracker = {%q, %s}, want GitHub owner/name", tr.Backend(), got)
+	}
+}
+
+// An explicit GitHub target skips detection entirely, so a damaged local
+// config cannot stop --repo from reaching GitHub.
+func TestOpenForcedGitHubSkipsDetection(t *testing.T) {
+	main, _ := repoWithWorktrees(t)
+	dir := initLocalTracker(t, main)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	replaceGitHub(t, func(gh.Repo) (gh.IssueStore, error) { return &fakeStore{login: "octocat"}, nil })
+	tr, err := Open(context.Background(), Config{Worktree: main, Backend: BackendGitHub, Repo: "owner/name"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Backend() != BackendGitHub {
+		t.Errorf("Backend = %q, want GitHub", tr.Backend())
+	}
+}
+
+// A caller that pinned local must be told the tracker is gone, not handed the
+// repository's GitHub issues.
+func TestOpenForcedLocalRefusesToFallBack(t *testing.T) {
+	main, _ := repoWithWorktrees(t)
+	_, err := Open(context.Background(), Config{Worktree: main, Backend: BackendLocal})
+	var invalid *InvalidInputError
+	if !errors.As(err, &invalid) || invalid.Field != "backend" {
+		t.Errorf("err = %v, want an InvalidInputError for backend", err)
+	}
+}
+
+func TestOpenGitHubRejectsANonGitHubRemote(t *testing.T) {
+	for name, remote := range map[string]string{
+		"another host": "https://gitlab.com/acme/widgets.git",
+		"a local path": "../upstream/widgets",
+	} {
+		t.Run(name, func(t *testing.T) {
+			main, _ := repoWithWorktrees(t)
+			gitRun(t, main, "remote", "add", "origin", remote)
+			_, err := Open(context.Background(), Config{Worktree: main})
+			var invalid *InvalidInputError
+			if !errors.As(err, &invalid) || invalid.Field != "repo" {
+				t.Errorf("err = %v, want an InvalidInputError for repo", err)
+			}
+		})
+	}
+}
+
 // fakeStore satisfies gh.IssueStore for the GitHub branch without credentials
 // or the network; only Viewer is reached.
 type fakeStore struct {
