@@ -1,9 +1,14 @@
-# Coverage gate: statement coverage on the logic packages; cmd/ is wiring
+# Coverage gate: statement coverage on internal/ and tracker/; cmd/ is wiring
 # and excluded so the bar bites where behavior lives.
 profile: coverage.out
 
 threshold:
   total: 90
+
+# Keep the public library at the same floor even if internal/ coverage masks it.
+override:
+  - path: ^tracker($|/)
+    threshold: 90
 
 exclude:
   paths:
