@@ -723,6 +723,72 @@ GitHub later is a one-way migration.
   a store opened before the flip. A failed run leaves the tracker local to be
   rerun. The target is the `--repo` or git-remote repository.
 
+## Tracker library
+
+A Go program can use hew in-process through `github.com/lumberbarons/hew/tracker`
+instead of shelling out to the binary: typed results, typed errors, and an explicit
+worktree and actor in place of the process's cwd and environment. The first consumer
+is birl, an orchestrator that drives many workers against one tracker. `internal/cli`
+becomes a renderer and exit-code mapper over `tracker`, with no change to CLI
+behaviour, the `--json` schema or the exit codes. This section is the contract the
+implementing issues and the 1.0 compatibility policy share.
+
+- **Scope.** The library is the operations an orchestrator needs: reads
+  (`Snapshot`, `Get`), `Start`, `Close`, `Release`, `Block`/`Unblock`, `ApplyPlan`,
+  and backend detection. Everything else — `create`, `set`, `triage`, `pr`, `init`,
+  `migrate`, `prime`, rendering and flag parsing — stays CLI-only. An operation
+  moves into `tracker` when a consumer needs it and its behaviour can be stated
+  without reference to a terminal, not before.
+- **Types mirror `--json`.** `tracker.Issue` is shaped like the flat `--json` schema
+  (dependencies as number lists, GraphQL shapes hidden), not like
+  `internal/model.Issue`. The library's shape is therefore the schema consumers can
+  already read, and `internal/model` stays free to change. `tracker` must not import
+  `internal/render` or `internal/cli`, so a consumer pulls in neither.
+- **Identity is explicit, and only on the local backend.** The CLI resolves a local
+  claimant from `HEW_USER`, else the OS login qualified with the worktree (see
+  Local backend). The library reads neither the cwd nor the environment after
+  `Open`: the worktree is an argument, and `As(actor)` returns a tracker whose
+  claims are made as that actor. `HEW_USER` is the CLI agent's spelling of the same
+  thing; `As` is the in-process one. Both mean one claimant per worker.
+- **`As(actor)` on GitHub is a documented no-op.** Every claim on GitHub is the
+  authenticated login, and there is no per-worker identity to set. `As` on a
+  GitHub tracker returns a tracker whose claims are still made as the login, and
+  `Identity()` reports the effective claimant on either backend, so a caller can
+  see that its `As` took no effect instead of assuming it did. It follows that on
+  GitHub "claimed by you" cannot tell workers apart: every worker sharing the login
+  gets the same answer for every claim. A caller such as birl therefore keeps its
+  own record of which worker holds which issue, regardless of backend, and does not
+  treat the tracker's claimant as that record.
+- **The backend is pinned at startup.** Detection is a function of the filesystem
+  (see Backend selection), and a wholly absent `.hew` falls back to GitHub (see
+  Local backend). A long-lived process whose local tracker is deleted underneath it
+  would, if it re-detected, start sending writes to the remote's real issues. A
+  consumer detects once, pins the backend it expects, and treats a detection that
+  disagrees with the pin as an error rather than following it.
+- **Typed errors; exit codes stay a CLI contract.** The library returns typed errors
+  a caller matches with `errors.As`/`errors.Is`; it never returns an exit code, and
+  no library code calls `os.Exit`. The CLI maps each type to the code it has always
+  used, and that mapping lives in `internal/cli` alone:
+
+  | Error | CLI exit | Meaning |
+  |---|---|---|
+  | claimed by someone else (carries the claimant) | 3 | pick the next ready item |
+  | claimed by the acting identity (carries the actor) | 5 | resume that work |
+  | open blockers (carries the blockers) | 6 | pick the next ready item |
+  | authentication failure | 4 | `gh auth login` |
+  | invalid input: a malformed argument, or a plan entry whose own fields are invalid | 2 | fix the call |
+  | not found, a closed target, a dependency cycle (a self-block included), a plan that fails to parse or resolve, anything unclassified | 1 | report it |
+
+  The claimant and actor ride in the error so the CLI's message and a consumer's
+  own handling read the same field instead of parsing a string. A new typed error
+  that the CLI cannot map is a bug in the mapping, not a reason to widen the table.
+- **Stability: experimental until 1.0.** The `tracker` API may change in any v0.x
+  minor release. A breaking change to it is committed as `feat!:` (or `fix!:`), so
+  goreleaser's changelog files it under Breaking changes rather than Features, and
+  a consumer reads the release notes to know what moved. The exported surface is
+  checked in CI so a change to it is deliberate and visible in review. From 1.0 it
+  is covered by the compatibility policy (#171).
+
 ## Build & distribution
 
 - **CI** (GitHub Actions, actions pinned by SHA at their latest versions): a
