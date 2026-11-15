@@ -73,19 +73,30 @@ func TestReleaseForceClearsAnyClaim(t *testing.T) {
 		{"shared", []string{"actor-a", "actor-z"}, false},
 		{"label only", nil, true},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx, store, issue := claimedFixture(t, tc.owners...)
-			if tc.label {
-				if err := store.AddLabels(ctx, issue.Number, []string{model.InProgressLabel}); err != nil {
+		// Forcing passes no login to the atomic release and skips the
+		// ownership read on the fallback; both must clear a claim that is not
+		// the actor's.
+		for _, backend := range []struct {
+			name  string
+			store func(*local.Store) gh.IssueStore
+		}{
+			{"atomic release", func(s *local.Store) gh.IssueStore { return s }},
+			{"check-then-act", func(s *local.Store) gh.IssueStore { return storeOnly{s} }},
+		} {
+			t.Run(tc.name+"/"+backend.name, func(t *testing.T) {
+				ctx, store, issue := claimedFixture(t, tc.owners...)
+				if tc.label {
+					if err := store.AddLabels(ctx, issue.Number, []string{model.InProgressLabel}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				tr := WrapAs(backend.store(store), BackendLocal, "actor-a")
+				if err := tr.Release(ctx, issue.Number, ReleaseOptions{Force: true}); err != nil {
 					t.Fatal(err)
 				}
-			}
-			tr := WrapAs(storeOnly{store}, BackendLocal, "actor-a")
-			if err := tr.Release(ctx, issue.Number, ReleaseOptions{Force: true}); err != nil {
-				t.Fatal(err)
-			}
-			assertReleased(t, ctx, store, issue.Number)
-		})
+				assertReleased(t, ctx, store, issue.Number)
+			})
+		}
 	}
 }
 
@@ -180,7 +191,12 @@ func TestReleaseReportsAPartiallyClearedClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Claimed() {
-		t.Error("claim fully cleared despite the failed assignee removal")
+	if !slices.Equal(got.Assignees, []string{"actor-a"}) {
+		t.Errorf("assignees = %v, want the claim still held after the failed removal", got.Assignees)
+	}
+	// The label goes first, so what the failure leaves behind is an assignee
+	// with no label — the half a retry or a forced release can still finish.
+	if got.InProgress() {
+		t.Error("in-progress label survived: the label must be cleared before the assignees")
 	}
 }

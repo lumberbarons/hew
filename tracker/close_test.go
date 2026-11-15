@@ -220,6 +220,9 @@ func TestCloseEpicWithNoOpenChildrenCloses(t *testing.T) {
 	if _, err := WrapAs(store, BackendLocal, "actor-a").Close(ctx, epic.Number, CloseOptions{Reason: "done", Completed: true}); err != nil {
 		t.Fatal(err)
 	}
+	if got := storeIssue(t, ctx, store, epic.Number); got.IsOpen() || got.StateReason != "COMPLETED" {
+		t.Errorf("epic state = %s %s, want closed as completed", got.State, got.StateReason)
+	}
 }
 
 // Close does not touch the claim: a claimed issue closed by hand keeps it.
