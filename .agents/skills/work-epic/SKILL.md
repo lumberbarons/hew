@@ -21,9 +21,12 @@ re-implement the loop by hand; if the driver cannot do something, stop and say s
 `review-code` and `review-tests` in turn and fixes what each found; the repairer resolves a conflict or a red CI run. The
 reviewer is a **different** agent from the implementer — a second point of view — and the fix
 happens in the session that found the problem, so nothing is re-reviewed: a PR is reviewed once.
-The agents are one block in [scripts/pump.py](scripts/pump.py) (`IMPLEMENTER`, `REVIEWER`,
-`REPAIRER`). Changing one is a source edit in a checkout of this plugin: an installed copy is a
-cache that updates overwrite, so if the user asks for different agents, say that instead of
+The agents are ordered chains in [scripts/pump.py](scripts/pump.py) (`AGENTS`); the reviewer
+defaults to `claude`, then `codex`. If an agent cannot start, or a review it ran reports an error
+(an exhausted usage limit, a crash), the pump starts the next agent in the chain, logs and reports
+the fallback, and parks the item only when the chain is exhausted. Set `WORK_EPIC_IMPLEMENTER`,
+`WORK_EPIC_REVIEWER`, or `WORK_EPIC_REPAIRER` to a comma-separated chain to change a role for one
+run. An installed copy is a cache that updates overwrite, so use those overrides rather than
 patching the cache.
 
 > [!IMPORTANT]
@@ -45,10 +48,11 @@ something fails to start.
 - On a **local hew tracker** (`hew init --local`, no `--repo`) none of GitHub applies: no `gh`, no
   authentication, no remote, no CI. The driver detects this itself; see
   [Local trackers](#local-trackers).
-- The `work-issue` skill (hew plugin) installed for the implementer and `review-code` and `review-tests` (critique
-  plugin) for the reviewer. The driver finds the work-issue and raise-issues skill directories in
-  the repo's own `.agents/skills/` or `.claude/skills/`, the plugin checkout, or the installed
-  cache; set `WORK_EPIC_WORK_ISSUE_DIR` or `WORK_EPIC_RAISE_ISSUES_DIR` to override.
+- The `work-issue` skill (hew plugin) installed for every agent in the implementer chain and
+  `review-code` and `review-tests` (critique plugin) for every agent in the reviewer chain. The
+  driver finds the work-issue and raise-issues skill directories in the repo's own
+  `.agents/skills/` or `.claude/skills/`, the plugin checkout, or the installed cache; set
+  `WORK_EPIC_WORK_ISSUE_DIR` or `WORK_EPIC_RAISE_ISSUES_DIR` to override.
 - The Orca CLI: `ORCA_CLI_COMMAND`, else the first of `orca-dev`, `orca-ide`, `orca` on PATH.
 
 ## Steps
@@ -146,8 +150,9 @@ The driver halts for a human only when one of these is true, and says which in t
 2. **A repair that failed twice.** A conflict or a red CI run two repair attempts could not resolve
    — or a failure the repairer found is not the PR's fault (a flaky test, main already red).
 3. **An outage.** Un-auth, a worker that errored, an unreadable Orca or tracker.
-4. **A review that did not run.** A missing or unreadable outcome, or a status other than
-   `reviewed`: an unreviewed PR is never merged and never read as clean.
+4. **A review that could not run.** The reviewer chain is exhausted after launch failures or
+   `error` outcomes, or the review ended in another status than `reviewed`: an unreviewed PR is
+   never merged and never read as clean.
 5. **Protected.** Branch protection wants something the pump cannot give, typically an approving
    review.
 

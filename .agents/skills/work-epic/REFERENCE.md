@@ -77,16 +77,23 @@ never recorded is therefore skipped as claimed; the human releases it with `hew 
 
 ## Agents and prompts
 
-| Role | What it runs | Agent |
+| Role | What it runs | Agents, in order |
 |---|---|---|
 | **Coordinator** | `work_epic.py` | The terminal the human started it in |
 | **Implementer** | `work-issue` in the issue's worktree | `opencode` |
-| **Reviewer** | `review-code`, then `review-tests`, fixing what each found, in the same worktree | `claude` |
+| **Reviewer** | `review-code`, then `review-tests`, fixing what each found, in the same worktree | `claude`, then `codex` |
 | **Repairer** | The repair contract in the same worktree | `opencode` |
 
-The agents are `pump.py`'s `IMPLEMENTER`, `REVIEWER`, and `REPAIRER`, and nowhere else. The reviewer
-is a different agent from the implementer by construction: that is the second point of view. The
-implementer and reviewer prompts load their skill by name, so both agents must have it installed; the
+The agents are ordered chains in `pump.py`'s `AGENTS`, and nowhere else. `WORK_EPIC_IMPLEMENTER`,
+`WORK_EPIC_REVIEWER`, and `WORK_EPIC_REPAIRER` override a chain for one run with a comma-separated
+list of agent ids; empty entries and duplicates are dropped. The first agent that starts does the
+work. If `worker-start` fails, the pump releases what the attempt left and tries the next agent; for
+the reviewer, an outcome with status `error` (including a missing outcome after the settlement
+grace) also moves to the next agent. Every fallback is logged, appended to the run's notes as
+`agent-fallback`, and named in the report and the cards; only an exhausted chain parks the item. A
+review that reached `reviewed` is never repeated. The issue's own implementer is skipped even if it
+leads the reviewer chain, so a fallback keeps the second point of view. The implementer and reviewer
+prompts load their skill by name, so every agent in a chain must have it installed; the
 reviewer's fix step and the repairer read the quality-gate table from the work-issue skill
 directory, so it must be readable on the host.
 
@@ -116,10 +123,10 @@ runs the lens. The
 repairer's is `{status: resolved|blocked|error, head, reason, gate}`. The worker's is work-issue's
 own outcome file (`status`, `issues[0].pr`, `issues[0].branch`).
 
-Orca's CLI does not expose an installed-agent list, so the choice is the operator's declaration. A
+Orca's CLI does not expose an installed-agent list, so the chains are the operator's declaration. A
 failed `worker-start` names the agent and returns `failedStage` / `residualResources`; the driver
-releases the residual terminal, reports the issue as unscheduled, and never silently tries a
-different agent.
+releases the residual terminal, notes the failure, and moves to the next agent in the chain. It
+never tries an agent the run did not declare.
 
 ## Orca's model, and what the pump uses
 
@@ -175,7 +182,10 @@ tick, so a restart loses nothing it cannot re-derive:
 
 An issue's `state` is one of `implementing`, `delivered`, `reviewing`, `reviewed`, `merged`,
 `failed`, `error`, `noop`, `review_failed`, or `unscheduled`. The pump never spawns an issue it
-already tracks, whatever state it is in. `parked` entries of kind `gate` follow the PR planner and
+already tracks, whatever state it is in. A review that fell through stores the agents already tried
+in the issue's `review_attempts`, so a resume neither retries one nor skips the rest; `implementer`
+names the agent that created the worktree, for the marker. `parked` entries of kind `gate` follow
+the PR planner and
 clear themselves when the human lifts the gate (closes the finding, resolves the conflict); kind
 `event` entries stay until the run ends. Outcome files are archived to `$OUTDIR/outcomes/` before the
 worker is released and removed from the worktree, so a stale file never sits in the checkout the

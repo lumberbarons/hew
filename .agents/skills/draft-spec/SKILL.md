@@ -177,8 +177,9 @@ actually be verified by someone who did not write the code.
 ## 8. Report
 
 Give the path, the story and task counts, and anything you assumed that the user
-should overturn. Say the spec is at `Draft` and that approve-spec is the next
-step if they want it reviewed and accepted. Then stop. Do not begin implementing,
+should overturn. Say the spec is at `Draft`, that refine-spec can interview them
+about its rough edges, and that approve-spec is the next step if they want it reviewed and
+accepted. Then stop. Do not begin implementing,
 do not approve it yourself, and do not file the tasks anywhere unless asked.
 
 ## Portability

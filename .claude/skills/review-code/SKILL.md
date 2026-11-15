@@ -33,7 +33,8 @@ skill's `scripts/review-mode.py` with the resolved scope and explicit intent. On
 clearly identified local development-branch change review fixes automatically; PR targets,
 general audits and uncertain cases report only. Explicit intent overrides those defaults.
 The review subagent stays read-only; the calling agent handles the bounded repair and
-verification phase when the selected mode permits it.
+verification phase when the selected mode permits it, and commits the verified repairs when
+the mode is automatic.
 
 ## Scope
 

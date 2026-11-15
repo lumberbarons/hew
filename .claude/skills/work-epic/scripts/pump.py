@@ -30,10 +30,16 @@ from orca_api import OrcaError, settled
 from pr_state import REPAIR_FAIL_MARKER
 from repo_state import CommandError, touches_code
 
-# The agents. The only place an agent id appears; edit here to change one.
-IMPLEMENTER = "opencode"
-REVIEWER = "claude"  # reviews, then fixes what it found
-REPAIRER = "opencode"  # repairs conflicts and red CI
+# The agents, as ordered chains. The first that can launch does the work; the next is
+# tried when the one before cannot start, or when a review it ran reports an error.
+# The only place an agent id appears. WORK_EPIC_<ROLE> overrides a chain for one run.
+AGENTS = {
+    "we": ("opencode",),
+    "wr": ("claude", "codex"),  # reviews, then fixes what it found
+    "wc": ("opencode",),  # repairs conflicts and red CI
+}
+ROLE_ENV = {"we": "WORK_EPIC_IMPLEMENTER", "wr": "WORK_EPIC_REVIEWER",
+            "wc": "WORK_EPIC_REPAIRER"}
 
 BUDGET_S = {"we": 2 * 3600, "wr": 90 * 60, "wc": 3600}  # continuous working, per agent
 CI_BUDGET_S = 3600  # a PR with no state change for this long is set aside
@@ -43,6 +49,24 @@ MAX_ORCA_ERRORS = 3
 GATE_ACTIONS = {"hold", "conflict", "ci_failed", "protected"}
 ROLE_NAMES = {"we": "worker", "wr": "reviewer", "wc": "repairer"}
 PROMPT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts")
+
+
+def agent_chain(role):
+    """A role's ordered agents: the env override, else the declared chain.
+
+    Empty entries and duplicates are dropped, so `WORK_EPIC_REVIEWER="claude, codex,claude"`
+    is the chain claude then codex. An unset or empty override keeps the default.
+    """
+    raw = os.environ.get(ROLE_ENV[role])
+    if not raw:
+        return AGENTS[role]
+    chain = tuple(dict.fromkeys(a.strip() for a in raw.split(",") if a.strip()))
+    return chain or AGENTS[role]
+
+
+def describe_chains(chains):
+    """The configured chains as one human-readable line."""
+    return "; ".join(f"{ROLE_NAMES[role]} {' -> '.join(chain)}" for role, chain in chains.items())
 
 
 def default_log(message):
@@ -91,10 +115,12 @@ class State:
 
 class Config:
     def __init__(self, *, scope, coord, outdir, work_issue_dir, workers=2, repo=None,
-                 resume=False, main=None, default="main", local=False):
+                 resume=False, main=None, default="main", local=False, agents=None):
         self.scope, self.workers, self.repo, self.resume = scope, workers, repo, resume
         self.coord, self.outdir, self.work_issue_dir = coord, outdir, work_issue_dir
         self.main, self.default, self.local = main, default, local
+        self.agents = {role: tuple(chain) for role, chain in
+                       (agents or {r: agent_chain(r) for r in AGENTS}).items()}
 
 
 class Pump:
@@ -129,11 +155,21 @@ class Pump:
     def marker(self, key, agent, text):
         return f"work-epic · {self.run_id} · {key} · {agent} · {text}"
 
+    def chain(self, role):
+        """The ordered agents a role may start, from the run's configuration."""
+        return self.cfg.agents.get(role) or AGENTS[role]
+
+    def reviewer_candidates(self, iss):
+        """Reviewer agents left to try, never the issue's own implementer."""
+        tried = set(iss.get("review_attempts") or ())
+        return [a for a in self.chain("wr") if a not in tried and a != iss.get("implementer")]
+
     def card(self, n, text, *, status=None, unread=None, pr=None):
         """Rewrite an issue's worktree card, keeping the marker tokens."""
         iss = self.state.issue(n)
         if iss.get("worktree"):
-            self.orca.worktree_set(iss["worktree"], comment=self.marker(f"we-{n}", IMPLEMENTER, text),
+            agent = iss.get("implementer") or self.chain("we")[0]
+            self.orca.worktree_set(iss["worktree"], comment=self.marker(f"we-{n}", agent, text),
                                    status=status, unread=unread, pr=pr)
 
     def park(self, key, text, *, issue=None, pr=None, kind="event", card=None):
@@ -201,13 +237,15 @@ class Pump:
             if not comment.startswith(prefix) or wt["id"] in tracked or row is None:
                 continue
             n = int(comment[len(prefix):].split(" ")[0])
+            tokens = comment.split(" · ")
+            agent = tokens[3] if len(tokens) > 3 and tokens[3] else self.chain("we")[0]
             self.log(f"adopting the worker for #{n} that was started but never recorded")
             self.state["agents"][row["dispatchId"]] = {
                 "role": "we", "key": str(n), "issue": n, "pr": None, "task": row.get("taskId"),
-                "agent": IMPLEMENTER, "worktree": wt["id"], "path": wt["path"],
+                "agent": agent, "worktree": wt["id"], "path": wt["path"],
                 "started": self.clock(), "done": False}
             self.state.issue(n).update(
-                state="implementing", worktree=wt["id"], path=wt["path"],
+                state="implementing", worktree=wt["id"], path=wt["path"], implementer=agent,
                 orca_branch=(wt.get("branch") or "").removeprefix("refs/heads/") or None)
         self.state.save()
 
@@ -374,38 +412,56 @@ class Pump:
     def start_worker(self, e):
         n, title = e["number"], e.get("title", "")
         name = f"we-{n}"
-        try:
-            rec, wid = self.start_agent(
-                "we", str(n), n, spec=render("worker_local" if self.cfg.local else "worker", n=n), title=f"{name} · {IMPLEMENTER}",
-                agent=IMPLEMENTER, worktree="new-child", wid=None, path=None,
-                repo=f"id:{self.cfg.coord['repoId']}", name=name,
-                display_name=f"#{n} {title[:50]}", base_branch=self.cfg.default if self.cfg.local else f"origin/{self.cfg.default}",
-                comment=self.marker(name, IMPLEMENTER, "worker started"), setup="inherit")
-        except OrcaError as e:
-            return self.unscheduled(n, e)
-        row = next((w for w in self.orca.worktrees() if w["id"] == wid), {})
-        path = row.get("path")
-        self.state["agents"][rec.dispatch].update(worktree=wid, path=path)
-        iss = self.state.issue(n)
-        iss.update(state="implementing", worktree=wid, path=path, large=e.get("large", False),
-                   title=title,
-                   orca_branch=(row.get("branch") or "").removeprefix("refs/heads/") or None)
-        self.orca.worktree_set(wid, issue=n, status="in-progress")
-        self.log(f"started {name} ({IMPLEMENTER}) in {path}")
+        failures = []
+        for agent in self.chain("we"):
+            try:
+                rec, wid = self.start_agent(
+                    "we", str(n), n, spec=render("worker_local" if self.cfg.local else "worker", n=n),
+                    title=f"{name} · {agent}", agent=agent, worktree="new-child", wid=None, path=None,
+                    repo=f"id:{self.cfg.coord['repoId']}", name=name,
+                    display_name=f"#{n} {title[:50]}", base_branch=self.cfg.default if self.cfg.local else f"origin/{self.cfg.default}",
+                    comment=self.marker(name, agent, "worker started"), setup="inherit")
+            except OrcaError as err:
+                failures.append((agent, err))
+                self.release_start(err)
+                self.discard_worktree(name)
+                self.state["notes"].append(
+                    {"type": "agent-fallback", "id": str(n),
+                     "subject": f"implementer {agent} could not start: {err}"})
+                continue
+            row = next((w for w in self.orca.worktrees() if w["id"] == wid), {})
+            path = row.get("path")
+            self.state["agents"][rec.dispatch].update(worktree=wid, path=path)
+            iss = self.state.issue(n)
+            iss.update(state="implementing", worktree=wid, path=path, large=e.get("large", False),
+                       title=title, implementer=agent,
+                       orca_branch=(row.get("branch") or "").removeprefix("refs/heads/") or None)
+            self.orca.worktree_set(wid, issue=n, status="in-progress")
+            self.log(f"started {name} ({agent}) in {path}")
+            return
+        self.unscheduled(n, failures)
 
-    def unscheduled(self, n, err):
-        """One failed spawn costs only that issue: free what it left, report, move on."""
-        self.state.issue(n)["state"] = "unscheduled"
+    def release_start(self, err):
+        """Release the dispatch a failed worker-start may have created before its error."""
         dispatch = orca_api.find_key(err.result or {}, "dispatchId")
         if dispatch:
             try:
                 self.orca.worker_release(dispatch)
             except OrcaError:
                 pass
+
+    def discard_worktree(self, name):
+        """Remove a worktree a failed spawn created under our own marker."""
         for w in self.orca.worktrees():
-            if (w.get("comment") or "").startswith(f"work-epic · {self.run_id} · we-{n} "):
+            if (w.get("comment") or "").startswith(f"work-epic · {self.run_id} · {name} "):
                 self.remove_worktree(w["id"], w.get("path"))
-        self.park(f"issue-{n}", f"#{n}: the {IMPLEMENTER} worker could not start — {err}")
+
+    def unscheduled(self, n, failures):
+        """One failed spawn costs only that issue: free what it left, report, move on."""
+        self.state.issue(n)["state"] = "unscheduled"
+        self.discard_worktree(f"we-{n}")
+        detail = "; ".join(f"{agent}: {err}" for agent, err in failures)
+        self.park(f"issue-{n}", f"#{n}: no implementer could start — {detail}")
 
     def on_worker(self, a, out):
         n, status = a["issue"], out.get("status")
@@ -487,22 +543,53 @@ class Pump:
         spec = render("reviewer_local" if self.cfg.local else "reviewer", n=n, pr=pr,
                       branch=iss["branch"], default=self.cfg.default,
                       work_issue_dir=self.cfg.work_issue_dir, tests_lens=self.tests_lens(iss))
-        try:
-            self.start_agent("wr", str(pr), n, spec=spec, title=f"wr-{pr} · {REVIEWER}",
-                             agent=REVIEWER, worktree=f"id:{iss['worktree']}", wid=iss["worktree"],
-                             path=iss["path"], pr=pr)
-        except OrcaError as e:
+        tried = iss.setdefault("review_attempts", [])
+        candidates = self.reviewer_candidates(iss)
+        if not candidates:
             iss["state"] = "review_failed"
-            return self.park(f"review-{pr}", f"{self.label(pr)}: the reviewer could not start — {e}",
-                             issue=n, pr=pr, card="REVIEW FAILED: reviewer did not start")
-        iss["state"] = "reviewing"
-        self.card(n, f"reviewing by {REVIEWER}", status="in-review")
-        self.log(f"started wr-{pr} ({REVIEWER})")
+            return self.park(f"review-{pr}", f"{self.label(pr)}: review did not run; no reviewer agent "
+                             f"is left to try (tried: {', '.join(tried) or 'none'}; "
+                             f"implementer: {iss.get('implementer')})", issue=n, pr=pr,
+                             card="REVIEW FAILED: not reviewed")
+        failures = []
+        for agent in candidates:
+            tried.append(agent)
+            try:
+                self.start_agent("wr", str(pr), n, spec=spec, title=f"wr-{pr} · {agent}",
+                                 agent=agent, worktree=f"id:{iss['worktree']}", wid=iss["worktree"],
+                                 path=iss["path"], pr=pr)
+            except OrcaError as err:
+                failures.append((agent, err))
+                self.release_start(err)
+                self.state["notes"].append(
+                    {"type": "agent-fallback", "id": str(pr),
+                     "subject": f"reviewer {agent} could not start: {err}"})
+                continue
+            iss["state"] = "reviewing"
+            self.card(n, f"reviewing by {agent}", status="in-review")
+            self.log(f"started wr-{pr} ({agent})")
+            return
+        detail = "; ".join(f"{agent}: {err}" for agent, err in failures)
+        iss["state"] = "review_failed"
+        return self.park(f"review-{pr}", f"{self.label(pr)}: no reviewer could start — {detail}",
+                         issue=n, pr=pr, card="REVIEW FAILED: reviewer did not start")
 
     def on_review(self, a, out):
         n, pr = a["issue"], a["pr"]
         iss = self.state.issue(n)
         if out.get("status") != "reviewed":
+            tried = iss.setdefault("review_attempts", [])
+            if a.get("agent") and a["agent"] not in tried:
+                tried.append(a["agent"])
+            remaining = self.reviewer_candidates(iss)
+            if out.get("status") == "error" and remaining:
+                reason = out.get("reason") or out.get("status")
+                note = f"{a.get('agent')} did not run ({reason}); retrying with {remaining[0]}"
+                self.state["notes"].append({"type": "agent-fallback", "id": str(pr), "subject": note})
+                self.log(f"review of PR #{pr} fell back: {note}")
+                iss["state"] = "delivered"  # the next tick starts the next reviewer
+                self.state.save()
+                return
             iss["state"] = "review_failed"
             return self.park(f"review-{pr}", f"{self.label(pr)}: the review did not run — "
                              f"{out.get('reason', out.get('status'))}", issue=n, pr=pr,
@@ -533,10 +620,10 @@ class Pump:
         blocker = findings.unfixed_blocker(records)
         if blocker:
             self.card(n, f"HOLD: {blocker.get('priority')} finding #{blocker.get('number')} not fixed "
-                         f"(reviewer {REVIEWER})", unread=True)
+                         f"(reviewer {a.get('agent')})", unread=True)
         else:
             open_count = sum(1 for r in records if r.get("number") and not r.get("fixed"))
-            self.card(n, f"reviewed by {REVIEWER}; {fixed} fixed, {open_count} filed open; ready to merge")
+            self.card(n, f"reviewed by {a.get('agent')}; {fixed} fixed, {open_count} filed open; ready to merge")
 
     # --- the merge pass ----------------------------------------------------------------
 
@@ -742,18 +829,27 @@ class Pump:
         spec = render("repairer_local" if self.cfg.local else "repairer", n=n, pr=pr,
                       branch=p["branch"], default=self.cfg.default,
                       work_issue_dir=self.cfg.work_issue_dir, why=p.get("note") or "")
-        try:
-            self.start_agent("wc", str(pr), n, spec=spec, title=f"wc-{pr} · {REPAIRER}",
-                             agent=REPAIRER, worktree=f"id:{iss['worktree']}", wid=iss["worktree"],
-                             path=iss["path"], pr=pr)
-        except OrcaError as e:
-            p["parked"] = True
-            self.park(key, f"{self.label(pr)}: the repairer could not start — {e}", issue=n, pr=pr,
-                      kind="gate", card="REPAIR FAILED: repairer did not start")
-            return False
-        self.card(n, f"repairing {self.label(pr)} ({REPAIRER})", status="in-review")
-        self.log(f"started wc-{pr} ({REPAIRER}): {p.get('note')}")
-        return True
+        failures = []
+        for agent in self.chain("wc"):
+            try:
+                self.start_agent("wc", str(pr), n, spec=spec, title=f"wc-{pr} · {agent}",
+                                 agent=agent, worktree=f"id:{iss['worktree']}", wid=iss["worktree"],
+                                 path=iss["path"], pr=pr)
+            except OrcaError as err:
+                failures.append((agent, err))
+                self.release_start(err)
+                self.state["notes"].append(
+                    {"type": "agent-fallback", "id": str(pr),
+                     "subject": f"repairer {agent} could not start: {err}"})
+                continue
+            self.card(n, f"repairing {self.label(pr)} ({agent})", status="in-review")
+            self.log(f"started wc-{pr} ({agent}): {p.get('note')}")
+            return True
+        p["parked"] = True
+        detail = "; ".join(f"{agent}: {err}" for agent, err in failures)
+        self.park(key, f"{self.label(pr)}: no repairer could start — {detail}", issue=n, pr=pr,
+                  kind="gate", card="REPAIR FAILED: repairer did not start")
+        return False
 
     def on_repair(self, a, out):
         n, pr = a["issue"], int(a["key"])
@@ -812,6 +908,7 @@ class Pump:
         status = ("halted" if self.halted else "stopped" if parked or open_left else "drained")
         return {"status": status, "run": self.run_id, "scope": list(self.cfg.scope),
                 "local": self.cfg.local,
+                "agents": {role: list(self.chain(role)) for role in AGENTS},
                 "issues": self.state["issues"], "merged": self.state["merged"],
                 "parked": parked, "notes": self.state["notes"], "counts": counts,
                 "spawnBudget": self.last_resolve.get("spawnBudget"),
@@ -829,6 +926,8 @@ class Pump:
 def render_report(s):
     """The human-facing end-of-run report."""
     lines = [f"Run {s['run']} over {' '.join('#%d' % n for n in s['scope'])}: {s['status'].upper()}"]
+    if s.get("agents"):
+        lines.append("  agents: " + describe_chains(s["agents"]))
     for n, iss in sorted(s["issues"].items(), key=lambda kv: int(kv[0])):
         bits = [iss.get("state", "?")]
         if iss.get("pr") and not s.get("local"):
