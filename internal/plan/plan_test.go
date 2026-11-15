@@ -22,7 +22,7 @@ func TestParse(t *testing.T) {
 	}
 
 	epic := entries[0]
-	if epic.Key() != "epic1" || !epic.IsEpic() || epic.Priority != model.P1 || epic.Line != 1 {
+	if epic.Key() != "epic1" || !epic.IsEpic() || epic.Priority != "P1" || epic.Line != 1 {
 		t.Errorf("epic = %+v", epic)
 	}
 	if !strings.Contains(epic.Body, "### Goal") {
@@ -30,7 +30,7 @@ func TestParse(t *testing.T) {
 	}
 
 	scaffold := entries[1]
-	if scaffold.Priority != model.DefaultPriority {
+	if scaffold.Priority != model.DefaultPriority.String() {
 		t.Errorf("default priority = %v", scaffold.Priority)
 	}
 	if scaffold.Parent == nil || scaffold.Parent.ID != "epic1" || scaffold.Parent.Number != 0 {

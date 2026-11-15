@@ -84,6 +84,14 @@ func Open(ctx context.Context, cfg Config) (*Tracker, error) {
 	return openGitHub(ctx, cfg, target)
 }
 
+// WrapAs makes a Tracker around an already-open store, as actor: the seam
+// hew's own CLI uses for writes, where it opens the store once for every
+// command and already knows which backend it opened. External callers use
+// Open, which also resolves the worktree and the backend.
+func WrapAs(store gh.IssueStore, backend Backend, actor string) *Tracker {
+	return &Tracker{backend: backend, store: store, actor: actor}
+}
+
 // openLocal opens the tracker with the actor the caller named, or the OS login
 // qualified by the worktree when none was given. The identity never comes from
 // HEW_USER: that is the CLI's spelling of the same thing.
