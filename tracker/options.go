@@ -49,8 +49,18 @@ type BlockOptions struct {
 }
 
 // ApplyOptions configures plan application. The zero value applies the
-// plan without a delay between writes; DryRun validates without writing.
+// plan without a delay between writes and with an in-memory checkpoint, so
+// nothing resumes across calls; DryRun validates without writing.
 type ApplyOptions struct {
 	DryRun   bool
 	Throttle time.Duration
+	// Checkpoint is where progress is recorded and resumed from. Nil means a
+	// fresh in-memory checkpoint.
+	Checkpoint Checkpoint
+	// Digest identifies the plan source in provenance markers and checkpoint
+	// records. Empty means the checkpoint's own digest, or a digest computed
+	// from the entries when it has none; a caller that parses a file passes
+	// that file's digest so a checkpoint on disk agrees with the markers its
+	// issues carry.
+	Digest string
 }
