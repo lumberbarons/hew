@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/tracker"
 )
 
 func TestExitCode(t *testing.T) {
@@ -22,6 +23,8 @@ func TestExitCode(t *testing.T) {
 		{"claimed by you", &ExitError{Code: ExitClaimedByYou, Message: "yours"}, ExitClaimedByYou},
 		{"auth", &gh.AuthError{Err: errors.New("401")}, ExitAuth},
 		{"wrapped auth", fmt.Errorf("context: %w", &gh.AuthError{Err: errors.New("401")}), ExitAuth},
+		{"tracker auth", &tracker.AuthError{Err: errors.New("401")}, ExitAuth},
+		{"wrapped tracker auth", fmt.Errorf("context: %w", &tracker.AuthError{Err: errors.New("401")}), ExitAuth},
 		{"wrapped usage", fmt.Errorf("context: %w", usageErr("bad")), ExitUsage},
 	}
 	for _, tt := range tests {

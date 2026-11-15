@@ -3,8 +3,8 @@ package tracker
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,7 +40,7 @@ func (f *fakeClient) GetIssue(_ context.Context, number int) (model.Issue, error
 			return i, nil
 		}
 	}
-	return model.Issue{}, fmt.Errorf("issue #%d not found", number)
+	return model.Issue{}, &gh.NotFoundError{Issue: number}
 }
 
 func fixture(number int, title string, labels ...string) model.Issue {
@@ -410,5 +410,33 @@ func TestSnapshotPropagatesListErrors(t *testing.T) {
 	}
 	if snapshot != nil {
 		t.Errorf("Snapshot = %+v on a failed fetch, want nil", snapshot)
+	}
+}
+
+// Store errors cross the boundary as the library's types, while keeping the
+// backend's own message: the CLI prints it, and an agent looks in it for the
+// instruction that unblocks the run.
+func TestReadsTypeStoreErrorsAtTheBoundary(t *testing.T) {
+	_, err := Wrap(&fakeClient{listErr: &gh.AuthError{Err: errors.New("HTTP 401: Bad credentials")}}).
+		Snapshot(context.Background(), SnapshotOptions{})
+	var auth *AuthError
+	if !errors.As(err, &auth) {
+		t.Fatalf("Snapshot error = %v, want tracker.AuthError", err)
+	}
+	if !strings.Contains(err.Error(), "gh auth login") {
+		t.Errorf("Snapshot error = %q, want the store's auth guidance preserved", err)
+	}
+
+	_, err = Wrap(&fakeClient{}).Get(context.Background(), 999)
+	var notFound *NotFoundError
+	if !errors.As(err, &notFound) || notFound.Issue != 999 {
+		t.Fatalf("Get error = %v, want tracker.NotFoundError for #999", err)
+	}
+	var storeNotFound *gh.NotFoundError
+	if !errors.As(err, &storeNotFound) {
+		t.Error("Get error lost the store's not-found cause")
+	}
+	if got, want := err.Error(), "issue #999 not found"; got != want {
+		t.Errorf("Get error = %q, want the store's message %q", got, want)
 	}
 }

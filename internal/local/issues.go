@@ -58,7 +58,7 @@ func (d *data) view(number int) (model.Issue, error) {
 		}
 		return i, nil
 	}
-	return model.Issue{}, fmt.Errorf("issue #%d not found", number)
+	return model.Issue{}, &gh.NotFoundError{Issue: number}
 }
 
 // SearchIssues matches issues containing every whitespace-separated term,

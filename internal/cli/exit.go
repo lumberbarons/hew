@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/tracker"
 )
 
 // ExitCode maps an error to the process exit code agent loops branch on: an
@@ -18,10 +19,11 @@ func ExitCode(err error) int {
 	}
 	var exitErr *ExitError
 	var authErr *gh.AuthError
+	var trackerAuth *tracker.AuthError
 	switch {
 	case errors.As(err, &exitErr):
 		return exitErr.Code
-	case errors.As(err, &authErr):
+	case errors.As(err, &authErr), errors.As(err, &trackerAuth):
 		return ExitAuth
 	}
 	return ExitGeneric

@@ -169,7 +169,7 @@ func (f *fakeClient) GetIssue(ctx context.Context, number int) (model.Issue, err
 	f.refreshRefs()
 	i := f.byNumber(number)
 	if i == nil {
-		return model.Issue{}, fmt.Errorf("issue #%d not found in o/r", number)
+		return model.Issue{}, &gh.NotFoundError{Issue: number, Repo: gh.Repo{Owner: "o", Name: "r"}}
 	}
 	out := *i
 	if f.onGetIssue != nil {

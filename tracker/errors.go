@@ -1,9 +1,12 @@
 package tracker
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/lumberbarons/hew/internal/gh"
 )
 
 // ClaimedError reports an existing claim. Assignees may be empty for a
@@ -47,10 +50,22 @@ func (e *AuthError) Error() string {
 }
 func (e *AuthError) Unwrap() error { return e.Err }
 
-// NotFoundError reports an issue absent from the tracker.
-type NotFoundError struct{ Issue int }
+// NotFoundError reports an issue absent from the tracker. Err carries the
+// store's own not-found error when the boundary translated one, so the
+// backend's message — which may name the repository — is what a caller prints.
+type NotFoundError struct {
+	Issue int
+	Err   error
+}
 
-func (e *NotFoundError) Error() string { return fmt.Sprintf("issue #%d not found", e.Issue) }
+func (e *NotFoundError) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return fmt.Sprintf("issue #%d not found", e.Issue)
+}
+
+func (e *NotFoundError) Unwrap() error { return e.Err }
 
 // ClosedError reports an operation refused on a closed target. Reason is
 // the backend's close reason, when available.
@@ -114,6 +129,21 @@ type InvalidInputError struct {
 
 func (e *InvalidInputError) Error() string {
 	return fmt.Sprintf("invalid %s: %s", e.Field, e.Reason)
+}
+
+// asReadError types a store failure at the tracker boundary: an absent issue
+// becomes NotFoundError, an authentication failure AuthError. Each keeps the
+// store's error as the cause, so the message and errors.Is retain what the
+// backend actually reported rather than a generic retelling.
+func asReadError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var notFound *gh.NotFoundError
+	if errors.As(err, &notFound) {
+		return &NotFoundError{Issue: notFound.Issue, Err: notFound}
+	}
+	return asAuthError(err)
 }
 
 func formatNumbers(numbers []int, separator string) string {
