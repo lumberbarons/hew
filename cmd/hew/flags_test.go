@@ -291,3 +291,34 @@ func TestBatchWritersReceiveTheCheckpointAndInputFiles(t *testing.T) {
 		}
 	}
 }
+
+// With no argument and no --file, migrate beads reads the project's own
+// .beads/issues.jsonl, found from any subdirectory. A corrupt checkpoint is
+// rejected only after that snapshot was read and parsed, so the error proves
+// the default path was resolved to a real file.
+func TestMigrateBeadsDefaultsToTheProjectSnapshot(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	project, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{".git", ".beads", filepath.Join("src", "pkg")} {
+		if err := os.MkdirAll(filepath.Join(project, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bead := `{"_type":"issue","id":"sc-1","title":"Open","status":"open","priority":2,"issue_type":"task","created_at":"2026-05-01T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(project, ".beads", "issues.jsonl"), []byte(bead+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := filepath.Join(t.TempDir(), "cp.json")
+	if err := os.WriteFile(checkpoint, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(filepath.Join(project, "src", "pkg"))
+
+	_, err = capture(t, "migrate", "beads", "--dry-run", "--checkpoint", checkpoint, "--repo", "octo/hello")
+	if err == nil || !strings.Contains(err.Error(), "not a valid resume-state file") || !strings.Contains(err.Error(), checkpoint) {
+		t.Fatalf("err = %v; want the corrupt checkpoint rejected, which needs the default snapshot to have been read", err)
+	}
+}
