@@ -51,7 +51,9 @@ report only. State the chosen mode and reason in one short sentence before revie
 For automatic fixing, retain the script's `root`, `branch`, `head`, `base` and `base_commit`.
 Immediately before repair, rerun it: it must still allow automatic fixing and those fields
 must still match. Otherwise leave the findings unresolved and explain the changed state.
-Do not make the tree appear clean by stashing, deleting, committing or ignoring user files.
+Do not make the tree appear clean by stashing, deleting, committing or ignoring user files;
+in automatic mode, the only commit this policy authorizes is the one carrying the verified
+repairs.
 
 ## One bounded repair pass
 
@@ -78,16 +80,27 @@ findings, followed by relevant verification:
   finding unresolved.
   Undo only that attempted repair's edits, preserving user work and earlier verified repairs,
   and report the finding unresolved with the failure or limitation.
-- Do not start a repeated review/fix loop. Do not commit, push, publish PR comments or file
-  issues unless the caller explicitly requested those actions. A separate workflow may do
-  those steps after this skill returns.
+- In automatic mode, commit the verified repairs on the reviewed branch once the repair pass
+  and verification are complete, unless the caller or the repository's instructions forbid
+  commits. Commit once, after all verified repairs, staging only the paths the repair edited
+  or deleted. Follow the repository's commit-message and signing conventions and describe the
+  repaired findings; do not add an issue-closing keyword unless the caller asked for one. If
+  Git refuses the commit — permissions, a missing identity, a failing hook — do not bypass it
+  with `--no-verify` or rewrite history: leave the verified repairs in the working tree and
+  report them as uncommitted with the reason. If the branch or head no longer matches the
+  snapshot taken before repair, do not commit. An explicit fix request alone does not
+  authorize a commit; commit there only when the caller also asked for one.
+- Do not start a repeated review/fix loop. Do not push, publish PR comments or file issues
+  unless the caller explicitly requested those actions. A separate workflow may do those
+  steps after this skill returns.
 
 ## Report unresolved work separately
 
 In fix mode, the normal H3 findings and their count describe only unresolved findings, ready
 for `raise-issues`. Give a separate brief repair summary and verification results; do not put
 repaired items into the unresolved findings list. Say when every finding was repaired rather
-than implying the initial review found nothing. Do not call a still-broken codebase sound.
+than implying the initial review found nothing. Name the commit that carries the verified
+repairs, or say they are uncommitted and why. Do not call a still-broken codebase sound.
 
 When `--json <path>` was requested, write the final file after repair. Preserve the schema in
 `FINDINGS.md`: `findings` holds unresolved items, `repaired` holds the original repaired findings

@@ -108,10 +108,11 @@ def dry_run(scope, repo, workers, resume):
         prs = pr_state.plan(scope, repo)
     print(f"Run: work-epic {' '.join('#%d' % n for n in scope)}  (dry run: nothing created)"
           + ("  [local tracker]" if local else ""))
+    print("  agents: " + pump.describe_chains({r: pump.agent_chain(r) for r in pump.AGENTS}))
     slots = min(workers, plan["spawnBudget"])
     print(f"Would start up to {slots} of {len(plan['eligible'])} eligible ({workers} workers assumed free):")
     for e in plan["eligible"][:slots]:
-        print(f"  we-{e['number']} · {pump.IMPLEMENTER}  #{e['number']} {e['title']}"
+        print(f"  we-{e['number']} · {' -> '.join(pump.agent_chain('we'))}  #{e['number']} {e['title']}"
               f"{'  [large]' if e['large'] else ''}")
     for s in plan["skipped"]:
         print(f"  skipped #{s['number']}: {s['reason']} ({s['detail']})")

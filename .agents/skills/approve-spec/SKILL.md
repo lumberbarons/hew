@@ -1,6 +1,6 @@
 ---
 name: approve-spec
-description: Review a drafted feature spec on its substance — is it worth doing now, is the scope honest, are the stories real, could a stranger falsify the done-when list, does it contradict a recorded decision — then either move it to Accepted or send it back with blocking objections. Use whenever a spec needs approving, accepting, reviewing or sanity-checking before the work starts — "approve this spec", "review spec 009", "is this spec any good", "can we build from this", "sign this off". Reviews specs, not code.
+description: Review a drafted feature spec in a fresh subagent on its substance — is it worth doing now, is the scope honest, are the stories real, could a stranger falsify the done-when list, does it contradict a recorded decision — then either move it to Accepted or send it back with blocking objections. Use whenever a spec needs approving, accepting, reviewing or sanity-checking before the work starts — "approve this spec", "review spec 009", "is this spec any good", "can we build from this", "sign this off". Reviews specs, not code.
 argument-hint: The spec to approve — path or number
 ---
 
@@ -15,7 +15,9 @@ Approving means moving the spec from `Draft` to `Accepted`, which is a claim
 that the feature is worth building as written. You can make that claim because
 a person invoked you deliberately to make it. Two things follow: you must be
 able to say no, and you must never run as an automatic step after drafting. An
-author who approves their own work has not been reviewed.
+author who approves their own work has not been reviewed. The calling agent
+handles validation and status changes; a fresh subagent does the substance
+review without the conversation that drafted or refined the spec.
 
 ## The script
 
@@ -32,7 +34,7 @@ Take the path or number you were given. If you were given neither, list what is
 under `specs/` with each one's current status and ask which — do not guess, and
 do not reach for the newest.
 
-Read the whole spec before forming any opinion.
+Resolve the spec to an absolute path. The reviewer will read the whole file.
 
 ## 2. Gate on shape
 
@@ -51,10 +53,31 @@ approve:
 uv run --no-project "$LIGHTSPEC" status specs/NNN-slug/spec.md
 ```
 
-An `Accepted` spec has already been through this. Say so and stop, rather than
-re-approving something to look busy.
+If the status is anything other than `Draft`, report it and stop.
 
-## 3. Ground yourself
+## Delegate the review
+
+After the gates pass, start one read-only reviewer in a fresh context with no
+inherited conversation. Give it only the absolute spec path, repository root,
+and this skill's path with instructions to perform steps 3–5 and return the
+report described in step 7. It is the reviewer, not another invocation of the
+calling workflow: it must not delegate again or run steps 1–2 or 6.
+
+Do not pass the drafting/refinement conversation, a parent-written summary,
+suggested concerns, or an expected verdict. The reviewer discovers relevant
+decisions, research, and code itself from the repository. Use the harness's
+controls to disable conversation inheritance; spawning a subagent alone does
+not establish isolation. If the harness cannot provide that context, stop and
+report that an isolated review is required. Do not fall back to reviewing in
+the calling session.
+
+Retain the spec's exact contents at dispatch so you can check that the returned
+verdict still applies. The reviewer reads files and searches only: it must not
+edit the spec, change its status, or execute project code.
+
+## 3. Ground yourself — reviewer
+
+Read the whole spec before forming any opinion.
 
 You cannot judge a spec against nothing. Two things to gather first:
 
@@ -66,7 +89,7 @@ You cannot judge a spec against nothing. Two things to gather first:
   plausible and whether something obvious is missing. A few searches. You are
   testing the spec's grip on reality, not auditing the codebase.
 
-## 4. The questions
+## 4. The questions — reviewer
 
 One per section, and they are the whole review. Each asks whether the section is
 doing its job — not whether it could be worded better.
@@ -87,7 +110,7 @@ review that always finds something is a review nothing can ever pass. And
 **quote the line you are objecting to**, so the author can disagree with
 something specific rather than with your impression.
 
-## 5. Reach a verdict
+## 5. Reach a verdict — reviewer
 
 Exactly one of four. The set is closed for the same reason the status vocabulary
 is: an approver allowed to hedge will.
@@ -103,7 +126,21 @@ is: an approver allowed to hedge will.
 
 The last two leave the spec at `Draft`.
 
-## 6. Record it
+Return the verdict, findings quoting the lines objected to, any assumptions on
+record, and what you checked it against: the ADRs, research, and code read. If
+you could not complete the review, report that explicitly instead of choosing
+an approving verdict.
+
+## 6. Record it — calling agent
+
+Wait for the reviewer to finish. A failed or incomplete review is not an
+approval. Preserve its verdict and objections; do not substitute your own
+judgment or repair the spec to make it pass.
+
+Before recording an approval, compare the spec's current contents with what
+you dispatched and check that its status is still `Draft`. If either changed,
+stop without recording approval: the returned verdict does not approve a
+different revision.
 
 Only for the two approving verdicts:
 
@@ -119,12 +156,13 @@ makes you the author again, and then nobody has reviewed the result. If the user
 wants those changes made, that is a separate ask, and re-approving is a fresh
 invocation of this skill.
 
-## 7. Report
+## 7. Report — calling agent
 
-Lead with the verdict. Then the findings, each quoting its line, ordered by how
-much they change what gets built. Then what you checked it against — which ADRs
-you read, what code you looked at — so the user can judge whether your grounding
-was thin. If you approved, say the status moved.
+Relay the reviewer's report. Lead with the verdict. Then the findings, each
+quoting its line, ordered by how much they change what gets built. Then what
+the reviewer checked it against — which ADRs and research it read, what code
+it looked at — so the user can judge whether its grounding was thin. If you
+recorded approval, say the status moved.
 
 ## Anti-patterns
 
@@ -136,3 +174,6 @@ was thin. If you approved, say the status moved.
   author flagged it, which is the system working
 - Editing the spec, cutting a branch, filing issues, or starting the work
 - Running as a step after draft-spec rather than because a person asked
+- Reviewing in the drafting conversation, or forwarding that conversation to
+  the reviewer through inheritance or a summary
+- Overriding a reviewer verdict or treating a failed review as approval
