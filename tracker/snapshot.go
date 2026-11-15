@@ -2,6 +2,7 @@ package tracker
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/lumberbarons/hew/internal/gh"
@@ -39,34 +40,80 @@ type Warning struct {
 	Fetched int
 }
 
-// Snapshot is one fetch of the tracker's issues, with the read-side queries a
-// caller needs answered from it. The queries are pure: they filter and sort
-// what the fetch returned, never call the backend again.
-type Snapshot struct {
-	issues   []model.Issue
-	warnings []Warning
-}
+// Reader answers read queries over an already-open store. It is the read half
+// of a Tracker, kept separate so no Tracker exists without the backend and
+// actor its write operations need: hew's own CLI resolves the backend and
+// opens the store once for every command, then wraps that store rather than
+// opening a second one. A consumer outside this module cannot name
+// gh.IssueStore and uses the read methods on the Tracker Open returns.
+type Reader struct{ store gh.IssueStore }
+
+// Wrap makes a Reader from an already-open store: the seam hew's own CLI uses
+// for reads. External callers use Open.
+func Wrap(store gh.IssueStore) *Reader { return &Reader{store: store} }
 
 // Snapshot fetches the tracker's issues in the requested states, once. The
 // zero SnapshotOptions fetches open issues only. Warnings report dependency
 // cycles and capped blocker or sub-issue connections — the conditions that
 // make a query's answer incomplete rather than merely empty.
+func (r *Reader) Snapshot(ctx context.Context, opts SnapshotOptions) (*Snapshot, error) {
+	return snapshot(ctx, r.store, opts)
+}
+
+// Get fetches one issue in any state, with its body and recent comments.
+func (r *Reader) Get(ctx context.Context, number int) (Issue, error) {
+	return get(ctx, r.store, number)
+}
+
+// Snapshot fetches the tracker's issues in the requested states, once.
 func (t *Tracker) Snapshot(ctx context.Context, opts SnapshotOptions) (*Snapshot, error) {
-	states := []gh.IssueState{gh.StateOpen}
-	if opts.IncludeClosed {
-		states = append(states, gh.StateClosed)
-	}
-	issues, err := t.store.ListIssues(ctx, states)
+	return snapshot(ctx, t.store, opts)
+}
+
+// Get fetches one issue in any state, with its body and recent comments.
+func (t *Tracker) Get(ctx context.Context, number int) (Issue, error) {
+	return get(ctx, t.store, number)
+}
+
+func snapshot(ctx context.Context, store gh.IssueStore, opts SnapshotOptions) (*Snapshot, error) {
+	states, fetch, err := resolveStates(opts.States)
 	if err != nil {
 		return nil, err
 	}
-	return newSnapshot(issues), nil
+	issues, err := store.ListIssues(ctx, fetch)
+	if err != nil {
+		return nil, err
+	}
+	return newSnapshot(issues, states), nil
+}
+
+// resolveStates turns the caller's states into the snapshot's record of what
+// it covers and the backend's fetch filter. The zero value means open only.
+func resolveStates(states []State) ([]State, []gh.IssueState, error) {
+	if len(states) == 0 {
+		states = []State{StateOpen}
+	}
+	record := make([]State, 0, len(states))
+	fetch := make([]gh.IssueState, 0, len(states))
+	for _, s := range states {
+		switch s {
+		case StateOpen:
+			record = append(record, StateOpen)
+			fetch = append(fetch, gh.StateOpen)
+		case StateClosed:
+			record = append(record, StateClosed)
+			fetch = append(fetch, gh.StateClosed)
+		default:
+			return nil, nil, &InvalidInputError{Field: "states", Reason: fmt.Sprintf("unknown state %q", s)}
+		}
+	}
+	return record, fetch, nil
 }
 
 // newSnapshot indexes a fetched issue set and keeps the warnings that bear on
 // read queries. Contradiction warnings (multiple labels, an in-progress epic)
 // are prime's business, not a snapshot's.
-func newSnapshot(issues []model.Issue) *Snapshot {
+func newSnapshot(issues []model.Issue, states []State) *Snapshot {
 	var warnings []Warning
 	for _, w := range model.Warnings(issues) {
 		switch w.Kind {
@@ -78,21 +125,41 @@ func newSnapshot(issues []model.Issue) *Snapshot {
 			warnings = append(warnings, Warning{Kind: WarnBlockersCapped, Issue: w.Issue, Total: w.Total, Fetched: w.Fetched})
 		}
 	}
-	return &Snapshot{issues: issues, warnings: warnings}
+	return &Snapshot{issues: issues, warnings: warnings, states: states}
 }
 
-// Get fetches one issue in any state, with its body and recent comments.
-func (t *Tracker) Get(ctx context.Context, number int) (Issue, error) {
-	issue, err := t.store.GetIssue(ctx, number)
+func get(ctx context.Context, store gh.IssueStore, number int) (Issue, error) {
+	issue, err := store.GetIssue(ctx, number)
 	if err != nil {
 		return Issue{}, err
 	}
 	return issueFromModel(issue, true), nil
 }
 
+// Snapshot is one fetch of the tracker's issues, with the read-side queries a
+// caller needs answered from it. The queries are pure: they filter and sort
+// what the fetch returned, never call the backend again, and every answer is
+// scoped to the states the fetch covered.
+type Snapshot struct {
+	issues   []model.Issue
+	warnings []Warning
+	states   []State
+}
+
+// States returns the states this snapshot fetched. A query can only answer
+// about issues in them, so Get returning false can mean the issue is closed
+// and this snapshot was open-only rather than that it does not exist.
+func (s *Snapshot) States() []State { return slices.Clone(s.states) }
+
 // Warnings returns the snapshot's completeness notices, in deterministic
 // order: cycles first, then capped connections in issue order.
-func (s *Snapshot) Warnings() []Warning { return slices.Clone(s.warnings) }
+func (s *Snapshot) Warnings() []Warning {
+	out := slices.Clone(s.warnings)
+	for n := range out {
+		out[n].Cycle = slices.Clone(out[n].Cycle)
+	}
+	return out
+}
 
 // Issues returns every fetched issue in list order — ready work first, then
 // claimed, blocked, epics and closed — with body. Callers that want one
@@ -103,8 +170,9 @@ func (s *Snapshot) Issues() []Issue {
 	return issuesFromModel(issues)
 }
 
-// Get returns the issue from the snapshot, if the fetch included it. It is a
-// lookup, not a fetch: use Tracker.Get for an issue outside the snapshot.
+// Get returns the issue from the snapshot, if the fetched states included it.
+// It is a lookup, not a fetch: use Reader.Get or Tracker.Get for an issue
+// outside the snapshot.
 func (s *Snapshot) Get(number int) (Issue, bool) {
 	for _, i := range s.issues {
 		if i.Number == number {
@@ -162,7 +230,7 @@ func (s *Snapshot) Children(epic int) []Issue {
 
 // issuesFromModel converts a query result to the library's flat shape. A
 // snapshot read carries bodies because the fetch already has them; comments
-// are only present on Tracker.Get.
+// are only present on Reader.Get and Tracker.Get.
 func issuesFromModel(issues []model.Issue) []Issue {
 	if issues == nil {
 		return nil

@@ -2,6 +2,7 @@ package tracker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -140,12 +141,15 @@ func TestSnapshotIncludesClosedOnRequest(t *testing.T) {
 	closed.StateReason = "completed"
 	store := &fakeClient{issues: []model.Issue{open, closed}}
 
-	snapshot, err := Wrap(store).Snapshot(context.Background(), SnapshotOptions{IncludeClosed: true})
+	snapshot, err := Wrap(store).Snapshot(context.Background(), SnapshotOptions{States: []State{StateOpen, StateClosed}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, want := numbers(snapshot.Issues()), []int{1, 2}; !slices.Equal(got, want) {
 		t.Errorf("Issues = %v, want %v", got, want)
+	}
+	if got, want := snapshot.States(), []State{StateOpen, StateClosed}; !slices.Equal(got, want) {
+		t.Errorf("States = %v, want %v", got, want)
 	}
 	got, ok := snapshot.Get(2)
 	if !ok {
@@ -238,7 +242,7 @@ func TestSnapshotAgainstLocalStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	snapshot, err := Wrap(store).Snapshot(ctx, SnapshotOptions{})
+	snapshot, err := (&Tracker{store: store}).Snapshot(ctx, SnapshotOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +265,7 @@ func TestSnapshotAgainstLocalStore(t *testing.T) {
 		t.Errorf("Warnings = %+v, want none", warnings)
 	}
 
-	got, err := Wrap(store).Get(ctx, blocker.Number)
+	got, err := (&Tracker{store: store}).Get(ctx, blocker.Number)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,5 +274,77 @@ func TestSnapshotAgainstLocalStore(t *testing.T) {
 	}
 	if len(got.Comments) != 1 || got.Comments[0].Body != "a comment" {
 		t.Errorf("Comments = %+v", got.Comments)
+	}
+}
+
+func TestSnapshotStatesScopeTheRead(t *testing.T) {
+	open := fixture(1, "Open", "P2", "bug")
+	closed := fixture(2, "Closed", "P2", "bug")
+	closed.State = "CLOSED"
+	store := &fakeClient{issues: []model.Issue{open, closed}}
+
+	snapshot, err := Wrap(store).Snapshot(context.Background(), SnapshotOptions{States: []State{StateClosed}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := numbers(snapshot.Issues()), []int{2}; !slices.Equal(got, want) {
+		t.Errorf("Issues = %v, want %v", got, want)
+	}
+	if got, want := snapshot.States(), []State{StateClosed}; !slices.Equal(got, want) {
+		t.Errorf("States = %v, want %v", got, want)
+	}
+	if _, ok := snapshot.Get(1); ok {
+		t.Error("Get(1) found an open issue in a closed-only snapshot")
+	}
+
+	if _, err := Wrap(store).Snapshot(context.Background(), SnapshotOptions{States: []State{"bogus"}}); err == nil {
+		t.Error("expected an invalid-input error for an unknown state")
+	} else {
+		var invalid *InvalidInputError
+		if !errors.As(err, &invalid) || invalid.Field != "states" {
+			t.Errorf("error = %v, want InvalidInputError for states", err)
+		}
+	}
+}
+
+// Every query result is a copy: mutating what a caller is given must not
+// change what the next query answers.
+func TestSnapshotResultsDoNotAliasStoredState(t *testing.T) {
+	issue := fixture(1, "Labeled", "P2", "bug", "area")
+	issue.Assignees = []string{"alice"}
+	blocker := fixture(2, "Blocker", "P2", "bug")
+	blocker.BlockedBy = []model.Ref{{Number: 1, State: "OPEN"}}
+	cycleA := fixture(3, "Cycle A", "P2", "bug")
+	cycleA.BlockedBy = []model.Ref{{Number: 4, State: "OPEN"}}
+	cycleB := fixture(4, "Cycle B", "P2", "bug")
+	cycleB.BlockedBy = []model.Ref{{Number: 3, State: "OPEN"}}
+	store := &fakeClient{issues: []model.Issue{issue, blocker, cycleA, cycleB}}
+
+	snapshot, err := Wrap(store).Snapshot(context.Background(), SnapshotOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := snapshot.Claimed()
+	if len(got) != 1 {
+		t.Fatalf("Claimed = %v", numbers(got))
+	}
+	got[0].Labels()[0] = "P0"
+	got[0].Assignees[0] = "mallory"
+
+	again := snapshot.Claimed()
+	if again[0].Labels()[0] != "P2" {
+		t.Errorf("labels changed through a query result: %v", again[0].Labels())
+	}
+	if again[0].Assignees[0] != "alice" {
+		t.Errorf("assignees changed through a query result: %v", again[0].Assignees)
+	}
+
+	warnings := snapshot.Warnings()
+	if len(warnings) != 1 || len(warnings[0].Cycle) != 3 {
+		t.Fatalf("Warnings = %+v", warnings)
+	}
+	warnings[0].Cycle[0] = 99
+	if cycle := snapshot.Warnings()[0].Cycle; cycle[0] != 3 {
+		t.Errorf("warning cycle changed through a query result: %v", cycle)
 	}
 }

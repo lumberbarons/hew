@@ -2,10 +2,21 @@ package tracker
 
 import "time"
 
-// SnapshotOptions selects which issues to fetch. The zero value fetches
-// open issues only.
+// State names an issue state a Snapshot can fetch.
+type State string
+
+const (
+	// StateOpen is open issues.
+	StateOpen State = "open"
+	// StateClosed is closed issues.
+	StateClosed State = "closed"
+)
+
+// SnapshotOptions selects which issues to fetch. The zero value fetches open
+// issues only. An unknown state is an invalid-input error.
 type SnapshotOptions struct {
-	IncludeClosed bool
+	// States selects the issue states to fetch. Empty means open only.
+	States []State
 }
 
 // StartOptions configures a claim. The zero value preserves the existing

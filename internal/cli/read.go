@@ -136,11 +136,8 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 	if err != nil {
 		return err
 	}
-	closedOnly := len(states) == 1 && states[0] == gh.StateClosed
-	// Snapshot has two modes — open, or open and closed. A closed-only list
-	// fetches both and drops the open half below.
 	snapshot, err := tracker.Wrap(a.Client).Snapshot(ctx, tracker.SnapshotOptions{
-		IncludeClosed: slices.Contains(states, gh.StateClosed),
+		States: trackerStates(states),
 	})
 	if err != nil {
 		return err
@@ -148,9 +145,6 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 	// Issues arrives in list order, and filtering preserves it.
 	out := slices.DeleteFunc(issuesFromTracker(snapshot.Issues()), func(i model.Issue) bool {
 		if i.Untriaged() {
-			return true
-		}
-		if closedOnly && i.IsOpen() {
 			return true
 		}
 		if opts.Label != "" && !i.HasLabel(opts.Label) {
@@ -174,7 +168,7 @@ func (a *App) Show(ctx context.Context, number int) error {
 	subject := issueFromTracker(issue)
 	var children []model.Issue
 	if subject.IsEpic() {
-		snapshot, err := t.Snapshot(ctx, tracker.SnapshotOptions{IncludeClosed: true})
+		snapshot, err := t.Snapshot(ctx, tracker.SnapshotOptions{States: everyTrackerState()})
 		if err != nil {
 			return err
 		}
@@ -326,7 +320,7 @@ func (a *App) EpicStatus(ctx context.Context, number int) error {
 		return a.emitList(issuesFromTracker(snapshot.Epics()), "no epics", render.EpicList)
 	}
 	// One fetch of both states resolves child titles without N+1 queries.
-	snapshot, err := t.Snapshot(ctx, tracker.SnapshotOptions{IncludeClosed: true})
+	snapshot, err := t.Snapshot(ctx, tracker.SnapshotOptions{States: everyTrackerState()})
 	if err != nil {
 		return err
 	}
@@ -359,11 +353,32 @@ func (a *App) warnChildrenBlockersCapped(children []model.Issue, warnings []mode
 	}
 }
 
+// trackerStates maps the CLI's resolved state filter onto the library's
+// states, so `list` asks the backend for exactly what it prints.
+func trackerStates(states []gh.IssueState) []tracker.State {
+	out := make([]tracker.State, len(states))
+	for n, s := range states {
+		switch s {
+		case gh.StateOpen:
+			out[n] = tracker.StateOpen
+		case gh.StateClosed:
+			out[n] = tracker.StateClosed
+		}
+	}
+	return out
+}
+
+// everyTrackerState is both states, for a read that must see closed issues
+// too (show on an epic, epic status).
+func everyTrackerState() []tracker.State {
+	return []tracker.State{tracker.StateOpen, tracker.StateClosed}
+}
+
 // issueFromTracker converts the library's flat issue back to the domain shape
 // the text and JSON renderers take. It is total: tracker keeps the raw labels,
-// reference states, parent title and close reason the flat schema hides, so
-// the rendered output is byte-for-byte what it was before the read went
-// through tracker.
+// reference and parent states, parent title and close reason the flat schema
+// hides, so the rendered output is byte-for-byte what it was before the read
+// went through tracker.
 func issueFromTracker(i tracker.Issue) model.Issue {
 	out := model.Issue{
 		Number:             i.Number,
@@ -381,7 +396,9 @@ func issueFromTracker(i tracker.Issue) model.Issue {
 		BlockedByTotal:     i.BlockedByTotal,
 		CommentsTotal:      i.CommentsTotal,
 	}
-	if i.Parent != nil {
+	if parent, ok := i.ParentRef(); ok {
+		out.Parent = &model.Ref{Number: parent.Number, State: parent.State}
+	} else if i.Parent != nil {
 		out.Parent = &model.Ref{Number: *i.Parent}
 	}
 	if i.Body != nil {
@@ -394,6 +411,9 @@ func issueFromTracker(i tracker.Issue) model.Issue {
 }
 
 func issuesFromTracker(issues []tracker.Issue) []model.Issue {
+	if issues == nil {
+		return nil
+	}
 	out := make([]model.Issue, len(issues))
 	for n, i := range issues {
 		out[n] = issueFromTracker(i)
@@ -402,6 +422,9 @@ func issuesFromTracker(issues []tracker.Issue) []model.Issue {
 }
 
 func refsFromTracker(refs []tracker.Ref) []model.Ref {
+	if refs == nil {
+		return nil
+	}
 	out := make([]model.Ref, len(refs))
 	for n, r := range refs {
 		out[n] = model.Ref{Number: r.Number, State: r.State}
