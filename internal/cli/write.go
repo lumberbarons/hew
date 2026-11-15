@@ -354,35 +354,32 @@ func (a *App) backend() tracker.Backend {
 	return tracker.BackendGitHub
 }
 
-// Release gives up a claim without assigning it to another owner.
+// Release gives up a claim without assigning it to another owner. The
+// decision lives in tracker.Release; what stays here is the CLI's wording for
+// its refusals.
 func (a *App) Release(ctx context.Context, number int, force bool) error {
-	issue, err := a.Client.GetIssue(ctx, number)
-	if err != nil {
-		return err
-	}
-	if !issue.Claimed() {
-		return genericErr("#%d is not claimed", number)
-	}
-	var viewer string
-	if !force {
-		viewer, err = a.Client.Viewer(ctx)
-		if err != nil {
-			return err
-		}
-		if len(issue.Assignees) != 1 || issue.Assignees[0] != viewer {
-			return genericErr("#%d is not claimed solely by you; pass --force to release it", number)
-		}
-	}
-	if releaser, ok := a.Client.(gh.ClaimReleaser); ok {
-		// Recheck ownership and clear both halves under one lock. A concurrent
-		// forced start must not have its new claim cleared by this stale read.
-		if err := releaser.ReleaseIssueClaim(ctx, number, viewer, force); err != nil {
-			return err
-		}
-	} else if _, err := a.releaseClaim(ctx, issue); err != nil {
-		return fmt.Errorf("releasing #%d failed (its claim may be partially cleared; inspect with hew show %d before retrying): %w", number, number, err)
+	if err := tracker.WrapAs(a.Client, a.backend(), "").Release(ctx, number, tracker.ReleaseOptions{Force: force}); err != nil {
+		return a.releaseError(number, err)
 	}
 	return a.reportMutation(ctx, number, "released #%d\n", number)
+}
+
+// releaseError maps tracker's release refusals onto the command's text. Every
+// refusal stays a generic failure; a partial release keeps its cause in the
+// chain and names the remedy.
+func (a *App) releaseError(number int, err error) error {
+	var notClaimed *tracker.NotClaimedError
+	var notOwner *tracker.NotOwnerError
+	var partial *tracker.PartialReleaseError
+	switch {
+	case errors.As(err, &notClaimed):
+		return genericErr("#%d is not claimed", number)
+	case errors.As(err, &notOwner):
+		return genericErr("#%d is not claimed solely by you; pass --force to release it", number)
+	case errors.As(err, &partial):
+		return fmt.Errorf("releasing #%d failed (its claim may be partially cleared; inspect with hew show %d before retrying): %w", number, number, partial.Err)
+	}
+	return err
 }
 
 // SetOpts are the retriage/edit inputs; zero values mean "leave alone".
@@ -624,82 +621,60 @@ func (a *App) swapType(ctx context.Context, issue model.Issue, typ string) error
 // --duplicate-of. Closing via PR is the norm; this is for wontfix/duplicate.
 // An epic with open sub-issues is refused without force: closing one strands
 // the children under a closed parent, and the guard names the flag rather
-// than trusting a warning to be read.
+// than trusting a warning to be read. The decisions live in tracker.Close;
+// what stays here is the CLI's wording and exit codes for its refusals.
 func (a *App) Close(ctx context.Context, number int, reason string, completed bool, duplicateOf int, force bool) error {
-	if completed && duplicateOf > 0 {
-		return usageErr("--completed and --duplicate-of are mutually exclusive")
-	}
-	if duplicateOf == number {
-		return usageErr("--duplicate-of #%d is the issue being closed", number)
-	}
-	stateReason := gh.CloseNotPlanned
-	switch {
-	case completed:
-		stateReason = gh.CloseCompleted
-	case duplicateOf > 0:
-		stateReason = gh.CloseDuplicate
-		if reason == "" {
-			reason = fmt.Sprintf("Duplicate of #%d", duplicateOf)
-		}
-	}
-	if reason == "" {
-		return usageErr("--reason is required")
-	}
-	issue, err := a.Client.GetIssue(ctx, number)
+	result, err := tracker.WrapAs(a.Client, a.backend(), "").Close(ctx, number, tracker.CloseOptions{
+		Reason:      reason,
+		Completed:   completed,
+		DuplicateOf: duplicateOf,
+		Force:       force,
+	})
 	if err != nil {
-		return err
+		return closeError(number, duplicateOf, err)
 	}
-	if !issue.IsOpen() {
-		// No override here: re-closing a closed issue has no effect to
-		// authorize. Naming the existing state is the whole remedy — it says
-		// whether the issue was completed or dropped, which is what decides
-		// if this call was a mistake.
-		return genericErr("#%d is already closed%s", number, closeState(issue))
-	}
-	// Before the reason comment, so a refusal leaves the epic untouched.
-	if err := a.guardOpenChildren(issue, force); err != nil {
-		return err
-	}
-	if duplicateOf > 0 {
-		// Before the comment, so a typo leaves the issue open and untouched.
-		if _, err := a.requireIssue(ctx, duplicateOf, "--duplicate-of"); err != nil {
-			return err
-		}
-		// A custom reason is free text; the original must stay findable from
-		// the closed duplicate, which stores it nowhere but the comment.
-		if !mentionsIssue(reason, duplicateOf) {
-			reason = strings.TrimRight(reason, " \t\r\n") + fmt.Sprintf("\n\nDuplicate of #%d", duplicateOf)
-		}
-	}
-	if err := a.Client.Comment(ctx, number, reason); err != nil {
-		return err
-	}
-	if err := a.Client.CloseIssue(ctx, number, stateReason); err != nil {
-		// The reason comment already posted; flag it so a retry isn't read as
-		// a clean redo — re-running would post the comment a second time.
-		return fmt.Errorf("posted the reason comment on #%d but closing it failed (a retry will comment again): %w", number, err)
-	}
-	return a.reportMutation(ctx, number, "closed #%d (%s)\n", number, formatStateReason(string(stateReason)))
+	return a.reportMutation(ctx, number, "closed #%d (%s)\n", number, formatStateReason(result.StateReason))
 }
 
-// guardOpenChildren refuses closing an epic that still has open sub-issues:
-// they would be stranded under a closed parent, and an epic's progress rollup
-// would then read as done while its work is not. The count is the server-side
-// summary (Total minus Completed), so a capped sub-issue connection cannot
-// hide a child from the guard.
-func (a *App) guardOpenChildren(issue model.Issue, force bool) error {
-	if force || !issue.IsEpic() {
-		return nil
+// closeError maps tracker's close refusals onto the command's exit codes and
+// text: the option mistakes are usage errors, the rest generic failures. A
+// duplicate target that does not exist is named with its flag, as it was when
+// the command did the lookup itself.
+func closeError(number, duplicateOf int, err error) error {
+	var invalid *tracker.InvalidInputError
+	var closed *tracker.ClosedError
+	var children *tracker.OpenChildrenError
+	var notFound *tracker.NotFoundError
+	var partial *tracker.PartialCloseError
+	switch {
+	case errors.As(err, &invalid):
+		switch invalid.Field {
+		case "completed":
+			return usageErr("--completed and --duplicate-of are mutually exclusive")
+		case "duplicateOf":
+			return usageErr("--duplicate-of #%d is the issue being closed", number)
+		case "reason":
+			return usageErr("--reason is required")
+		}
+	case errors.As(err, &closed):
+		// Naming the existing state is the whole remedy: it says whether the
+		// issue was completed or dropped, which decides if this call was a
+		// mistake.
+		return genericErr("#%d is already closed%s", closed.Issue, closedState(closed.Reason))
+	case errors.As(err, &children):
+		unit := "sub-issues"
+		if children.Open == 1 {
+			unit = "sub-issue"
+		}
+		return genericErr("#%d is an epic with %d open %s; pass --force to close it anyway", children.Issue, children.Open, unit)
+	case errors.As(err, &notFound) && duplicateOf > 0 && notFound.Issue == duplicateOf:
+		return fmt.Errorf("--duplicate-of: %w", err)
+	case errors.As(err, &partial):
+		// The reason comment already posted; flag it so a retry isn't read as
+		// a clean redo — re-running would post the comment a second time.
+		return fmt.Errorf("posted the reason comment on #%d but closing it failed (a retry will comment again): %w", number, partial.Err)
 	}
-	open := issue.SubIssuesTotal - issue.SubIssuesCompleted
-	if open <= 0 {
-		return nil
-	}
-	unit := "sub-issues"
-	if open == 1 {
-		unit = "sub-issue"
-	}
-	return genericErr("#%d is an epic with %d open %s; pass --force to close it anyway", issue.Number, open, unit)
+	return err
 }
 
 // requireIssue resolves an issue number the caller names from another issue's
@@ -746,32 +721,6 @@ func uniqueInts(numbers []int) []int {
 		}
 	}
 	return out
-}
-
-// mentionsIssue reports whether text already names #number as a reference of
-// this repository: not a longer number that merely starts with it, and not
-// the tail of another repository's owner/repo#number.
-func mentionsIssue(text string, number int) bool {
-	ref := fmt.Sprintf("#%d", number)
-	for from := 0; ; {
-		i := strings.Index(text[from:], ref)
-		if i < 0 {
-			return false
-		}
-		start, end := from+i, from+i+len(ref)
-		from = end
-		if start > 0 && (text[start-1] == '/' || isWordByte(text[start-1])) {
-			continue
-		}
-		if end < len(text) && isWordByte(text[end]) {
-			continue
-		}
-		return true
-	}
-}
-
-func isWordByte(b byte) bool {
-	return b == '_' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }
 
 // Reopen is close's inverse: comment the reason, reopen the issue. Closing
