@@ -486,6 +486,60 @@ forge. Untriaged content is emitted by exactly one list-shaped command,
 asks; the command boundary is what a deny list enforces (see above). The
 primer still reports how much is waiting.
 
+## Use as a library
+
+A Go program can drive a tracker in-process instead of shelling out to the
+binary: `github.com/lumberbarons/hew/tracker`
+([docs](https://pkg.go.dev/github.com/lumberbarons/hew/tracker)) takes the
+worktree and the claim identity as arguments — never the process's working
+directory or environment — and returns typed results and typed errors, not exit
+codes.
+
+```go
+t, err := tracker.Open(ctx, tracker.Config{Worktree: worktree})
+if err != nil {
+	return err // *tracker.AuthError, *tracker.InvalidInputError, ...
+}
+snap, err := t.Snapshot(ctx, tracker.SnapshotOptions{}) // open issues, one fetch
+if err != nil {
+	return err
+}
+for _, issue := range snap.Ready() {
+	fmt.Println(issue.Number, issue.Title)
+}
+
+// Dependency writes are cycle-checked client-side, exactly as `hew block` is.
+_, err = t.Block(ctx, 42, []int{41}, tracker.BlockOptions{})
+var cycle *tracker.CycleError
+if errors.As(err, &cycle) {
+	// cycle.Cycle is the ordered path, e.g. []int{42, 41, 42}.
+}
+
+// A local tracker carries one claimant per worker; GitHub has only the login.
+worker := t.As("worker-3")
+fmt.Println("claiming as", worker.Identity())
+```
+
+`Open` answers every path and worktree question from `Config.Worktree`.
+`Config.Actor` (or `As`, which shares the open store) names the claimant on a
+local tracker; GitHub claims as the `gh` CLI's authenticated login and detects
+the repository from the origin remote unless `Config.Repo` pins one. Notices go
+to the optional `Config.Notice` writer — the library never prints. Today it
+covers backend detection (`Detect`, `Open`), snapshot and single-issue reads,
+and `Block`/`Unblock`; the rest of the command surface is CLI-only. `ready`,
+`list`, `show`, `epic status`, `block` and `unblock` are implemented on top of
+it, so a library caller and the commands share one behavior.
+
+**Stability: experimental.** The `tracker` API may change in any v0.x minor
+release. A breaking change ships as a `feat!:`/`fix!:` commit, so it lands under
+Breaking changes in the release notes rather than Features, and CI diffs the
+exported surface so every change is deliberate and visible in review; from 1.0
+it will be covered by the project's compatibility policy. The minimum toolchain
+is the `go` directive in [`go.mod`](go.mod), which carries an explicit patch
+release and is raised when a standard-library advisory lands; it is also what CI
+builds with. The GitHub backend needs the same `gh auth login`
+credentials as the CLI; the local backend needs neither `gh` nor a network.
+
 ## Design
 
 See [DESIGN.md](DESIGN.md) for the conventions the tool enforces, the read-path
