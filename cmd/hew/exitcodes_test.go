@@ -172,8 +172,9 @@ func TestOnlyStartProducesClaimExitCodes(t *testing.T) {
 }
 
 // startGuardFuncs are the only functions allowed to name the reserved codes:
-// the refusals `start` returns from its claim and blocker checks.
-var startGuardFuncs = map[string]bool{"claimRefusal": true, "blockerRefusal": true}
+// the one place that maps tracker's typed claim and blocker refusals back to
+// exits 3, 5 and 6.
+var startGuardFuncs = map[string]bool{"startRefusal": true}
 
 // The command layer's only constructors of the reserved codes sit in start's
 // refusal helpers; a stray one anywhere else would surface as a claim. This

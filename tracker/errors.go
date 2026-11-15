@@ -12,11 +12,17 @@ import (
 // ClaimedError reports an existing claim. Assignees may be empty for a
 // label-only claim. Actor is the effective acting identity; on GitHub it is
 // the authenticated login. ByActor means that identity owns the claim.
+//
+// Err is set when the acting identity could not be read while answering: Actor
+// is then empty and ByActor false, so a caller can tell "someone else holds
+// it" from "cannot say who holds it" instead of reading the empty fields as a
+// positive answer.
 type ClaimedError struct {
 	Issue     int
 	Assignees []string
 	Actor     string
 	ByActor   bool
+	Err       error
 }
 
 func (e *ClaimedError) Error() string {
@@ -79,6 +85,22 @@ func (e *ClosedError) Error() string {
 		return fmt.Sprintf("issue #%d is closed (%s)", e.Issue, e.Reason)
 	}
 	return fmt.Sprintf("issue #%d is closed", e.Issue)
+}
+
+// EpicError reports a claim on an epic. Epics are containers: their children
+// are the workable issues.
+type EpicError struct{ Issue int }
+
+func (e *EpicError) Error() string {
+	return fmt.Sprintf("issue #%d is an epic; epics are never worked directly", e.Issue)
+}
+
+// UntriagedError reports a claim on an issue with no priority. Claiming an
+// untriaged issue is triage, so the caller has to supply the priority.
+type UntriagedError struct{ Issue int }
+
+func (e *UntriagedError) Error() string {
+	return fmt.Sprintf("issue #%d is untriaged; a priority is required to claim it", e.Issue)
 }
 
 // CycleError reports a dependency cycle, including self-blocks. Cycle is

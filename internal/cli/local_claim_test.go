@@ -87,6 +87,52 @@ func TestStartTellsWorktreesApartThroughTheLocalStore(t *testing.T) {
 	}
 }
 
+// HEW_USER is the CLI's spelling of the library's actor: a claim made as A
+// resumes as A (exit 5, the work is already yours) and reads as someone else's
+// claim for B (exit 3, pick the next ready item).
+func TestStartHEWUserOwnsTheTrackerClaim(t *testing.T) {
+	main, _ := gitRepoWithWorktree(t)
+	dir := filepath.Join(main, local.DirName)
+	if err := local.Init(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HEW_USER", "A")
+	agentA, err := local.Open(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := agentA.CreateIssue(ctx, "Claimed by A", "", []string{"P2", "task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appA, _, _ := newLocalApp(agentA)
+	if err := appA.Start(ctx, created.Number, StartOpts{}); err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+
+	// A second session under the same identity is told to resume, not to
+	// treat its own claim as somebody else's.
+	sameActor, err := local.Open(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resume, _, _ := newLocalApp(sameActor)
+	exitCode(t, resume.Start(ctx, created.Number, StartOpts{}), ExitClaimedByYou)
+
+	// B sees the same claim as a stranger's.
+	t.Setenv("HEW_USER", "B")
+	otherActor, err := local.Open(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _, _ := newLocalApp(otherActor)
+	err = other.Start(ctx, created.Number, StartOpts{})
+	exitCode(t, err, ExitClaimed)
+	if !strings.Contains(err.Error(), "@A") {
+		t.Errorf("refusal should name the claimant @A: %v", err)
+	}
+}
+
 // racingStore wins the claim as rival just before delegating, standing in for
 // another agent whose claim lands after Start's read — the window an atomic
 // claim exists to close.

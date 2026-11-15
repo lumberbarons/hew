@@ -225,13 +225,11 @@ func formatStateReason(reason string) string {
 // closeState renders " (completed)" for an issue whose close reason GitHub
 // recorded, and nothing for one closed before that field existed — "#20 is
 // closed ()" reads as a bug in the tool rather than a gap in the data.
-func closeState(issue model.Issue) string {
-	return closeStateSuffix(issue.StateReason)
-}
+func closeState(issue model.Issue) string { return closedState(issue.StateReason) }
 
-// closeStateSuffix is closeState's rendering for a raw close reason, such as
-// the one a typed tracker error carries.
-func closeStateSuffix(reason string) string {
+// closedState is closeState for a raw backend state reason, such as the one a
+// typed tracker error carries.
+func closedState(reason string) string {
 	if reason == "" {
 		return ""
 	}
@@ -252,42 +250,51 @@ func guardClosed(issue model.Issue, allowClosed bool) error {
 	return genericErr("#%d is closed%s — pass --closed to edit anyway", issue.Number, closeState(issue))
 }
 
-// claimRefusal turns a tripped claim guard into the exit code that tells the
-// caller what to do about it: someone else's claim is exit 3 (pick the next
-// ready item), your own is exit 5 (resume the work you already claimed). The
-// viewer lookup lives here rather than in Start's happy path so the refusal,
-// not every claim, pays for the extra call.
-func (a *App) claimRefusal(ctx context.Context, issue model.Issue) error {
-	if len(issue.Assignees) == 0 {
-		// In-progress with nobody assigned: no claimant to attribute.
-		return &ExitError{Code: ExitClaimed, Message: fmt.Sprintf("#%d already claimed (in-progress); pick the next ready item or --force", issue.Number)}
-	}
-	who := "assigned to @" + render.SanitizeInline(strings.Join(issue.Assignees, " @"))
-	viewer, err := a.Client.Viewer(ctx)
+// startRefusal maps tracker's typed start refusals back to the exit codes
+// agent loops branch on and to the message text the CLI has always printed:
+// someone else's claim is exit 3 (pick the next ready item), your own is exit
+// 5 (resume the work you already claimed), open blockers are exit 6 (pick the
+// next ready item). Everything else keeps the exit code it had: closed and
+// epic are generic, a missing priority is usage.
+func (a *App) startRefusal(err error) error {
+	var claimed *tracker.ClaimedError
+	var blocked *tracker.BlockedError
+	var closed *tracker.ClosedError
+	var epic *tracker.EpicError
+	var untriaged *tracker.UntriagedError
+	var invalid *tracker.InvalidInputError
 	switch {
-	case err != nil:
-		// The refusal stands regardless of whose claim it is; only the
-		// refinement is lost, so degrade to the conservative signal.
-		a.warnf("cannot resolve the authenticated user (%v); reporting #%d as someone else's claim", err, issue.Number)
-	case slices.Contains(issue.Assignees, viewer):
-		return &ExitError{Code: ExitClaimedByYou, Message: fmt.Sprintf("#%d is already claimed by you (%s); resume that work or --force to re-claim", issue.Number, who)}
+	case errors.As(err, &claimed):
+		if claimed.Err != nil {
+			// The refusal stands regardless of whose claim it is; only the
+			// refinement is lost, so degrade to the conservative signal.
+			a.warnf("cannot resolve the authenticated user (%v); reporting #%d as someone else's claim", claimed.Err, claimed.Issue)
+		}
+		if len(claimed.Assignees) == 0 {
+			// In-progress with nobody assigned: no claimant to attribute.
+			return &ExitError{Code: ExitClaimed, Message: fmt.Sprintf("#%d already claimed (in-progress); pick the next ready item or --force", claimed.Issue)}
+		}
+		who := "assigned to @" + render.SanitizeInline(strings.Join(claimed.Assignees, " @"))
+		if claimed.ByActor {
+			return &ExitError{Code: ExitClaimedByYou, Message: fmt.Sprintf("#%d is already claimed by you (%s); resume that work or --force to re-claim", claimed.Issue, who)}
+		}
+		return &ExitError{Code: ExitClaimed, Message: fmt.Sprintf("#%d already claimed (%s); pick the next ready item or --force", claimed.Issue, who)}
+	case errors.As(err, &blocked):
+		refs := make([]string, len(blocked.OpenBlockers))
+		for i, n := range blocked.OpenBlockers {
+			refs[i] = fmt.Sprintf("#%d", n)
+		}
+		return &ExitError{Code: ExitBlocked, Message: fmt.Sprintf("#%d is blocked by open %s; pick the next ready item or --force", blocked.Issue, strings.Join(refs, ", "))}
+	case errors.As(err, &closed):
+		return genericErr("#%d is closed%s", closed.Issue, closedState(closed.Reason))
+	case errors.As(err, &epic):
+		return genericErr("#%d is an epic; epics are never worked directly — start one of its sub-issues", epic.Issue)
+	case errors.As(err, &untriaged):
+		return usageErr("#%d is untriaged; start requires --priority (claiming is triage)", untriaged.Issue)
+	case errors.As(err, &invalid) && invalid.Field == "priority":
+		return usageErr("--priority must be P0..P4")
 	}
-	return &ExitError{Code: ExitClaimed, Message: fmt.Sprintf("#%d already claimed (%s); pick the next ready item or --force", issue.Number, who)}
-}
-
-// blockerRefusal keeps start in step with ready: an issue with an open
-// blocker is hidden from ready, so claiming it by id would take work whose
-// prerequisite is unfinished.
-func blockerRefusal(issue model.Issue) error {
-	open := issue.OpenBlockers()
-	if len(open) == 0 {
-		return nil
-	}
-	refs := make([]string, len(open))
-	for i, n := range open {
-		refs[i] = fmt.Sprintf("#%d", n)
-	}
-	return &ExitError{Code: ExitBlocked, Message: fmt.Sprintf("#%d is blocked by open %s; pick the next ready item or --force", issue.Number, strings.Join(refs, ", "))}
+	return err
 }
 
 // StartOpts are the claim inputs; zero values mean the default behavior.
@@ -304,98 +311,30 @@ type StartOpts struct {
 	Show bool
 }
 
-// Start claims an issue: assign @me plus the in-progress label. The guard
-// refuses issues that are already assigned or in-progress — exit 3 for
-// someone else's claim so an agent loop moves on to the next ready item,
-// exit 5 when the claim is already yours; --force steals. It also refuses
-// an issue with open blockers (exit 6), which ready would have hidden;
-// --force overrides that too. Claiming an
+// Start claims an issue: assign @me plus the in-progress label. The decision
+// lives in tracker.Start; what stays here is the CLI contract it cannot carry:
+// the guard's refusals map to exit 3 for someone else's claim (pick the next
+// ready item), exit 5 when the claim is already yours (resume), and exit 6 for
+// open blockers ready would have hidden; --force overrides both. Claiming an
 // untriaged issue requires --priority — claiming forces triage.
 func (a *App) Start(ctx context.Context, number int, opts StartOpts) error {
-	priorityFlag, force := opts.Priority, opts.Force
-	issue, err := a.Client.GetIssue(ctx, number)
+	// No actor: tracker.Start resolves the store's Viewer when the claim needs
+	// it, so a closed or already-claimed target is refused without paying for
+	// the lookup.
+	result, err := tracker.WrapAs(a.Client, a.backend(), "").Start(ctx, number, tracker.StartOptions{
+		Priority: opts.Priority,
+		Force:    opts.Force,
+	})
 	if err != nil {
-		return err
+		return a.startRefusal(err)
 	}
-	if !issue.IsOpen() {
-		return genericErr("#%d is closed%s", number, closeState(issue))
+	after := issueFromTracker(result.Issue)
+	// A capped blocker list can hide an open blocker, so the guard could not
+	// vouch for it; say so once the claim has gone through.
+	if !opts.Force && after.BlockedByTotal > len(after.BlockedBy) {
+		a.warnf("#%d has %d blockers, only %d fetched; an open blocker may be hidden", number, after.BlockedByTotal, len(after.BlockedBy))
 	}
-	if issue.IsEpic() {
-		return genericErr("#%d is an epic; epics are never worked directly — start one of its sub-issues", number)
-	}
-	if (len(issue.Assignees) > 0 || issue.InProgress()) && !force {
-		return a.claimRefusal(ctx, issue)
-	}
-	if !force {
-		if err := blockerRefusal(issue); err != nil {
-			return err
-		}
-	}
-	priority, _ := issue.Priority()
-	if priorityFlag != "" {
-		p, ok := model.ParsePriority(priorityFlag)
-		if !ok {
-			return usageErr("--priority must be P0..P4")
-		}
-		priority = p
-	} else if priority == model.PriorityUnknown {
-		return usageErr("#%d is untriaged; start requires --priority (claiming is triage)", number)
-	}
-	// A capped blocker list can hide an open blocker, so the check cannot
-	// vouch for it; say so once the claim is certain to be attempted.
-	if !force && issue.BlockedByTotal > len(issue.BlockedBy) {
-		a.warnf("#%d has %d blockers, only %d fetched; an open blocker may be hidden", number, issue.BlockedByTotal, len(issue.BlockedBy))
-	}
-
-	viewer, err := a.Client.Viewer(ctx)
-	if err != nil {
-		return err
-	}
-	// The local store can make the claim conditional: one locked write checks
-	// and claims, so simultaneous starts have exactly one winner. Claim
-	// before the priority swap so a loser has not already changed the issue.
-	// GitHub has no conditional writes, so it falls through to the
-	// check-then-act path and the re-read after claiming.
-	if claimer, ok := a.Client.(gh.Claimer); ok {
-		if err := claimer.ClaimIssue(ctx, number, viewer, force); err != nil {
-			if errors.Is(err, gh.ErrClaimConflict) {
-				current, readErr := a.Client.GetIssue(ctx, number)
-				if readErr != nil {
-					return readErr
-				}
-				return a.claimRefusal(ctx, current)
-			}
-			return err
-		}
-		if err := a.swapPriority(ctx, issue, priority); err != nil {
-			// Claiming is triage: a claim without the priority would leave the
-			// issue half-started, and a retry would then be told it is already
-			// the caller's (exit 5) instead of finishing the job.
-			return errors.Join(err, a.undoClaim(ctx, issue, viewer, force))
-		}
-	} else {
-		if err := a.swapPriority(ctx, issue, priority); err != nil {
-			return err
-		}
-		if force && len(issue.Assignees) > 0 {
-			if err := a.Client.RemoveAssignees(ctx, number, issue.Assignees); err != nil {
-				return err
-			}
-		}
-		if !issue.InProgress() {
-			if err := a.Client.AddLabels(ctx, number, []string{model.InProgressLabel}); err != nil {
-				return err
-			}
-		}
-		if err := a.Client.AddAssignee(ctx, number, viewer); err != nil {
-			return err
-		}
-	}
-	after, err := a.Client.GetIssue(ctx, number)
-	if err != nil {
-		return err
-	}
-	if len(after.Assignees) != 1 || after.Assignees[0] != viewer {
+	if len(after.Assignees) != 1 || after.Assignees[0] != result.Claimant {
 		a.warnf("claim may have raced: #%d now assigned to @%s", number, render.SanitizeInline(strings.Join(after.Assignees, " @")))
 	}
 	if opts.Show && !a.JSON {
@@ -404,7 +343,15 @@ func (a *App) Start(ctx context.Context, number int, opts StartOpts) error {
 		a.printf("started #%d\n", number)
 		return a.emitIssue(after, nil)
 	}
-	return a.emitMutation(after, "started #%d: %s\n", number, render.SanitizeInline(issue.Title))
+	return a.emitMutation(after, "started #%d: %s\n", number, render.SanitizeInline(after.Title))
+}
+
+// backend names the store the App is wired to, for the tracker seam.
+func (a *App) backend() tracker.Backend {
+	if a.Local {
+		return tracker.BackendLocal
+	}
+	return tracker.BackendGitHub
 }
 
 // Release gives up a claim without assigning it to another owner.
@@ -910,7 +857,7 @@ func (a *App) blockError(err error) error {
 	}
 	var closed *tracker.ClosedError
 	if errors.As(err, &closed) {
-		return genericErr("#%d is closed%s — pass --closed to edit anyway", closed.Issue, closeStateSuffix(closed.Reason))
+		return genericErr("#%d is closed%s — pass --closed to edit anyway", closed.Issue, closedState(closed.Reason))
 	}
 	var notOpen *tracker.NotOpenError
 	if errors.As(err, &notOpen) {
@@ -953,7 +900,7 @@ func (a *App) Unblock(ctx context.Context, number int, blockers []int, allowClos
 func (a *App) unblockError(err error) error {
 	var closed *tracker.ClosedError
 	if errors.As(err, &closed) {
-		return genericErr("#%d is closed%s — pass --closed to edit anyway", closed.Issue, closeStateSuffix(closed.Reason))
+		return genericErr("#%d is closed%s — pass --closed to edit anyway", closed.Issue, closedState(closed.Reason))
 	}
 	var partial *tracker.PartialWriteError
 	if errors.As(err, &partial) {
@@ -1156,31 +1103,6 @@ func (a *App) InitLocal(dir string) error {
 
 // swapPriority enforces the one-priority-label invariant: remove the
 // others, add the target if absent.
-// undoClaim undoes an atomic claim back to the state before: issue is the
-// snapshot start read before claiming. It reports its own failure so the
-// caller can show both, since a failed rollback leaves the claim in place.
-func (a *App) undoClaim(ctx context.Context, issue model.Issue, viewer string, force bool) error {
-	var errs []error
-	if !slices.Contains(issue.Assignees, viewer) {
-		errs = append(errs, a.Client.RemoveAssignees(ctx, issue.Number, []string{viewer}))
-	}
-	if force {
-		// The forced claim displaced the earlier claimants; put them back.
-		for _, who := range issue.Assignees {
-			if who != viewer {
-				errs = append(errs, a.Client.AddAssignee(ctx, issue.Number, who))
-			}
-		}
-	}
-	if !issue.InProgress() {
-		errs = append(errs, a.Client.RemoveLabel(ctx, issue.Number, model.InProgressLabel))
-	}
-	if err := errors.Join(errs...); err != nil {
-		return fmt.Errorf("could not release the claim on #%d: %w", issue.Number, err)
-	}
-	return nil
-}
-
 func (a *App) swapPriority(ctx context.Context, issue model.Issue, p model.Priority) error {
 	target := p.String()
 	for _, l := range issue.Labels {

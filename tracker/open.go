@@ -88,6 +88,14 @@ func Open(ctx context.Context, cfg Config) (*Tracker, error) {
 // hew's own CLI uses for writes, where it opens the store once for every
 // command and already knows which backend it opened. External callers use
 // Open, which also resolves the worktree and the backend.
+//
+// An empty actor defers to the store's Viewer, read when an operation first
+// needs the identity rather than at WrapAs. That is what keeps the CLI's
+// identity rules — HEW_USER on a local tracker, the authenticated login on
+// GitHub — outside this package while still letting a command refuse a claim
+// before it has paid for the lookup: a refusal can name the claimant without
+// the acting identity, and only a claim has to know who is acting. Identity
+// reports the actor given, empty when it was deferred.
 func WrapAs(store gh.IssueStore, backend Backend, actor string) *Tracker {
 	return &Tracker{backend: backend, store: store, actor: actor}
 }

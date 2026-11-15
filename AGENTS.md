@@ -37,6 +37,7 @@ The layering exists so everything with behavior is testable without hitting GitH
 |---|---|---|
 | `cmd/hew/` | main + urfave/cli v3 flag wiring only — no behavior, excluded from coverage | Adding a command or flag |
 | `internal/cli/` | The commands, written against the `gh.IssueStore` interface, with `gh.PullRequests` for `pr` alone — see [internal/cli/AGENTS.md](internal/cli/AGENTS.md) | Changing command behavior or guarded flows |
+| `tracker/` | The public in-process API (`github.com/lumberbarons/hew/tracker`): `Open` picks a backend from an explicit worktree and actor, and `Reader`/`Writer` carry the reads (`Snapshot`, `Get`) and dependency writes (`Block`, `Unblock`) over an already-open store, so the CLI's commands delegate instead of reimplementing; typed results and typed errors, never exit codes; experimental until 1.0, with the exported surface diffed in CI | Changing the library API, or moving an operation out of the CLI |
 | `internal/gh/` | Thin API layer: the `IssueStore` and `PullRequests` interfaces (`Client` is their union) and the go-gh-backed implementation of both; auth reuses the `gh` CLI's stored credentials (no auth flow of our own), repo detection comes from the git remote | Changing queries, auth, or API calls |
 | `internal/model/` | Pure domain logic: readiness, label normalization, cycle detection — no I/O, plain unit tests | Changing readiness or label semantics |
 | `internal/render/` | Text and JSON renderers, golden-file tested (`testdata/*.golden`) | Changing output format |
