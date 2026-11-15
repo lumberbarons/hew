@@ -126,7 +126,7 @@ func (t *Tracker) ApplyPlan(ctx context.Context, entries []PlanEntry, opts Apply
 		}
 		issue, err := t.store.CreateIssue(ctx, PlanTitle(e), PlanBodyWithProvenance(e, digest), planLabels(e))
 		if err != nil {
-			return result, fmt.Errorf("creating %s (rerun to resume): %w", e.Key(), err)
+			return result, fmt.Errorf("creating %s (rerun to resume): %w", e.Key(), asAuthError(err))
 		}
 		if err := checkpoint.RecordCreated(e.Key(), issue.Number); err != nil {
 			return result, err
@@ -185,7 +185,7 @@ func (t *Tracker) verifyPlanCheckpoint(ctx context.Context, checkpoint Checkpoin
 		}
 		issue, err := t.store.GetIssue(ctx, record.Number)
 		if err != nil {
-			return fmt.Errorf("verifying mapped issue #%d for %s: %w", record.Number, record.Key, err)
+			return fmt.Errorf("verifying mapped issue #%d for %s: %w", record.Number, record.Key, asReadError(err))
 		}
 		if !conventions.HasProvenanceMarker(issue.Body, conventions.ProvenanceApply, record.Key, digest) {
 			return fmt.Errorf("refusing to modify issue #%d: it does not carry the hew provenance marker for entry key %q from this source file, so this run did not create it",
@@ -213,7 +213,7 @@ func (t *Tracker) requirePlanRefs(ctx context.Context, entries []PlanEntry, chec
 			}
 			checked[ref.Number] = true
 			if _, err := t.store.GetIssue(ctx, ref.Number); err != nil {
-				return fmt.Errorf("line %d: %s: %w", ref.Line, ref.Field, err)
+				return fmt.Errorf("line %d: %s: %w", ref.Line, ref.Field, asReadError(err))
 			}
 		}
 	}
@@ -225,7 +225,7 @@ func (t *Tracker) requirePlanRefs(ctx context.Context, entries []PlanEntry, chec
 func (t *Tracker) ensurePlanLabels(ctx context.Context, entries []PlanEntry) error {
 	existing, err := t.store.ListLabels(ctx)
 	if err != nil {
-		return err
+		return asAuthError(err)
 	}
 	have := map[string]bool{}
 	for _, l := range existing {
@@ -251,7 +251,7 @@ func (t *Tracker) ensurePlanLabels(ctx context.Context, entries []PlanEntry) err
 			continue
 		}
 		if err := t.store.CreateLabel(ctx, l); err != nil {
-			return fmt.Errorf("creating label %q: %w", l.Name, err)
+			return fmt.Errorf("creating label %q: %w", l.Name, asAuthError(err))
 		}
 		have[strings.ToLower(l.Name)] = true
 	}

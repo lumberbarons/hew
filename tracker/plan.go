@@ -150,13 +150,19 @@ func (e PlanEntry) ExistingRefs() []ExistingRef {
 // dependency or parent cycles. References may point forward — creation
 // happens before wiring — but every local reference must resolve. Errors name
 // the source line when the entry carries one, its position otherwise.
+//
+// A rejection is an *InvalidInputError whose Reason names the entry and the
+// rule, so a caller branches on the type rather than the text.
 func ValidatePlan(entries []PlanEntry) error {
 	for i, e := range entries {
 		if err := validatePlanEntry(e, i); err != nil {
-			return err
+			return &InvalidInputError{Field: "plan", Reason: err.Error()}
 		}
 	}
-	return validatePlanRefs(entries)
+	if err := validatePlanRefs(entries); err != nil {
+		return &InvalidInputError{Field: "plan", Reason: err.Error()}
+	}
+	return nil
 }
 
 func validatePlanEntry(e PlanEntry, index int) error {

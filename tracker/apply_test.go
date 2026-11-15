@@ -543,3 +543,32 @@ func countStrings(values []string, want string) int {
 	}
 	return count
 }
+
+func TestApplyPlanTypesItsFailuresAtTheBoundary(t *testing.T) {
+	t.Run("a missing parent is a NotFoundError", func(t *testing.T) {
+		tr := WrapAs(newApplyStore(), BackendGitHub, "")
+		entries := []PlanEntry{{ID: "orphan", Title: "Orphan", Type: "task", Parent: &PlanRef{Number: 9999}}}
+		_, err := tr.ApplyPlan(testCtx, entries, ApplyOptions{})
+		var notFound *NotFoundError
+		if !errors.As(err, &notFound) || notFound.Issue != 9999 {
+			t.Fatalf("err = %v, want a *NotFoundError for #9999", err)
+		}
+	})
+	t.Run("an auth failure on create is an AuthError", func(t *testing.T) {
+		store := newApplyStore()
+		store.createErr = &gh.AuthError{Err: errors.New("bad credentials")}
+		_, err := WrapAs(store, BackendGitHub, "").ApplyPlan(testCtx, []PlanEntry{{ID: "a", Title: "A", Type: "task"}}, ApplyOptions{})
+		var auth *AuthError
+		if !errors.As(err, &auth) {
+			t.Fatalf("err = %v, want a *AuthError", err)
+		}
+	})
+	t.Run("a rejected plan is an InvalidInputError", func(t *testing.T) {
+		tr := WrapAs(newApplyStore(), BackendGitHub, "")
+		_, err := tr.ApplyPlan(testCtx, []PlanEntry{{Type: "task"}}, ApplyOptions{})
+		var invalid *InvalidInputError
+		if !errors.As(err, &invalid) || invalid.Field != "plan" || !strings.Contains(invalid.Reason, "title is required") {
+			t.Fatalf("err = %v, want an *InvalidInputError naming the missing title", err)
+		}
+	})
+}
