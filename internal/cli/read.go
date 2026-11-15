@@ -10,6 +10,7 @@ import (
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/model"
 	"github.com/lumberbarons/hew/internal/render"
+	"github.com/lumberbarons/hew/tracker"
 )
 
 // The primer caps every live section and points at the command that lists
@@ -57,16 +58,19 @@ func (a *App) Ready(ctx context.Context, opts ReadyOpts) error {
 	if opts.Limit < 0 {
 		return usageErr("--limit must be 0 or greater")
 	}
-	issues, err := a.Client.ListIssues(ctx, openStates)
+	snapshot, err := tracker.Wrap(a.Client).Snapshot(ctx, tracker.SnapshotOptions{})
 	if err != nil {
 		return err
 	}
 	// A cycle or a truncated blocker list can make ready wrong; surface both
 	// so the agent knows the queue may be incomplete.
-	for _, w := range model.WarningsOfKind(model.Warnings(issues), model.WarnDependencyCycle, model.WarnBlockersCapped) {
-		a.warnf("%s", render.FormatWarning(w))
+	for _, w := range warningsFromTracker(snapshot.Warnings()) {
+		switch w.Kind {
+		case model.WarnDependencyCycle, model.WarnBlockersCapped:
+			a.warnf("%s", render.FormatWarning(w))
+		}
 	}
-	ready := model.Ready(issues)
+	ready := issuesFromTracker(snapshot.Ready())
 	if opts.Limit > 0 && len(ready) > opts.Limit {
 		a.warnf("showing %d of %d ready issues; --limit 0 for all", opts.Limit, len(ready))
 		ready = ready[:opts.Limit]
@@ -132,24 +136,22 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 	if err != nil {
 		return err
 	}
-	issues, err := a.Client.ListIssues(ctx, states)
+	snapshot, err := tracker.Wrap(a.Client).Snapshot(ctx, tracker.SnapshotOptions{
+		States: trackerStates(states),
+	})
 	if err != nil {
 		return err
 	}
-	var out []model.Issue
-	for _, i := range issues {
+	// Issues arrives in list order, and filtering preserves it.
+	out := slices.DeleteFunc(issuesFromTracker(snapshot.Issues()), func(i model.Issue) bool {
 		if i.Untriaged() {
-			continue
+			return true
 		}
 		if opts.Label != "" && !i.HasLabel(opts.Label) {
-			continue
+			return true
 		}
-		if opts.Epic > 0 && (i.Parent == nil || i.Parent.Number != opts.Epic) {
-			continue
-		}
-		out = append(out, i)
-	}
-	model.SortForList(out)
+		return opts.Epic > 0 && (i.Parent == nil || i.Parent.Number != opts.Epic)
+	})
 	return a.emitListBodies(out, "no issues", render.List, opts.Bodies)
 }
 
@@ -158,20 +160,22 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 // child's blockers — a second two-state fetch, but only when the subject is
 // an epic.
 func (a *App) Show(ctx context.Context, number int) error {
-	issue, err := a.Client.GetIssue(ctx, number)
+	t := tracker.Wrap(a.Client)
+	issue, err := t.Get(ctx, number)
 	if err != nil {
 		return err
 	}
+	subject := issueFromTracker(issue)
 	var children []model.Issue
-	if issue.IsEpic() {
-		issues, err := a.Client.ListIssues(ctx, allStates)
+	if subject.IsEpic() {
+		snapshot, err := t.Snapshot(ctx, tracker.SnapshotOptions{States: everyTrackerState()})
 		if err != nil {
 			return err
 		}
-		children = model.Children(issues, number)
-		a.warnChildrenBlockersCapped(children, issues)
+		children = issuesFromTracker(snapshot.Children(number))
+		a.warnChildrenBlockersCapped(children, warningsFromTracker(snapshot.Warnings()))
 	}
-	return a.emitIssue(issue, children)
+	return a.emitIssue(subject, children)
 }
 
 // Search runs a repo-scoped text search over open and closed issues — the
@@ -307,29 +311,29 @@ func (a *App) Prime(ctx context.Context, opts PrimeOpts) error {
 // EpicStatus with number <= 0 lists all open epics with progress rollups;
 // with a number it shows that epic's children and the next workable one.
 func (a *App) EpicStatus(ctx context.Context, number int) error {
+	t := tracker.Wrap(a.Client)
 	if number <= 0 {
-		issues, err := a.Client.ListIssues(ctx, openStates)
+		snapshot, err := t.Snapshot(ctx, tracker.SnapshotOptions{})
 		if err != nil {
 			return err
 		}
-		epics := model.Epics(issues)
-		return a.emitList(epics, "no epics", render.EpicList)
+		return a.emitList(issuesFromTracker(snapshot.Epics()), "no epics", render.EpicList)
 	}
 	// One fetch of both states resolves child titles without N+1 queries.
-	issues, err := a.Client.ListIssues(ctx, allStates)
+	snapshot, err := t.Snapshot(ctx, tracker.SnapshotOptions{States: everyTrackerState()})
 	if err != nil {
 		return err
 	}
-	byNum := model.ByNumber(issues)
-	epic, ok := byNum[number]
+	found, ok := snapshot.Get(number)
 	if !ok {
 		return genericErr("issue #%d not found in %s", number, a.Repo)
 	}
+	epic := issueFromTracker(found)
 	if !epic.IsEpic() {
 		return genericErr("#%d has no sub-issues; not an epic", number)
 	}
-	children := model.Children(issues, number)
-	a.warnChildrenBlockersCapped(children, issues)
+	children := issuesFromTracker(snapshot.Children(number))
+	a.warnChildrenBlockersCapped(children, warningsFromTracker(snapshot.Warnings()))
 	return a.emitEpicStatus(epic, children)
 }
 
@@ -337,14 +341,109 @@ func (a *App) EpicStatus(ctx context.Context, number int) error {
 // wrong: a capped blocker list may hide an open blocker, so an unworkable
 // child could be named. The warning stays per-child so the agent can see
 // which child of the sequence is suspect.
-func (a *App) warnChildrenBlockersCapped(children []model.Issue, issues []model.Issue) {
+func (a *App) warnChildrenBlockersCapped(children []model.Issue, warnings []model.Warning) {
 	members := make(map[int]bool, len(children))
 	for _, c := range children {
 		members[c.Number] = true
 	}
-	for _, w := range model.WarningsOfKind(model.Warnings(issues), model.WarnBlockersCapped) {
+	for _, w := range model.WarningsOfKind(warnings, model.WarnBlockersCapped) {
 		if members[w.Issue] {
 			a.warnf("#%d has %d blockers, only %d fetched; next may be wrong", w.Issue, w.Total, w.Fetched)
 		}
 	}
+}
+
+// trackerStates maps the CLI's resolved state filter onto the library's
+// states, so `list` asks the backend for exactly what it prints.
+func trackerStates(states []gh.IssueState) []tracker.State {
+	out := make([]tracker.State, len(states))
+	for n, s := range states {
+		switch s {
+		case gh.StateOpen:
+			out[n] = tracker.StateOpen
+		case gh.StateClosed:
+			out[n] = tracker.StateClosed
+		}
+	}
+	return out
+}
+
+// everyTrackerState is both states, for a read that must see closed issues
+// too (show on an epic, epic status).
+func everyTrackerState() []tracker.State {
+	return []tracker.State{tracker.StateOpen, tracker.StateClosed}
+}
+
+// issueFromTracker converts the library's flat issue back to the domain shape
+// the text and JSON renderers take. It is total: tracker keeps the raw labels,
+// reference and parent states, parent title and close reason the flat schema
+// hides, so the rendered output is byte-for-byte what it was before the read
+// went through tracker.
+func issueFromTracker(i tracker.Issue) model.Issue {
+	out := model.Issue{
+		Number:             i.Number,
+		Title:              i.Title,
+		State:              strings.ToUpper(i.State),
+		StateReason:        i.StateReason(),
+		CreatedAt:          i.CreatedAt,
+		Labels:             i.Labels(),
+		Assignees:          i.Assignees,
+		ParentTitle:        i.ParentTitle(),
+		SubIssues:          refsFromTracker(i.SubIssueRefs()),
+		SubIssuesTotal:     i.SubIssuesTotal,
+		SubIssuesCompleted: i.SubIssuesCompleted,
+		BlockedBy:          refsFromTracker(i.BlockedByRefs()),
+		BlockedByTotal:     i.BlockedByTotal,
+		CommentsTotal:      i.CommentsTotal,
+	}
+	if parent, ok := i.ParentRef(); ok {
+		out.Parent = &model.Ref{Number: parent.Number, State: parent.State}
+	} else if i.Parent != nil {
+		out.Parent = &model.Ref{Number: *i.Parent}
+	}
+	if i.Body != nil {
+		out.Body = *i.Body
+	}
+	for _, c := range i.Comments {
+		out.Comments = append(out.Comments, model.Comment{Author: c.Author, CreatedAt: c.CreatedAt, Body: c.Body})
+	}
+	return out
+}
+
+func issuesFromTracker(issues []tracker.Issue) []model.Issue {
+	if issues == nil {
+		return nil
+	}
+	out := make([]model.Issue, len(issues))
+	for n, i := range issues {
+		out[n] = issueFromTracker(i)
+	}
+	return out
+}
+
+func refsFromTracker(refs []tracker.Ref) []model.Ref {
+	if refs == nil {
+		return nil
+	}
+	out := make([]model.Ref, len(refs))
+	for n, r := range refs {
+		out[n] = model.Ref{Number: r.Number, State: r.State}
+	}
+	return out
+}
+
+// warningsFromTracker keeps the kind values in step with model's, which is
+// what lets the existing prose renderer format them unchanged.
+func warningsFromTracker(warnings []tracker.Warning) []model.Warning {
+	out := make([]model.Warning, len(warnings))
+	for n, w := range warnings {
+		out[n] = model.Warning{
+			Kind:    model.WarningKind(w.Kind),
+			Issue:   w.Issue,
+			Cycle:   w.Cycle,
+			Total:   w.Total,
+			Fetched: w.Fetched,
+		}
+	}
+	return out
 }
