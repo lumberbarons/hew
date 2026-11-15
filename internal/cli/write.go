@@ -311,7 +311,7 @@ func (a *App) Start(ctx context.Context, number int, opts StartOpts) error {
 		return err
 	}
 	if !issue.IsOpen() {
-		return genericErr("#%d is closed", number)
+		return genericErr("#%d is closed%s", number, closeState(issue))
 	}
 	if issue.IsEpic() {
 		return genericErr("#%d is an epic; epics are never worked directly — start one of its sub-issues", number)

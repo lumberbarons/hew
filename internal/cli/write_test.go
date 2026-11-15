@@ -697,6 +697,35 @@ func TestStartGuards(t *testing.T) {
 	exitCode(t, app.Start(ctx, 3, StartOpts{Priority: "P7"}), ExitUsage)
 }
 
+// TestStartRefusesClosedIssueNamingState covers #77: start's refusal is the
+// one an agent loop hits most often, and "closed" alone cannot separate a
+// target closed out from under it from a mistyped number. Every other write
+// command already names the state, so start should too.
+func TestStartRefusesClosedIssueNamingState(t *testing.T) {
+	completed := issue(1, "Done", "P2", "bug")
+	completed.State = "CLOSED"
+	completed.StateReason = "COMPLETED"
+	// GitHub records no state reason on issues closed before that field
+	// existed; the refusal must not render empty parentheses for them.
+	legacy := issue(2, "Old", "P2", "bug")
+	legacy.State = "CLOSED"
+	f := newFake(completed, legacy)
+	app, _, _ := newApp(f)
+
+	err := app.Start(ctx, 1, StartOpts{})
+	if err == nil || !strings.Contains(err.Error(), "#1 is closed (completed)") {
+		t.Errorf("closed err = %v", err)
+	}
+	err = app.Start(ctx, 2, StartOpts{})
+	if err == nil || !strings.Contains(err.Error(), "#2 is closed") {
+		t.Errorf("legacy closed err = %v", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "#2 is closed (") {
+		t.Errorf("a closed issue with no state reason renders empty parentheses: %v", err)
+	}
+	assertOnlyReads(t, f)
+}
+
 func TestStartUntriagedWithPriority(t *testing.T) {
 	f := newFake(issue(3, "Untriaged"))
 	app, _, _ := newApp(f)
