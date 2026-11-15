@@ -77,7 +77,8 @@ func closedOverrideFlag() ucli.Flag {
 // has to fire only for the old one. Hidden keeps --help teaching one
 // vocabulary; the usage text is still what names the replacement.
 
-// deprecatedFlag is the hidden spelling of a renamed string flag.
+// deprecatedStringFlag is the hidden spelling of a renamed string flag; use
+// names its replacement in the usage text.
 func deprecatedStringFlag(name, use string) ucli.Flag {
 	return &ucli.StringFlag{Name: name, Hidden: true, Usage: "deprecated: use " + use}
 }
