@@ -49,7 +49,7 @@ var beadTypeLabels = map[string]string{
 // history order, wire parents and blockers, then close what was closed.
 func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 	if opts.File == "" {
-		return usageErr("usage: hew migrate beads --file <issues.jsonl>")
+		return usageErr("usage: hew migrate beads <issues.jsonl> (or --file FILE)")
 	}
 	if opts.StatePath == "" {
 		opts.StatePath = filepath.Join(filepath.Dir(opts.File), "github-migration.json")

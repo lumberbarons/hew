@@ -37,11 +37,13 @@ var primerGlobalFlags = map[string]bool{
 // command so an exemption for one command can't hide the same flag drifting
 // undocumented on another.
 var omittedFlags = map[string]bool{
-	"create --edit":    true, // interactive, not for agents
-	"start --force":    true, // escape hatch
-	"apply --state":    true, // plumbing; the default is right
-	"list --closed":    true, // back-compat alias for --state closed, which the primer teaches instead
-	"apply --throttle": true, // plumbing; the default is right
+	"create --edit":      true, // interactive, not for agents
+	"start --force":      true, // escape hatch
+	"apply --checkpoint": true, // plumbing; the default is right
+	"apply --file":       true, // the plan is the argument the primer teaches; --file is the same input
+	"apply --state":      true, // deprecated spelling of --checkpoint
+	"list --closed":      true, // deprecated spelling of --state closed, which the primer teaches instead
+	"apply --throttle":   true, // plumbing; the default is right
 	// The closed-target refusal names --closed as the remedy at the moment it
 	// fires, so the primer doesn't spend budget teaching an escape hatch the
 	// tool already hands you.

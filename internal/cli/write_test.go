@@ -1367,7 +1367,7 @@ func TestReopenReportsClaimLeftWhenReleaseFails(t *testing.T) {
 func TestBlock(t *testing.T) {
 	f := newFake(issue(1, "A", "P2", "bug"), issue(2, "B", "P2", "bug"))
 	app, out, _ := newApp(f)
-	if err := app.Block(ctx, 1, 2, false); err != nil {
+	if err := app.Block(ctx, 1, []int{2}, false); err != nil {
 		t.Fatal(err)
 	}
 	i := f.byNumber(1)
@@ -1386,7 +1386,7 @@ func TestBlockRefusesCycle(t *testing.T) {
 	c.BlockedBy = []model.Ref{{Number: 1, State: "OPEN"}}
 	f := newFake(issue(1, "A", "P2", "bug"), b, c)
 	app, _, _ := newApp(f)
-	err := app.Block(ctx, 1, 2, false)
+	err := app.Block(ctx, 1, []int{2}, false)
 	if err == nil || !strings.Contains(err.Error(), "cycle #1 → #2 → #3 → #1") {
 		t.Errorf("err = %v", err)
 	}
@@ -1398,7 +1398,7 @@ func TestBlockRefusesCycle(t *testing.T) {
 func TestBlockRefusesSelfBlock(t *testing.T) {
 	f := newFake(issue(1, "A", "P2", "bug"))
 	app, _, _ := newApp(f)
-	err := app.Block(ctx, 1, 1, false)
+	err := app.Block(ctx, 1, []int{1}, false)
 	if err == nil || !strings.Contains(err.Error(), "cycle #1 → #1") {
 		t.Errorf("err = %v", err)
 	}
@@ -1414,7 +1414,7 @@ func TestBlockRefusesTwoCycle(t *testing.T) {
 	b.BlockedBy = []model.Ref{{Number: 1, State: "OPEN"}}
 	f := newFake(issue(1, "A", "P2", "bug"), b)
 	app, _, _ := newApp(f)
-	err := app.Block(ctx, 1, 2, false)
+	err := app.Block(ctx, 1, []int{2}, false)
 	if err == nil || !strings.Contains(err.Error(), "cycle #1 → #2 → #1") {
 		t.Errorf("err = %v", err)
 	}
@@ -1432,7 +1432,7 @@ func TestBlockRefusesWhenCycleCheckUnverifiable(t *testing.T) {
 	b.BlockedByTotal = 25
 	f := newFake(issue(1, "A", "P2", "bug"), b, issue(3, "C", "P2", "bug"))
 	app, _, _ := newApp(f)
-	err := app.Block(ctx, 1, 2, false)
+	err := app.Block(ctx, 1, []int{2}, false)
 	if err == nil || !strings.Contains(err.Error(), "cannot verify") {
 		t.Errorf("err = %v", err)
 	}
@@ -1446,7 +1446,7 @@ func TestBlockAlreadyBlocked(t *testing.T) {
 	a.BlockedBy = []model.Ref{{Number: 2, State: "OPEN"}}
 	f := newFake(a, issue(2, "B", "P2", "bug"))
 	app, out, _ := newApp(f)
-	if err := app.Block(ctx, 1, 2, false); err != nil {
+	if err := app.Block(ctx, 1, []int{2}, false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "already blocked") {
@@ -1462,10 +1462,10 @@ func TestBlockRequiresOpenIssues(t *testing.T) {
 	closed.State = "CLOSED"
 	f := newFake(issue(1, "A", "P2", "bug"), closed)
 	app, _, _ := newApp(f)
-	if err := app.Block(ctx, 1, 2, false); err == nil || !strings.Contains(err.Error(), "closed blockers don't block") {
+	if err := app.Block(ctx, 1, []int{2}, false); err == nil || !strings.Contains(err.Error(), "closed blockers don't block") {
 		t.Errorf("err = %v", err)
 	}
-	if err := app.Block(ctx, 99, 1, false); err == nil || !strings.Contains(err.Error(), "not an open issue") {
+	if err := app.Block(ctx, 99, []int{1}, false); err == nil || !strings.Contains(err.Error(), "not an open issue") {
 		t.Errorf("err = %v", err)
 	}
 }
@@ -1481,7 +1481,7 @@ func TestBlockRefusesClosedTarget(t *testing.T) {
 	f := newFake(closed, issue(2, "B", "P2", "bug"))
 	app, _, _ := newApp(f)
 
-	err := app.Block(ctx, 1, 2, false)
+	err := app.Block(ctx, 1, []int{2}, false)
 	if err == nil || !strings.Contains(err.Error(), "#1 is closed (not planned)") {
 		t.Errorf("err = %v", err)
 	}
@@ -1504,7 +1504,7 @@ func TestUnblockRefusesClosedTarget(t *testing.T) {
 	f := newFake(closed, issue(2, "B", "P2", "bug"))
 	app, _, _ := newApp(f)
 
-	err := app.Unblock(ctx, 1, 2, false)
+	err := app.Unblock(ctx, 1, []int{2}, false)
 	if err == nil || !strings.Contains(err.Error(), "#1 is closed (completed)") {
 		t.Errorf("err = %v", err)
 	}
@@ -1534,13 +1534,13 @@ func TestWriteCommandsEditClosedWithOverride(t *testing.T) {
 	if got := f.byNumber(1).Labels; !slices.Contains(got, "P0") {
 		t.Errorf("override set did not apply: %v", got)
 	}
-	if err := app.Block(ctx, 1, 2, true); err != nil {
+	if err := app.Block(ctx, 1, []int{2}, true); err != nil {
 		t.Fatalf("block with override: %v", err)
 	}
 	if got := f.byNumber(1).BlockedBy; len(got) != 1 {
 		t.Errorf("override block did not apply: %v", got)
 	}
-	if err := app.Unblock(ctx, 1, 2, true); err != nil {
+	if err := app.Unblock(ctx, 1, []int{2}, true); err != nil {
 		t.Fatalf("unblock with override: %v", err)
 	}
 	if got := f.byNumber(1).BlockedBy; len(got) != 0 {
@@ -1553,7 +1553,7 @@ func TestUnblock(t *testing.T) {
 	a.BlockedBy = []model.Ref{{Number: 2, State: "OPEN"}}
 	f := newFake(a, issue(2, "B", "P2", "bug"))
 	app, out, _ := newApp(f)
-	if err := app.Unblock(ctx, 1, 2, false); err != nil {
+	if err := app.Unblock(ctx, 1, []int{2}, false); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.byNumber(1).BlockedBy) != 0 {
@@ -1567,7 +1567,7 @@ func TestUnblock(t *testing.T) {
 func TestUnblockNotBlocked(t *testing.T) {
 	f := newFake(issue(1, "A", "P2", "bug"), issue(2, "B", "P2", "bug"))
 	app, out, _ := newApp(f)
-	if err := app.Unblock(ctx, 1, 2, false); err != nil {
+	if err := app.Unblock(ctx, 1, []int{2}, false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "not blocked") {
@@ -1712,7 +1712,7 @@ func TestReportMutationWrapsRefetchFailure(t *testing.T) {
 	f.failOn["GetIssue"] = errors.New("boom") // only the JSON re-fetch calls it here
 	app, _, _ := newApp(f)
 	app.JSON = true
-	err := app.Block(ctx, 1, 2, false)
+	err := app.Block(ctx, 1, []int{2}, false)
 	if err == nil || !strings.Contains(err.Error(), "was updated, but fetching the result") {
 		t.Errorf("err = %v", err)
 	}
@@ -2541,5 +2541,198 @@ func TestCodeSpanGuidanceDoesNotClaimEveryBodyIsReadInABrowser(t *testing.T) {
 	}
 	if !strings.Contains(conventions.CodeSpanGuidance, "migrate local") {
 		t.Errorf("guidance %q does not say why local bodies follow the convention", conventions.CodeSpanGuidance)
+	}
+}
+
+// callsTo returns the recorded calls whose name is method, in order.
+func callsTo(f *fakeClient, method string) []string {
+	var got []string
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, method+" ") {
+			got = append(got, c)
+		}
+	}
+	return got
+}
+
+func TestBlockTakesSeveralBlockersInOneCall(t *testing.T) {
+	f := newFake(issue(1, "A", "P2", "bug"), issue(2, "B", "P2", "bug"), issue(3, "C", "P2", "bug"))
+	app, out, _ := newApp(f)
+	if err := app.Block(ctx, 1, []int{2, 3}, false); err != nil {
+		t.Fatal(err)
+	}
+	var got []int
+	for _, b := range f.byNumber(1).BlockedBy {
+		got = append(got, b.Number)
+	}
+	if !slices.Equal(got, []int{2, 3}) {
+		t.Errorf("blockedBy = %v, want [2 3]", got)
+	}
+	if want := "blocked #1 on #2, #3\n"; out.String() != want {
+		t.Errorf("output = %q, want %q", out.String(), want)
+	}
+	if n := len(callsTo(f, "ListIssues")); n != 1 {
+		t.Errorf("ListIssues called %d times; the graph is read once for the whole call", n)
+	}
+}
+
+// A cycle through any one blocker refuses the whole call before the first
+// write: a half-applied dependency set is the one outcome a caller cannot
+// tell from success by reading the exit code.
+func TestBlockSeveralRefusesAnyCycleBeforeWriting(t *testing.T) {
+	c := issue(3, "C", "P2", "bug")
+	c.BlockedBy = []model.Ref{{Number: 1, State: "OPEN"}}
+	f := newFake(issue(1, "A", "P2", "bug"), issue(2, "B", "P2", "bug"), c)
+	app, _, _ := newApp(f)
+	err := app.Block(ctx, 1, []int{2, 3}, false)
+	if err == nil || !strings.Contains(err.Error(), "cycle #1 → #3 → #1") {
+		t.Fatalf("err = %v, want the #3 cycle named", err)
+	}
+	if got := callsTo(f, "AddBlockedBy"); len(got) != 0 {
+		t.Errorf("writes before the refusal: %v", got)
+	}
+}
+
+func TestBlockSeveralRefusesAClosedBlockerBeforeWriting(t *testing.T) {
+	closed := issue(3, "C", "P2", "bug")
+	closed.State = "CLOSED"
+	f := newFake(issue(1, "A", "P2", "bug"), issue(2, "B", "P2", "bug"), closed)
+	app, _, _ := newApp(f)
+	err := app.Block(ctx, 1, []int{2, 3}, false)
+	if err == nil || !strings.Contains(err.Error(), "#3 is not an open issue") {
+		t.Fatalf("err = %v, want #3 refused", err)
+	}
+	if got := callsTo(f, "AddBlockedBy"); len(got) != 0 {
+		t.Errorf("writes before the refusal: %v", got)
+	}
+}
+
+func TestBlockSeveralAddsOnlyTheMissingEdges(t *testing.T) {
+	a := issue(1, "A", "P2", "bug")
+	a.BlockedBy = []model.Ref{{Number: 2, State: "OPEN"}}
+	f := newFake(a, issue(2, "B", "P2", "bug"), issue(3, "C", "P2", "bug"))
+	app, out, _ := newApp(f)
+	if err := app.Block(ctx, 1, []int{2, 3, 3}, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := callsTo(f, "AddBlockedBy"); !slices.Equal(got, []string{"AddBlockedBy 1 3"}) {
+		t.Errorf("writes = %v; want only the missing edge, once", got)
+	}
+	if want := "blocked #1 on #3; already blocked by #2\n"; out.String() != want {
+		t.Errorf("output = %q, want %q", out.String(), want)
+	}
+}
+
+func TestBlockSeveralAllAlreadyBlockedIsANoOp(t *testing.T) {
+	a := issue(1, "A", "P2", "bug")
+	a.BlockedBy = []model.Ref{{Number: 2, State: "OPEN"}, {Number: 3, State: "OPEN"}}
+	f := newFake(a, issue(2, "B", "P2", "bug"), issue(3, "C", "P2", "bug"))
+	app, out, _ := newApp(f)
+	if err := app.Block(ctx, 1, []int{2, 3}, false); err != nil {
+		t.Fatal(err)
+	}
+	if want := "#1 is already blocked by #2, #3\n"; out.String() != want {
+		t.Errorf("output = %q, want %q", out.String(), want)
+	}
+	assertNoWrites(t, f)
+}
+
+// A write that fails after others landed must say which landed, so the
+// caller neither retries edges that exist nor assumes the missing ones do.
+func TestBlockSeveralNamesWhatLandedWhenAWriteFails(t *testing.T) {
+	f := newFake(issue(1, "A", "P2", "bug"), issue(2, "B", "P2", "bug"), issue(3, "C", "P2", "bug"), issue(4, "D", "P2", "bug"))
+	f.failAfter["AddBlockedBy"] = failPoint{calls: 1, err: errors.New("boom")}
+	app, _, _ := newApp(f)
+	err := app.Block(ctx, 1, []int{2, 3, 4}, false)
+	want := "already blocked #1 on #2, but blocking on #3 failed: boom; not attempted: #4"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v; want %q", err, want)
+	}
+	if got := f.byNumber(1).BlockedBy; len(got) != 1 || got[0].Number != 2 {
+		t.Errorf("blockedBy = %v, want just #2", got)
+	}
+}
+
+func TestBlockSeveralJSONIsOneIssueDocument(t *testing.T) {
+	f := newFake(issue(1, "A", "P2", "bug"), issue(2, "B", "P2", "bug"), issue(3, "C", "P2", "bug"))
+	app, out, _ := newApp(f)
+	app.JSON = true
+	if err := app.Block(ctx, 1, []int{2, 3}, false); err != nil {
+		t.Fatal(err)
+	}
+	got := decodeJSON(t, out)
+	if blockers, _ := got["openBlockers"].([]any); len(blockers) != 2 {
+		t.Errorf("openBlockers = %v, want both new edges", got["openBlockers"])
+	}
+}
+
+func TestBlockRequiresABlocker(t *testing.T) {
+	f := newFake(issue(1, "A", "P2", "bug"))
+	app, _, _ := newApp(f)
+	exitCode(t, app.Block(ctx, 1, nil, false), ExitUsage)
+	exitCode(t, app.Unblock(ctx, 1, nil, false), ExitUsage)
+	if len(f.calls) != 0 {
+		t.Errorf("calls = %v; a usage error must come before any I/O", f.calls)
+	}
+}
+
+func TestUnblockTakesSeveralBlockersInOneCall(t *testing.T) {
+	a := issue(1, "A", "P2", "bug")
+	a.BlockedBy = []model.Ref{{Number: 2, State: "OPEN"}, {Number: 3, State: "OPEN"}, {Number: 4, State: "OPEN"}}
+	f := newFake(a, issue(2, "B", "P2", "bug"), issue(3, "C", "P2", "bug"), issue(4, "D", "P2", "bug"))
+	app, out, _ := newApp(f)
+	if err := app.Unblock(ctx, 1, []int{2, 3, 3}, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := callsTo(f, "RemoveBlockedBy"); !slices.Equal(got, []string{"RemoveBlockedBy 1 2", "RemoveBlockedBy 1 3"}) {
+		t.Errorf("writes = %v", got)
+	}
+	if got := f.byNumber(1).BlockedBy; len(got) != 1 || got[0].Number != 4 {
+		t.Errorf("blockedBy = %v, want just #4", got)
+	}
+	if want := "unblocked #1 from #2, #3\n"; out.String() != want {
+		t.Errorf("output = %q, want %q", out.String(), want)
+	}
+}
+
+func TestUnblockSeveralSkipsEdgesThatAreNotThere(t *testing.T) {
+	a := issue(1, "A", "P2", "bug")
+	a.BlockedBy = []model.Ref{{Number: 2, State: "OPEN"}}
+	f := newFake(a, issue(2, "B", "P2", "bug"), issue(3, "C", "P2", "bug"))
+	app, out, _ := newApp(f)
+	if err := app.Unblock(ctx, 1, []int{2, 3}, false); err != nil {
+		t.Fatal(err)
+	}
+	if want := "unblocked #1 from #2; not blocked by #3\n"; out.String() != want {
+		t.Errorf("output = %q, want %q", out.String(), want)
+	}
+	f = newFake(issue(1, "A", "P2", "bug"), issue(2, "B", "P2", "bug"), issue(3, "C", "P2", "bug"))
+	app, out, _ = newApp(f)
+	if err := app.Unblock(ctx, 1, []int{2, 3}, false); err != nil {
+		t.Fatal(err)
+	}
+	if want := "#1 is not blocked by #2, #3\n"; out.String() != want {
+		t.Errorf("output = %q, want %q", out.String(), want)
+	}
+	assertNoWrites(t, f)
+}
+
+func TestUnblockSeveralNamesWhatLandedWhenAWriteFails(t *testing.T) {
+	a := issue(1, "A", "P2", "bug")
+	a.BlockedBy = []model.Ref{{Number: 2, State: "OPEN"}, {Number: 3, State: "OPEN"}}
+	f := newFake(a, issue(2, "B", "P2", "bug"), issue(3, "C", "P2", "bug"))
+	f.failAfter["RemoveBlockedBy"] = failPoint{calls: 1, err: errors.New("boom")}
+	app, _, _ := newApp(f)
+	err := app.Unblock(ctx, 1, []int{2, 3}, false)
+	want := "already unblocked #1 from #2, but unblocking from #3 failed: boom"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v; want %q", err, want)
+	}
+	// A failure on the first write changed nothing, so the error stands as is.
+	f = newFake(a, issue(2, "B", "P2", "bug"), issue(3, "C", "P2", "bug"))
+	f.failOn["RemoveBlockedBy"] = errors.New("boom")
+	app, _, _ = newApp(f)
+	if err := app.Unblock(ctx, 1, []int{2, 3}, false); err == nil || err.Error() != "boom" {
+		t.Errorf("err = %v, want the bare failure", err)
 	}
 }

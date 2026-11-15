@@ -111,7 +111,9 @@ func surfaceKey(entry string) string {
 // removed are entries the old surface accepted that the new one does not —
 // the failures; added are new entries, which are always allowed. A rename
 // without an alias appears as one removal plus one addition; with an alias the
-// old name's key is still present and nothing is removed.
+// old name's key is still present and nothing is removed. Widening a flag to
+// repeatable is the one shape change that keeps every old command line valid,
+// so it is not a removal; narrowing back is.
 func diffSurface(old, cur []string) (removed, added []string) {
 	have := func(set []string) map[string]bool {
 		m := make(map[string]bool, len(set))
@@ -122,7 +124,10 @@ func diffSurface(old, cur []string) (removed, added []string) {
 	}
 	oldKeys, curKeys := have(old), have(cur)
 	for _, e := range old {
-		if !curKeys[surfaceKey(e)] {
+		key := surfaceKey(e)
+		// A single-value flag that became repeatable still accepts every
+		// command line it did: `--on 5` parses either way.
+		if !curKeys[key] && !curKeys[key+" repeatable"] {
 			removed = append(removed, e)
 		}
 	}
@@ -189,6 +194,7 @@ func TestDiffSurface(t *testing.T) {
 	}
 	cases := []struct {
 		name        string
+		old         []string // the committed surface; base when nil
 		cur         []string
 		wantRemoved []string
 		wantAdded   []string
@@ -221,6 +227,26 @@ func TestDiffSurface(t *testing.T) {
 			wantAdded: []string{"flag hew list --finished bool"},
 		},
 		{
+			// `--on 5` still parses when --on may repeat, so widening a
+			// single-value flag costs no caller anything; the reverse does.
+			name: "a flag that becomes repeatable is not a removal",
+			cur: []string{
+				"command hew list", "flag hew list --closed bool",
+				"flag hew list --limit int repeatable", "args hew show <n>",
+			},
+			wantAdded: []string{"flag hew list --limit int repeatable"},
+		},
+		{
+			name: "a flag that stops being repeatable is a removal",
+			cur: []string{
+				"command hew list", "flag hew list --closed bool",
+				"flag hew list --limit int", "args hew show <n>",
+			},
+			old:         []string{"command hew list", "flag hew list --closed bool", "flag hew list --limit int repeatable", "args hew show <n>"},
+			wantRemoved: []string{"flag hew list --limit int repeatable"},
+			wantAdded:   []string{"flag hew list --limit int"},
+		},
+		{
 			name:      "addition passes",
 			cur:       append(slices.Clone(base), "flag hew list --all bool", "command hew archive"),
 			wantAdded: []string{"flag hew list --all bool", "command hew archive"},
@@ -246,7 +272,11 @@ func TestDiffSurface(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			removed, added := diffSurface(base, tc.cur)
+			old := base
+			if tc.old != nil {
+				old = tc.old
+			}
+			removed, added := diffSurface(old, tc.cur)
 			if !slices.Equal(removed, tc.wantRemoved) {
 				t.Errorf("removed = %q, want %q", removed, tc.wantRemoved)
 			}

@@ -4,6 +4,7 @@ args hew close <n>
 args hew epic status [<n>]
 args hew hooks install <claude|codex|cursor|opencode>
 args hew hooks remove <claude|codex|cursor|opencode>
+args hew migrate beads [<issues.jsonl>]
 args hew release <n>
 args hew reopen <n>
 args hew search <terms>
@@ -43,11 +44,13 @@ command hew triage
 command hew unblock
 flag hew --json bool
 flag hew --repo string
+flag hew apply --checkpoint string
 flag hew apply --dry-run bool
+flag hew apply --file string
 flag hew apply --state string
 flag hew apply --throttle duration
 flag hew block --closed bool
-flag hew block --on int
+flag hew block --on int repeatable
 flag hew close --completed bool
 flag hew close --duplicate-of int
 flag hew close --reason string
@@ -90,11 +93,13 @@ flag hew list --closed bool
 flag hew list --epic int
 flag hew list --label string
 flag hew list --state string
+flag hew migrate beads --checkpoint string
 flag hew migrate beads --dry-run bool
 flag hew migrate beads --file string
 flag hew migrate beads --include-closed bool
 flag hew migrate beads --state string
 flag hew migrate beads --throttle duration
+flag hew migrate local --checkpoint string
 flag hew migrate local --dry-run bool
 flag hew migrate local --state string
 flag hew migrate local --throttle duration
@@ -126,4 +131,4 @@ flag hew start --priority string
 flag hew start --show bool
 flag hew triage --search string
 flag hew unblock --closed bool
-flag hew unblock --from int
+flag hew unblock --from int repeatable

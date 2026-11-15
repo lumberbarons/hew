@@ -24,7 +24,7 @@ func TestFixedArgumentsRejectSurplus(t *testing.T) {
 		{"apply", "one.jsonl", "two.jsonl"}, {"init", "extra"},
 		{"hooks", "install", "claude", "extra"},
 		{"hooks", "remove", "claude", "extra"},
-		{"migrate", "beads", "extra"},
+		{"migrate", "beads", "one.jsonl", "two.jsonl"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			// A malformed repo is a tripwire: reaching buildApp is already
@@ -72,7 +72,8 @@ func TestFixedArgumentsAcceptValidInput(t *testing.T) {
 		{[]string{"apply"}, []string{"plan.jsonl"}}, {[]string{"init"}, nil},
 		{[]string{"hooks", "install"}, []string{"claude"}},
 		{[]string{"hooks", "remove"}, []string{"codex"}},
-		{[]string{"migrate", "beads"}, nil},
+		{[]string{"migrate", "beads"}, nil}, {[]string{"migrate", "beads"}, []string{"issues.jsonl"}},
+		{[]string{"apply"}, []string{"--file", "plan.jsonl"}},
 	} {
 		t.Run(strings.Join(append(append([]string{}, tc.path...), tc.args...), " "), func(t *testing.T) {
 			cmd := root()
@@ -104,7 +105,7 @@ func TestIssueFlagsRejectNonPositive(t *testing.T) {
 	}
 	for _, tc := range cases {
 		values := []string{"0", "-5"}
-		if tc.flag == "blocked-by" || tc.flag == "children" || tc.flag == "for" {
+		if tc.flag == "blocked-by" || tc.flag == "children" || tc.flag == "for" || tc.flag == "on" || tc.flag == "from" {
 			values = append(values, "12,0", "12,-5", "0,12", "-5,12")
 		}
 		for _, value := range values {

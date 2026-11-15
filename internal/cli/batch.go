@@ -85,11 +85,11 @@ func edgeKey(kind plan.EdgeKind, from, to int) string {
 
 // restartHint is appended to every rejection. Naming the remedy matters more
 // here than usual: the output is read by agents, and the obvious move —
-// deleting the state file — silently re-creates everything the interrupted
+// deleting the checkpoint file — silently re-creates everything the interrupted
 // run already created, which is the one outcome the checkpoint exists to
 // prevent.
 func restartHint(path string) string {
-	return fmt.Sprintf("pass --state with a new path to start a fresh run (every issue the interrupted run already created will be created again), or delete %s", path)
+	return fmt.Sprintf("pass --checkpoint with a new path to start a fresh run (every issue the interrupted run already created will be created again), or delete %s", path)
 }
 
 // stateRepo is the identity a checkpoint binds to: the GitHub repository, or

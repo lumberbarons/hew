@@ -248,14 +248,14 @@ func fixedArgs(min, max int) ucli.BeforeFunc {
 		if err := appcli.ValidateArgCount(cmd.Args().Slice(), min, max, usage); err != nil {
 			return ctx, err
 		}
-		for _, name := range []string{"parent", "epic", "duplicate-of", "discovered-from", "on", "from"} {
+		for _, name := range []string{"parent", "epic", "duplicate-of", "discovered-from"} {
 			if cmd.IsSet(name) {
 				if err := appcli.ValidateIssueNumbers(name, cmd.Int(name)); err != nil {
 					return ctx, err
 				}
 			}
 		}
-		for _, name := range []string{"blocked-by", "children", "for"} {
+		for _, name := range []string{"blocked-by", "children", "for", "on", "from"} {
 			if cmd.IsSet(name) {
 				if err := appcli.ValidateIssueNumbers(name, cmd.IntSlice(name)...); err != nil {
 					return ctx, err
@@ -332,10 +332,10 @@ func listCmd() *ucli.Command {
 			&ucli.StringFlag{Name: "label", Usage: "only issues with this label (case-insensitive)"},
 			&ucli.IntFlag{Name: "epic", Usage: "only children of epic `N`"},
 			&ucli.StringFlag{Name: "state", Usage: "issue state: `open`, closed, or all"},
-			&ucli.BoolFlag{Name: "closed", Usage: "alias for --state closed"},
+			&ucli.BoolFlag{Name: "closed", Hidden: true, Usage: "deprecated: use --state closed"},
 			&ucli.BoolFlag{Name: "bodies", Usage: "include issue bodies (requires --json) for single-call dedup"},
 		},
-		Before: fixedArgs(0, 0),
+		Before: before(fixedArgs(0, 0), noteDeprecated("closed", "--state closed")),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
 			if err != nil {
@@ -747,10 +747,10 @@ func reopenCmd() *ucli.Command {
 func blockCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:      "block",
-		Usage:     "add a native dependency (cycle-checked)",
+		Usage:     "add native dependencies (cycle-checked before any is written)",
 		ArgsUsage: "<n> --on <m>",
 		Flags: []ucli.Flag{
-			&ucli.IntFlag{Name: "on", Usage: "blocking issue `N` (required)", Required: true},
+			&ucli.IntSliceFlag{Name: "on", Usage: "blocking issue `N` (required; repeatable)", Required: true},
 			closedOverrideFlag(),
 		},
 		Before: fixedArgs(1, 1),
@@ -763,7 +763,7 @@ func blockCmd() *ucli.Command {
 			if err != nil {
 				return err
 			}
-			return app.Block(ctx, n, cmd.Int("on"), cmd.Bool("closed"))
+			return app.Block(ctx, n, cmd.IntSlice("on"), cmd.Bool("closed"))
 		},
 	}
 }
@@ -771,10 +771,10 @@ func blockCmd() *ucli.Command {
 func unblockCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:      "unblock",
-		Usage:     "remove a dependency",
+		Usage:     "remove dependencies",
 		ArgsUsage: "<n> --from <m>",
 		Flags: []ucli.Flag{
-			&ucli.IntFlag{Name: "from", Usage: "blocking issue `N` (required)", Required: true},
+			&ucli.IntSliceFlag{Name: "from", Usage: "blocking issue `N` (required; repeatable)", Required: true},
 			closedOverrideFlag(),
 		},
 		Before: fixedArgs(1, 1),
@@ -787,7 +787,7 @@ func unblockCmd() *ucli.Command {
 			if err != nil {
 				return err
 			}
-			return app.Unblock(ctx, n, cmd.Int("from"), cmd.Bool("closed"))
+			return app.Unblock(ctx, n, cmd.IntSlice("from"), cmd.Bool("closed"))
 		},
 	}
 }
@@ -938,25 +938,27 @@ Fields and their shapes:
 
 Creation is checkpointed after every write, so a failed run resumes without
 duplicates; dependency cycles between entries are rejected before anything is
-written. The state file is local scratch bound to this repository and to a
-digest of the plan: edit the plan, move repositories, or bring a state file
+written. The checkpoint is local scratch bound to this repository and to a
+digest of the plan: edit the plan, move repositories, or bring a checkpoint
 from elsewhere and it is refused rather than trusted.
 
 ` + conventions.CodeSpanGuidance,
 		Flags: []ucli.Flag{
-			&ucli.StringFlag{Name: "state", Usage: "resume-state `FILE`, bound to this repo and plan (default: <plan>.state.json)"},
+			&ucli.StringFlag{Name: "file", Usage: "the plan `FILE`, instead of passing it as an argument"},
+			checkpointFlag("plan", "<plan>.state.json"),
+			deprecatedStringFlag("state", "--checkpoint"),
 			&ucli.BoolFlag{Name: "dry-run", Usage: "print the plan without creating anything"},
 			&ucli.DurationFlag{Name: "throttle", Usage: "pause between writes", Value: 500 * time.Millisecond},
 		},
-		Before: fixedArgs(1, 1),
+		Before: before(fixedArgs(0, 1), inputBefore(true), checkpointBefore),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
 			if err != nil {
 				return err
 			}
 			return app.Apply(ctx, appcli.ApplyOpts{
-				File:      cmd.Args().First(),
-				StatePath: cmd.String("state"),
+				File:      inputFile(cmd),
+				StatePath: checkpointPath(cmd),
 				DryRun:    cmd.Bool("dry-run"),
 				Throttle:  cmd.Duration("throttle"),
 			})
@@ -971,18 +973,20 @@ func migrateCmd() *ucli.Command {
 		Action: groupAction,
 		Commands: []*ucli.Command{
 			{
-				Name:  "beads",
-				Usage: "migrate a beads (bd) database: labels, deps, epics, in-progress state",
+				Name:      "beads",
+				Usage:     "migrate a beads (bd) database: labels, deps, epics, in-progress state",
+				ArgsUsage: "[<issues.jsonl>]",
 				Flags: []ucli.Flag{
-					&ucli.StringFlag{Name: "file", Usage: "beads snapshot (default: <project>/.beads/issues.jsonl)"},
-					&ucli.StringFlag{Name: "state", Usage: "resume-state `FILE`, bound to this repo and snapshot (default: alongside the snapshot)"},
+					&ucli.StringFlag{Name: "file", Usage: "beads snapshot `FILE`, instead of passing it as an argument (default: <project>/.beads/issues.jsonl)"},
+					checkpointFlag("snapshot", "alongside the snapshot"),
+					deprecatedStringFlag("state", "--checkpoint"),
 					&ucli.BoolFlag{Name: "dry-run", Usage: "print the plan without creating anything"},
 					&ucli.BoolFlag{Name: "include-closed", Usage: "also migrate closed beads (create, comment, close)"},
 					&ucli.DurationFlag{Name: "throttle", Usage: "pause between writes", Value: 500 * time.Millisecond},
 				},
-				Before: fixedArgs(0, 0),
+				Before: before(fixedArgs(0, 1), inputBefore(false), checkpointBefore),
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
-					file := cmd.String("file")
+					file := inputFile(cmd)
 					if file == "" {
 						cwd, err := os.Getwd()
 						if err != nil {
@@ -990,7 +994,7 @@ func migrateCmd() *ucli.Command {
 						}
 						root, err := appcli.FindProjectRoot(cwd)
 						if err != nil {
-							return fmt.Errorf("%w (or pass --file)", err)
+							return fmt.Errorf("%w (or pass the snapshot as an argument)", err)
 						}
 						file = filepath.Join(root, ".beads", "issues.jsonl")
 					}
@@ -1000,7 +1004,7 @@ func migrateCmd() *ucli.Command {
 					}
 					return app.MigrateBeads(ctx, appcli.MigrateOpts{
 						File:          file,
-						StatePath:     cmd.String("state"),
+						StatePath:     checkpointPath(cmd),
 						DryRun:        cmd.Bool("dry-run"),
 						IncludeClosed: cmd.Bool("include-closed"),
 						Throttle:      cmd.Duration("throttle"),
@@ -1023,11 +1027,12 @@ is locked for the whole run. If a step fails the tracker stays local and rerunni
 it stopped; the checkpoint is bound to the repository and to the exact contents
 of issues.jsonl, so changing local issues between runs is refused.`,
 				Flags: []ucli.Flag{
-					&ucli.StringFlag{Name: "state", Usage: "resume-state `FILE`, bound to this repo and issues.jsonl (default: .hew/migration-state.json)"},
+					checkpointFlag("issues.jsonl", ".hew/migration-state.json"),
+					deprecatedStringFlag("state", "--checkpoint"),
 					&ucli.BoolFlag{Name: "dry-run", Usage: "print the plan without creating anything"},
 					&ucli.DurationFlag{Name: "throttle", Usage: "pause between writes", Value: 500 * time.Millisecond},
 				},
-				Before: fixedArgs(0, 0),
+				Before: before(fixedArgs(0, 0), checkpointBefore),
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
 					tracker, err := local.MainDir("")
 					if err != nil {
@@ -1039,7 +1044,7 @@ of issues.jsonl, so changing local issues between runs is refused.`,
 					}
 					return app.MigrateLocal(ctx, appcli.MigrateLocalOpts{
 						Dir:       tracker,
-						StatePath: cmd.String("state"),
+						StatePath: checkpointPath(cmd),
 						DryRun:    cmd.Bool("dry-run"),
 						Throttle:  cmd.Duration("throttle"),
 					})

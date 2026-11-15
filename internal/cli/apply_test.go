@@ -566,7 +566,7 @@ func TestApplyRefusesUnboundState(t *testing.T) {
 	// The message has to name a way forward, and specifically has to say that
 	// the obvious one re-creates work, or an agent will silently duplicate a
 	// half-finished plan.
-	if !strings.Contains(err.Error(), "--state") || !strings.Contains(err.Error(), "created again") {
+	if !strings.Contains(err.Error(), "--checkpoint") || !strings.Contains(err.Error(), "created again") {
 		t.Errorf("error names no recovery: %v", err)
 	}
 	if len(f.calls) != 0 {
