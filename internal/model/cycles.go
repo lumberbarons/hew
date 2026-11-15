@@ -76,6 +76,21 @@ type CycleCheck struct {
 	Verifiable bool
 }
 
+// Checker is a prepared cycle check over one open-issue graph. Build it once
+// to check several prospective edges without rebuilding the graph for each,
+// which is what a multi-blocker write does.
+type Checker struct {
+	adj       map[int][]int
+	truncated map[int]bool
+}
+
+// NewChecker prepares a check over allOpen. The set has the same requirement
+// as CheckBlockedBy: it must be every open issue in the repository, or a
+// cycle whose members were filtered out goes undetected.
+func NewChecker(allOpen []Issue) *Checker {
+	return &Checker{adj: blockedByGraph(allOpen), truncated: truncatedBlockers(allOpen)}
+}
+
 // CheckBlockedBy reports whether adding "issue blocked by blocker" would
 // create a cycle. The check is transitive over blocked-by edges: the edge
 // closes a cycle iff blocker is already (transitively) blocked by issue.
@@ -84,11 +99,16 @@ type CycleCheck struct {
 // issue on the search path had a truncated blocker list the verdict is
 // marked unverifiable, because the missing edges could hide a cycle.
 func CheckBlockedBy(allOpen []Issue, issue, blocker int) CycleCheck {
+	return NewChecker(allOpen).Check(issue, blocker)
+}
+
+// Check answers one edge against the prepared graph, with CheckBlockedBy's
+// semantics. A found cycle is definite even when part of the graph is
+// truncated; a nil cycle on a truncated path is not proof the edge is safe.
+func (c *Checker) Check(issue, blocker int) CycleCheck {
 	if issue == blocker {
 		return CycleCheck{Cycle: []int{issue, issue}, Verifiable: true}
 	}
-	adj := blockedByGraph(allOpen)
-	truncated := truncatedBlockers(allOpen)
 	verifiable := true
 	// Find a path blocker -> ... -> issue through blocked-by edges.
 	visited := map[int]bool{blocker: true}
@@ -97,12 +117,12 @@ func CheckBlockedBy(allOpen []Issue, issue, blocker int) CycleCheck {
 		if n == issue {
 			return path
 		}
-		if truncated[n] {
+		if c.truncated[n] {
 			// n's blocked-by list is incomplete; a hidden edge could reach
 			// issue, so a "no cycle" answer here can't be trusted.
 			verifiable = false
 		}
-		for _, m := range adj[n] {
+		for _, m := range c.adj[n] {
 			if !visited[m] {
 				visited[m] = true
 				if p := dfs(m, append(path, m)); p != nil {

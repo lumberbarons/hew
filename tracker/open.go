@@ -203,11 +203,13 @@ func defaultActor(dir string) (string, error) {
 }
 
 // asAuthError turns the GitHub client's auth failure into the library's typed
-// error, so a consumer matches one type on either side of the boundary.
+// error, so a consumer matches one type on either side of the boundary. The
+// store's error is the cause, keeping the message that names `gh auth login`
+// and the credential failure behind it.
 func asAuthError(err error) error {
 	var auth *gh.AuthError
 	if errors.As(err, &auth) {
-		return &AuthError{Err: auth.Err}
+		return &AuthError{Err: auth}
 	}
 	return err
 }

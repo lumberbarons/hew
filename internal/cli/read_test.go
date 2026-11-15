@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -565,11 +566,31 @@ func TestShow(t *testing.T) {
 	}
 }
 
+// A rejected token keeps the CLI contract an agent loop branches on: exit 4,
+// and the message still names the command that fixes it.
+func TestReadyAuthFailureKeepsAuthExit(t *testing.T) {
+	f := newFake()
+	f.failOn["ListIssues"] = &gh.AuthError{Err: errors.New("HTTP 401: Bad credentials")}
+	app, _, _ := newApp(f)
+	err := app.Ready(ctx, ReadyOpts{})
+	if err == nil {
+		t.Fatal("Ready() = nil, want the auth failure")
+	}
+	if got := ExitCode(err); got != ExitAuth {
+		t.Errorf("ExitCode = %d, want %d", got, ExitAuth)
+	}
+	if !strings.Contains(err.Error(), "gh auth login") {
+		t.Errorf("err = %q, want it to name `gh auth login`", err)
+	}
+}
+
+// The store's own not-found text is the message: the tracker boundary types
+// the error but must not reduce it to a generic one.
 func TestShowNotFound(t *testing.T) {
 	app, _, _ := newApp(newFake())
 	err := app.Show(ctx, 99)
-	if err == nil || !strings.Contains(err.Error(), "not found") {
-		t.Errorf("err = %v", err)
+	if err == nil || err.Error() != "issue #99 not found in o/r" {
+		t.Errorf("err = %v, want the store's not-found message", err)
 	}
 }
 
