@@ -17,10 +17,14 @@ import (
 // and GetIssue, so embedding the interface keeps the rest out of the way.
 type fakeClient struct {
 	gh.IssueStore
-	issues []model.Issue
+	issues  []model.Issue
+	listErr error
 }
 
 func (f *fakeClient) ListIssues(_ context.Context, states []gh.IssueState) ([]model.Issue, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	var out []model.Issue
 	for _, i := range f.issues {
 		if slices.Contains(states, gh.IssueState(i.State)) {
@@ -86,18 +90,31 @@ func TestSnapshotQueriesAndWarningsAgainstFakeClient(t *testing.T) {
 	cappedSubs := fixture(10, "Capped sub-issues", "P2", "task", "epic")
 	cappedSubs.SubIssuesTotal = 3
 
+	// Contradictions are prime's business: a multi-priority issue must not add
+	// a snapshot warning, and in-progress keeps it out of Ready.
+	contradictory := fixture(11, "Contradictory", "P1", "P3", "bug", "in-progress")
+	contradictory.Assignees = []string{"alice"}
+
+	// Untriaged issues are ordinary tracker state: Issues lists them, Ready
+	// does not.
+	untriaged := fixture(12, "Untriaged")
+
 	store := &fakeClient{issues: []model.Issue{
 		ready, claimed, blocked, epic, child, closed, capped, cycleA, cycleB, cappedSubs,
+		contradictory, untriaged,
 	}}
 	snapshot, err := Wrap(store).Snapshot(context.Background(), SnapshotOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got, want := snapshot.States(), []State{StateOpen}; !slices.Equal(got, want) {
+		t.Errorf("States = %v, want %v", got, want)
+	}
 
 	if got, want := numbers(snapshot.Ready()), []int{1, 5}; !slices.Equal(got, want) {
 		t.Errorf("Ready = %v, want %v", got, want)
 	}
-	if got, want := numbers(snapshot.Claimed()), []int{2}; !slices.Equal(got, want) {
+	if got, want := numbers(snapshot.Claimed()), []int{2, 11}; !slices.Equal(got, want) {
 		t.Errorf("Claimed = %v, want %v", got, want)
 	}
 	if got, want := numbers(snapshot.Blocked()), []int{3, 8, 9, 7}; !slices.Equal(got, want) {
@@ -115,7 +132,7 @@ func TestSnapshotQueriesAndWarningsAgainstFakeClient(t *testing.T) {
 
 	// The list view carries every fetched issue in list order: ready first,
 	// then claimed, blocked, epics and closed.
-	if got, want := numbers(snapshot.Issues()), []int{1, 5, 2, 3, 8, 9, 7, 4, 10}; !slices.Equal(got, want) {
+	if got, want := numbers(snapshot.Issues()), []int{1, 5, 12, 2, 11, 3, 8, 9, 7, 4, 10}; !slices.Equal(got, want) {
 		t.Errorf("Issues = %v, want %v", got, want)
 	}
 
@@ -158,6 +175,9 @@ func TestSnapshotIncludesClosedOnRequest(t *testing.T) {
 	if got.State != "closed" || got.StateReason() != "completed" {
 		t.Errorf("Get(2) = %+v, want closed/completed", got)
 	}
+	if got.Body == nil || *got.Body != closed.Body {
+		t.Errorf("Get(2) body = %v, want %q", got.Body, closed.Body)
+	}
 }
 
 func TestGetCarriesBodyAndComments(t *testing.T) {
@@ -189,6 +209,12 @@ func TestGetCarriesBodyAndComments(t *testing.T) {
 	}
 	if !got.HasLabel("BUG") {
 		t.Error("HasLabel is not case-insensitive")
+	}
+	if got.HasLabel("enhancement") {
+		t.Error("HasLabel matched a label the issue does not carry")
+	}
+	if got.HasLabel("BU") {
+		t.Error("HasLabel matched a prefix rather than the whole label")
 	}
 	if got.ParentTitle() != "Parent" || got.StateReason() != "completed" {
 		t.Errorf("ParentTitle/StateReason = %q/%q", got.ParentTitle(), got.StateReason())
@@ -346,5 +372,43 @@ func TestSnapshotResultsDoNotAliasStoredState(t *testing.T) {
 	warnings[0].Cycle[0] = 99
 	if cycle := snapshot.Warnings()[0].Cycle; cycle[0] != 3 {
 		t.Errorf("warning cycle changed through a query result: %v", cycle)
+	}
+}
+
+func TestSnapshotBlockedAndClaimedRespectOpenState(t *testing.T) {
+	// A closed blocker is non-blocking, and a closed issue is in neither
+	// queue, while an issue can be both claimed and blocked.
+	closedOnlyBlocker := fixture(1, "Closed blocker", "P2", "bug")
+	closedOnlyBlocker.BlockedBy = []model.Ref{{Number: 2, State: "CLOSED"}}
+	open := fixture(4, "Open blocker", "P2", "bug")
+	claimedBlocked := fixture(3, "Claimed and blocked", "P2", "bug", "in-progress")
+	claimedBlocked.Assignees = []string{"alice"}
+	claimedBlocked.BlockedBy = []model.Ref{{Number: 4, State: "OPEN"}}
+	closedClaimed := fixture(5, "Closed claimed", "P2", "bug", "in-progress")
+	closedClaimed.State = "CLOSED"
+	closedClaimed.Assignees = []string{"alice"}
+	closedClaimed.BlockedBy = []model.Ref{{Number: 4, State: "OPEN"}}
+
+	store := &fakeClient{issues: []model.Issue{closedOnlyBlocker, open, claimedBlocked, closedClaimed}}
+	snapshot, err := Wrap(store).Snapshot(context.Background(), SnapshotOptions{States: []State{StateOpen, StateClosed}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := numbers(snapshot.Blocked()), []int{3}; !slices.Equal(got, want) {
+		t.Errorf("Blocked = %v, want %v", got, want)
+	}
+	if got, want := numbers(snapshot.Claimed()), []int{3}; !slices.Equal(got, want) {
+		t.Errorf("Claimed = %v, want %v", got, want)
+	}
+}
+
+func TestSnapshotPropagatesListErrors(t *testing.T) {
+	boom := errors.New("backend down")
+	snapshot, err := Wrap(&fakeClient{listErr: boom}).Snapshot(context.Background(), SnapshotOptions{})
+	if !errors.Is(err, boom) {
+		t.Errorf("Snapshot error = %v, want %v", err, boom)
+	}
+	if snapshot != nil {
+		t.Errorf("Snapshot = %+v on a failed fetch, want nil", snapshot)
 	}
 }
