@@ -98,7 +98,12 @@ func annotations(i model.Issue) string {
 		}
 		parts = append(parts, "blocked by "+strings.Join(refs, " "))
 	}
-	if i.Claimed() {
+	// A claim says someone is actively working the issue, which a closed
+	// issue cannot be: whatever closed it ended the work. The label and
+	// assignee stay on the closed issue — close is not the claim's owner,
+	// reopen's release is — but the read path renders them only while open,
+	// so a closed issue reads [closed] instead of [in progress @x; closed].
+	if i.Claimed() && i.IsOpen() {
 		claim := "in progress"
 		if len(i.Assignees) > 0 {
 			claim += " @" + SanitizeInline(strings.Join(i.Assignees, " @"))

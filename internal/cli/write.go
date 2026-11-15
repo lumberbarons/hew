@@ -622,7 +622,10 @@ func (a *App) swapType(ctx context.Context, issue model.Issue, typ string) error
 
 // Close comments the reason and closes: not-planned unless --completed or
 // --duplicate-of. Closing via PR is the norm; this is for wontfix/duplicate.
-func (a *App) Close(ctx context.Context, number int, reason string, completed bool, duplicateOf int) error {
+// An epic with open sub-issues is refused without force: closing one strands
+// the children under a closed parent, and the guard names the flag rather
+// than trusting a warning to be read.
+func (a *App) Close(ctx context.Context, number int, reason string, completed bool, duplicateOf int, force bool) error {
 	if completed && duplicateOf > 0 {
 		return usageErr("--completed and --duplicate-of are mutually exclusive")
 	}
@@ -653,6 +656,10 @@ func (a *App) Close(ctx context.Context, number int, reason string, completed bo
 		// if this call was a mistake.
 		return genericErr("#%d is already closed%s", number, closeState(issue))
 	}
+	// Before the reason comment, so a refusal leaves the epic untouched.
+	if err := a.guardOpenChildren(issue, force); err != nil {
+		return err
+	}
 	if duplicateOf > 0 {
 		// Before the comment, so a typo leaves the issue open and untouched.
 		if _, err := a.requireIssue(ctx, duplicateOf, "--duplicate-of"); err != nil {
@@ -673,6 +680,26 @@ func (a *App) Close(ctx context.Context, number int, reason string, completed bo
 		return fmt.Errorf("posted the reason comment on #%d but closing it failed (a retry will comment again): %w", number, err)
 	}
 	return a.reportMutation(ctx, number, "closed #%d (%s)\n", number, formatStateReason(string(stateReason)))
+}
+
+// guardOpenChildren refuses closing an epic that still has open sub-issues:
+// they would be stranded under a closed parent, and an epic's progress rollup
+// would then read as done while its work is not. The count is the server-side
+// summary (Total minus Completed), so a capped sub-issue connection cannot
+// hide a child from the guard.
+func (a *App) guardOpenChildren(issue model.Issue, force bool) error {
+	if force || !issue.IsEpic() {
+		return nil
+	}
+	open := issue.SubIssuesTotal - issue.SubIssuesCompleted
+	if open <= 0 {
+		return nil
+	}
+	unit := "sub-issues"
+	if open == 1 {
+		unit = "sub-issue"
+	}
+	return genericErr("#%d is an epic with %d open %s; pass --force to close it anyway", issue.Number, open, unit)
 }
 
 // requireIssue resolves an issue number the caller names from another issue's

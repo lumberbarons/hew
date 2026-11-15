@@ -213,6 +213,7 @@ hew pr [--for N ...] [--title "..."] [--amend]
                                   # trailers are appended, never duplicated)
           [--base BRANCH] [--ready]  # creation-only: --amend refuses both
 hew close <n> --reason "..." [--completed | --duplicate-of M]
+                                        # --force closes an epic that still has open sub-issues
 hew reopen <n> --reason "..."          # comment + reopen; releases a stale claim,
                                        # no-op on an open issue
 hew block <n> --on <m> [--on <m> ...] [--closed]

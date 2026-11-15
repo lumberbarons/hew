@@ -1052,7 +1052,7 @@ func TestSetRefusesClosedIssue(t *testing.T) {
 func TestCloseNotPlanned(t *testing.T) {
 	f := newFake(issue(1, "Work", "P2", "bug"))
 	app, out, _ := newApp(f)
-	if err := app.Close(ctx, 1, "wontfix: superseded", false, 0); err != nil {
+	if err := app.Close(ctx, 1, "wontfix: superseded", false, 0, false); err != nil {
 		t.Fatal(err)
 	}
 	i := f.byNumber(1)
@@ -1070,7 +1070,7 @@ func TestCloseNotPlanned(t *testing.T) {
 func TestCloseCompleted(t *testing.T) {
 	f := newFake(issue(1, "Work", "P2", "bug"))
 	app, _, _ := newApp(f)
-	if err := app.Close(ctx, 1, "done out of band", true, 0); err != nil {
+	if err := app.Close(ctx, 1, "done out of band", true, 0, false); err != nil {
 		t.Fatal(err)
 	}
 	if f.byNumber(1).StateReason != "COMPLETED" {
@@ -1081,7 +1081,7 @@ func TestCloseCompleted(t *testing.T) {
 func TestCloseDuplicate(t *testing.T) {
 	f := newFake(issue(1, "Work", "P2", "bug"), issue(5, "Original", "P2", "bug"))
 	app, _, _ := newApp(f)
-	if err := app.Close(ctx, 1, "", false, 5); err != nil {
+	if err := app.Close(ctx, 1, "", false, 5, false); err != nil {
 		t.Fatal(err)
 	}
 	if f.byNumber(1).StateReason != "DUPLICATE" {
@@ -1095,8 +1095,8 @@ func TestCloseDuplicate(t *testing.T) {
 func TestCloseValidation(t *testing.T) {
 	f := newFake(issue(1, "Work", "P2", "bug"))
 	app, _, _ := newApp(f)
-	exitCode(t, app.Close(ctx, 1, "r", true, 5), ExitUsage)
-	exitCode(t, app.Close(ctx, 1, "", false, 0), ExitUsage)
+	exitCode(t, app.Close(ctx, 1, "r", true, 5, false), ExitUsage)
+	exitCode(t, app.Close(ctx, 1, "", false, 0, false), ExitUsage)
 	if len(f.calls) != 0 || len(f.comments[1]) != 0 {
 		t.Errorf("refused close still touched the API: calls=%v comments=%v", f.calls, f.comments[1])
 	}
@@ -1104,7 +1104,7 @@ func TestCloseValidation(t *testing.T) {
 	closed.State = "CLOSED"
 	f2 := newFake(closed)
 	app2, _, _ := newApp(f2)
-	if err := app2.Close(ctx, 2, "r", false, 0); err == nil || !strings.Contains(err.Error(), "already closed") {
+	if err := app2.Close(ctx, 2, "r", false, 0, false); err == nil || !strings.Contains(err.Error(), "already closed") {
 		t.Errorf("err = %v", err)
 	}
 	// The already-closed guard runs before the reason comment posts:
@@ -1129,11 +1129,11 @@ func TestCloseReportsExistingCloseState(t *testing.T) {
 	f := newFake(completed, reasonless)
 	app, _, _ := newApp(f)
 
-	err := app.Close(ctx, 1, "r", false, 0)
+	err := app.Close(ctx, 1, "r", false, 0, false)
 	if err == nil || !strings.Contains(err.Error(), "#1 is already closed (completed)") {
 		t.Errorf("err = %v", err)
 	}
-	err = app.Close(ctx, 2, "r", false, 0)
+	err = app.Close(ctx, 2, "r", false, 0, false)
 	if err == nil || !strings.Contains(err.Error(), "#2 is already closed") {
 		t.Errorf("err = %v", err)
 	}
@@ -1142,6 +1142,94 @@ func TestCloseReportsExistingCloseState(t *testing.T) {
 	}
 	if len(f.comments[1]) != 0 || len(f.comments[2]) != 0 {
 		t.Errorf("refused close still commented: %v %v", f.comments[1], f.comments[2])
+	}
+}
+
+// epicWithChild builds an epic and one open child, parent-linked both ways,
+// for the close guard tests.
+func epicWithChild() (*fakeClient, *model.Issue) {
+	epic := issue(10, "Epic: big", "P2", model.EpicLabel)
+	epic.SubIssues = []model.Ref{{Number: 11, State: "OPEN"}}
+	child := issue(11, "Child", "P2", "task")
+	child.Parent = &model.Ref{Number: 10, State: "OPEN"}
+	return newFake(epic, child), epic
+}
+
+// Closing an epic with open sub-issues strands them under a closed parent,
+// so it is refused until --force says the orphaning is intended (#237). The
+// refusal lands before the reason comment, so it leaves the epic untouched.
+func TestCloseRefusesEpicWithOpenChildren(t *testing.T) {
+	f, _ := epicWithChild()
+	app, _, _ := newApp(f)
+	err := app.Close(ctx, 10, "epic abandoned", false, 0, false)
+	if err == nil || !strings.Contains(err.Error(), "#10 is an epic with 1 open sub-issue") {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "--force") {
+		t.Errorf("remedy not named: %v", err)
+	}
+	// The guard runs before the reason comment: the refused call read the
+	// epic and wrote nothing.
+	assertOnlyReads(t, f)
+	if got := f.byNumber(10); got.State != "OPEN" || len(f.comments[10]) != 0 {
+		t.Errorf("refused close mutated the epic: state=%s comments=%v", got.State, f.comments[10])
+	}
+
+	// --completed is refused on the same terms: the open children are the
+	// problem, not the close reason.
+	f2, _ := epicWithChild()
+	app2, _, _ := newApp(f2)
+	if err := app2.Close(ctx, 10, "done", true, 0, false); err == nil || !strings.Contains(err.Error(), "1 open sub-issue") {
+		t.Errorf("err = %v", err)
+	}
+
+	// A childless epic has nothing to strand: it closes without the flag.
+	lone := issue(20, "Epic: abandoned before children", "P2", model.EpicLabel)
+	f3 := newFake(lone)
+	app3, _, _ := newApp(f3)
+	if err := app3.Close(ctx, 20, "epic abandoned", false, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := f3.byNumber(20); got.State != "CLOSED" {
+		t.Errorf("childless epic state = %s", got.State)
+	}
+}
+
+// --force closes the epic anyway. It accepts the orphaning of the named
+// children; it does not cascade a close onto them.
+func TestCloseEpicForceClosesDespiteOpenChildren(t *testing.T) {
+	f, _ := epicWithChild()
+	app, out, _ := newApp(f)
+	if err := app.Close(ctx, 10, "superseded by #12", false, 0, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.byNumber(10); got.State != "CLOSED" {
+		t.Errorf("state = %s, want CLOSED", got.State)
+	}
+	if got := f.byNumber(11); got.State != "OPEN" {
+		t.Errorf("child state = %s, want OPEN (force does not cascade)", got.State)
+	}
+	if !strings.Contains(out.String(), "closed #10 (not planned)") {
+		t.Errorf("output = %q", out.String())
+	}
+}
+
+// Close keeps the claim it found (#237): the in-progress label and assignee
+// stay, so reopen's release remains the one place claims are cleared and a
+// PR merge — which runs no hew — leaves closed issues shaped the same way.
+// The read path hides the claim on closed issues; the data is not close's to
+// clear.
+func TestCloseKeepsClaim(t *testing.T) {
+	claimed := issue(1, "Work", "P2", "bug", model.InProgressLabel)
+	claimed.Assignees = []string{"alice"}
+	f := newFake(claimed)
+	app, _, _ := newApp(f)
+	if err := app.Close(ctx, 1, "superseded", false, 0, false); err != nil {
+		t.Fatal(err)
+	}
+	i := f.byNumber(1)
+	if !i.Claimed() {
+		t.Errorf("close cleared the claim: labels=%v assignees=%v", i.Labels, i.Assignees)
 	}
 }
 
@@ -1730,7 +1818,7 @@ func TestCloseReportsCommentedWhenCloseFails(t *testing.T) {
 	f := newFake(issue(1, "A", "P2", "bug"))
 	f.failOn["CloseIssue"] = errors.New("boom")
 	app, _, _ := newApp(f)
-	err := app.Close(ctx, 1, "wontfix", false, 0)
+	err := app.Close(ctx, 1, "wontfix", false, 0, false)
 	if err == nil || !strings.Contains(err.Error(), "posted the reason comment") {
 		t.Errorf("err = %v", err)
 	}
@@ -2312,7 +2400,7 @@ func TestCloseDuplicateOfRefusesBadTargets(t *testing.T) {
 					t.Fatal(err)
 				}
 				app, _, _ := newLocalApp(store)
-				err = app.Close(ctx, work.Number, "", false, tc.target(work.Number))
+				err = app.Close(ctx, work.Number, "", false, tc.target(work.Number), false)
 				if err == nil {
 					t.Fatal("close accepted a bad --duplicate-of target")
 				}
@@ -2365,7 +2453,7 @@ func TestCloseDuplicateOfNamesTheTarget(t *testing.T) {
 				n := strconv.Itoa(original.Number)
 				reason, want := strings.ReplaceAll(tc.reason, "{n}", n), strings.ReplaceAll(tc.want, "{n}", n)
 				app, _, _ := newLocalApp(store)
-				if err := app.Close(ctx, dup.Number, reason, false, original.Number); err != nil {
+				if err := app.Close(ctx, dup.Number, reason, false, original.Number, false); err != nil {
 					t.Fatal(err)
 				}
 				after, err := store.GetIssue(ctx, dup.Number)
