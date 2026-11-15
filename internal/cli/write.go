@@ -17,6 +17,7 @@ import (
 	"github.com/lumberbarons/hew/internal/local"
 	"github.com/lumberbarons/hew/internal/model"
 	"github.com/lumberbarons/hew/internal/render"
+	"github.com/lumberbarons/hew/tracker"
 )
 
 // CreateOpts are the create command's inputs.
@@ -225,10 +226,16 @@ func formatStateReason(reason string) string {
 // recorded, and nothing for one closed before that field existed — "#20 is
 // closed ()" reads as a bug in the tool rather than a gap in the data.
 func closeState(issue model.Issue) string {
-	if issue.StateReason == "" {
+	return closeStateSuffix(issue.StateReason)
+}
+
+// closeStateSuffix is closeState's rendering for a raw close reason, such as
+// the one a typed tracker error carries.
+func closeStateSuffix(reason string) string {
+	if reason == "" {
 		return ""
 	}
-	return " (" + formatStateReason(issue.StateReason) + ")"
+	return " (" + formatStateReason(reason) + ")"
 }
 
 // guardClosed refuses a write aimed at a closed issue. Editing one is almost
@@ -867,128 +874,105 @@ func (a *App) releaseClaim(ctx context.Context, issue model.Issue) (string, erro
 	return "@" + render.SanitizeInline(strings.Join(issue.Assignees, " and @")) + "'s stale claim", nil
 }
 
-// Block adds native dependencies after a transitive client-side cycle
-// check — GitHub itself only rejects self-blocks and direct two-issue
-// cycles. It refuses a closed target unless allowClosed is set; a closed
-// blocker is refused outright, since closed blockers don't block.
-//
-// Several blockers are validated together and written only once every one has
-// passed, so a refusal never leaves a half-applied set. Each is checked against
-// the graph as it stands: every new edge starts at number, so a cycle through
-// two of them would revisit number and is already a cycle through one.
+// Block adds native dependencies through tracker, which owns the transitive
+// client-side cycle check — GitHub itself only rejects self-blocks and direct
+// two-issue cycles. The typed refusal is rendered here in the command's own
+// text; the library call is the same one any in-process consumer makes.
 func (a *App) Block(ctx context.Context, number int, blockers []int, allowClosed bool) error {
 	if len(blockers) == 0 {
 		return usageErr("usage: hew block <n> --on <m>")
 	}
-	blockers = uniqueInts(blockers)
-	issues, err := a.Client.ListIssues(ctx, openStates)
+	result, err := tracker.WrapWriter(a.Client).Block(ctx, number, blockers, tracker.BlockOptions{AllowClosed: allowClosed})
 	if err != nil {
-		return err
+		return a.blockError(err)
 	}
-	byNum := model.ByNumber(issues)
-	issue, ok := byNum[number]
-	if !ok {
-		// Absent from the open set means closed or nonexistent, and the old
-		// message conflated the two. Re-read to tell them apart; only this
-		// path pays for the extra call, so the common case stays one query.
-		target, getErr := a.Client.GetIssue(ctx, number)
-		if getErr != nil {
-			return genericErr("#%d is not an open issue in %s", number, a.Repo)
-		}
-		if err := guardClosed(target, allowClosed); err != nil {
-			return err
-		}
-		// Overridden: a closed issue is absent from the open-issue graph, so
-		// no open blocked-by edge can reach it and the cycle check below is
-		// vacuously safe for it.
-		issue = target
-	}
-	var add, existing []int
-	for _, blocker := range blockers {
-		if _, ok := byNum[blocker]; !ok {
-			return genericErr("#%d is not an open issue in %s; closed blockers don't block", blocker, a.Repo)
-		}
-		if slices.Contains(issue.OpenBlockers(), blocker) {
-			existing = append(existing, blocker)
-			continue
-		}
-		check := model.CheckBlockedBy(issues, number, blocker)
-		if check.Cycle != nil {
-			return genericErr("refusing: would create dependency cycle %s", render.FormatCycle(check.Cycle))
-		}
-		if !check.Verifiable {
-			return genericErr("refusing: cannot verify #%d → #%d is cycle-free because some issues have more blockers than were fetched; reduce blockers on the issues involved and retry", number, blocker)
-		}
-		add = append(add, blocker)
-	}
-	if len(add) == 0 {
-		return a.reportNoOp(ctx, number, "#%d is already blocked by %s\n", number, commaRefs(existing))
-	}
-	for i, blocker := range add {
-		if err := a.Client.AddBlockedBy(ctx, number, blocker); err != nil {
-			return partialWriteError(err, "already blocked #%d on", "blocking on", number, add, i)
-		}
+	if len(result.Added) == 0 {
+		return a.reportNoOp(ctx, number, "#%d is already blocked by %s\n", number, commaRefs(result.Existing))
 	}
 	note := ""
-	if len(existing) > 0 {
-		note = "; already blocked by " + commaRefs(existing)
+	if len(result.Existing) > 0 {
+		note = "; already blocked by " + commaRefs(result.Existing)
 	}
-	return a.reportMutation(ctx, number, "blocked #%d on %s%s\n", number, commaRefs(add), note)
+	return a.reportMutation(ctx, number, "blocked #%d on %s%s\n", number, commaRefs(result.Added), note)
 }
 
-// Unblock removes dependencies. It refuses a closed target unless allowClosed
-// is set. A blocker that is not there is skipped and named rather than
-// failing the call, as a single one is reported as a no-op.
+// blockError maps tracker's dependency refusals onto the command's existing
+// text. The numbers come from the typed error, so a consumer and the CLI read
+// the same fields instead of parsing a message.
+func (a *App) blockError(err error) error {
+	var cycle *tracker.CycleError
+	if errors.As(err, &cycle) {
+		return genericErr("refusing: would create dependency cycle %s", render.FormatCycle(cycle.Cycle))
+	}
+	var unverifiable *tracker.UnverifiableCycleError
+	if errors.As(err, &unverifiable) {
+		return genericErr("refusing: cannot verify #%d → #%d is cycle-free because some issues have more blockers than were fetched; reduce blockers on the issues involved and retry", unverifiable.Issue, unverifiable.Blocker)
+	}
+	var closed *tracker.ClosedError
+	if errors.As(err, &closed) {
+		return genericErr("#%d is closed%s — pass --closed to edit anyway", closed.Issue, closeStateSuffix(closed.Reason))
+	}
+	var notOpen *tracker.NotOpenError
+	if errors.As(err, &notOpen) {
+		return genericErr("#%d is not an open issue in %s; closed blockers don't block", notOpen.Blocker, a.Repo)
+	}
+	var notFound *tracker.NotFoundError
+	if errors.As(err, &notFound) {
+		return genericErr("#%d is not an open issue in %s", notFound.Issue, a.Repo)
+	}
+	var partial *tracker.PartialWriteError
+	if errors.As(err, &partial) {
+		return dependencyPartialError(partial, "blocked", "on", "blocking on")
+	}
+	return err
+}
+
+// Unblock removes dependencies through tracker. It refuses a closed target
+// unless allowClosed is set; a blocker that is not there is reported as a
+// no-op or named alongside the ones that were removed.
 func (a *App) Unblock(ctx context.Context, number int, blockers []int, allowClosed bool) error {
 	if len(blockers) == 0 {
 		return usageErr("usage: hew unblock <n> --from <m>")
 	}
-	blockers = uniqueInts(blockers)
-	issue, err := a.Client.GetIssue(ctx, number)
+	result, err := tracker.WrapWriter(a.Client).Unblock(ctx, number, blockers, tracker.BlockOptions{AllowClosed: allowClosed})
 	if err != nil {
-		return err
+		return a.unblockError(err)
 	}
-	if err := guardClosed(issue, allowClosed); err != nil {
-		return err
-	}
-	var remove, missing []int
-	for _, blocker := range blockers {
-		if slices.ContainsFunc(issue.BlockedBy, func(b model.Ref) bool { return b.Number == blocker }) {
-			remove = append(remove, blocker)
-		} else {
-			missing = append(missing, blocker)
-		}
-	}
-	if len(remove) == 0 {
-		return a.emitNoOp(issue, "#%d is not blocked by %s\n", number, commaRefs(missing))
-	}
-	for i, blocker := range remove {
-		if err := a.Client.RemoveBlockedBy(ctx, number, blocker); err != nil {
-			return partialWriteError(err, "already unblocked #%d from", "unblocking from", number, remove, i)
-		}
+	if len(result.Removed) == 0 {
+		return a.reportNoOp(ctx, number, "#%d is not blocked by %s\n", number, commaRefs(result.Missing))
 	}
 	note := ""
-	if len(missing) > 0 {
-		note = "; not blocked by " + commaRefs(missing)
+	if len(result.Missing) > 0 {
+		note = "; not blocked by " + commaRefs(result.Missing)
 	}
-	return a.reportMutation(ctx, number, "unblocked #%d from %s%s\n", number, commaRefs(remove), note)
+	return a.reportMutation(ctx, number, "unblocked #%d from %s%s\n", number, commaRefs(result.Removed), note)
 }
 
-// partialWriteError reports the write at index failed in a run of edge writes.
-// When it was the first nothing has changed and err stands as it is; otherwise
-// the caller must be told which edges did land, because neither retrying them
-// nor assuming the rest exist is safe. landed is a format taking the issue
-// number and ending in the preposition ("already blocked #%d on").
-func partialWriteError(err error, landed, doing string, number int, writes []int, index int) error {
-	if index == 0 {
-		return err
+// unblockError is blockError's Unblock half: the refusals the library adds
+// here are the closed target and a partial write.
+func (a *App) unblockError(err error) error {
+	var closed *tracker.ClosedError
+	if errors.As(err, &closed) {
+		return genericErr("#%d is closed%s — pass --closed to edit anyway", closed.Issue, closeStateSuffix(closed.Reason))
 	}
-	head := fmt.Sprintf(landed+" %s, but %s #%d failed", number, commaRefs(writes[:index]), doing, writes[index])
+	var partial *tracker.PartialWriteError
+	if errors.As(err, &partial) {
+		return dependencyPartialError(partial, "unblocked", "from", "unblocking from")
+	}
+	return err
+}
+
+// dependencyPartialError reports the edge write that failed after earlier
+// edges in the same call landed, so a caller neither retries edges that exist
+// nor assumes the missing ones do not. The verbs differ by operation; the
+// shape is the same.
+func dependencyPartialError(err *tracker.PartialWriteError, landed, preposition, doing string) error {
+	head := fmt.Sprintf("already %s #%d %s %s, but %s #%d failed", landed, err.Issue, preposition, commaRefs(err.Landed), doing, err.Failed)
 	tail := ""
-	if rest := writes[index+1:]; len(rest) > 0 {
-		tail = "; not attempted: " + commaRefs(rest)
+	if len(err.NotAttempted) > 0 {
+		tail = "; not attempted: " + commaRefs(err.NotAttempted)
 	}
-	return fmt.Errorf("%s: %w%s", head, err, tail)
+	return fmt.Errorf("%s: %w%s", head, err.Err, tail)
 }
 
 // commaRefs formats issue numbers as "#2, #3" for a sentence.
