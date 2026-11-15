@@ -249,6 +249,83 @@ dependencies:
     .claude/skills/spec-to-epic/scripts/extract_spec.py: sha256:13380af41f7b8bc3c08e7f198f52926787259d4a896b05f3ca998cd22859022f
     .claude/skills/spec-to-epic/scripts/lightspec.py: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
   content_hash: sha256:049113ea9eae9ca0bbddebc60ffc428e6f4ab068aa298258d1445adf77a5cb6a
+- repo_url: lumberbarons/lumber-mart
+  name: work-epic
+  host: github.com
+  resolved_commit: b9359f5069c4a4756ed22a70cb5844fd8072f319
+  version: 4.5.0
+  virtual_path: plugins/work-epic
+  is_virtual: true
+  package_type: skill_bundle
+  deployed_files:
+  - .agents/skills/work-epic
+  - .agents/skills/work-epic/REFERENCE.md
+  - .agents/skills/work-epic/SKILL.md
+  - .agents/skills/work-epic/prompts/repairer.md
+  - .agents/skills/work-epic/prompts/repairer_local.md
+  - .agents/skills/work-epic/prompts/reviewer.md
+  - .agents/skills/work-epic/prompts/reviewer_local.md
+  - .agents/skills/work-epic/prompts/worker.md
+  - .agents/skills/work-epic/prompts/worker_local.md
+  - .agents/skills/work-epic/scripts/findings.py
+  - .agents/skills/work-epic/scripts/local_state.py
+  - .agents/skills/work-epic/scripts/orca_api.py
+  - .agents/skills/work-epic/scripts/pr_state.py
+  - .agents/skills/work-epic/scripts/pump.py
+  - .agents/skills/work-epic/scripts/repo_state.py
+  - .agents/skills/work-epic/scripts/resolve_ready.py
+  - .agents/skills/work-epic/scripts/work_epic.py
+  - .claude/skills/work-epic
+  - .claude/skills/work-epic/REFERENCE.md
+  - .claude/skills/work-epic/SKILL.md
+  - .claude/skills/work-epic/prompts/repairer.md
+  - .claude/skills/work-epic/prompts/repairer_local.md
+  - .claude/skills/work-epic/prompts/reviewer.md
+  - .claude/skills/work-epic/prompts/reviewer_local.md
+  - .claude/skills/work-epic/prompts/worker.md
+  - .claude/skills/work-epic/prompts/worker_local.md
+  - .claude/skills/work-epic/scripts/findings.py
+  - .claude/skills/work-epic/scripts/local_state.py
+  - .claude/skills/work-epic/scripts/orca_api.py
+  - .claude/skills/work-epic/scripts/pr_state.py
+  - .claude/skills/work-epic/scripts/pump.py
+  - .claude/skills/work-epic/scripts/repo_state.py
+  - .claude/skills/work-epic/scripts/resolve_ready.py
+  - .claude/skills/work-epic/scripts/work_epic.py
+  deployed_file_hashes:
+    .agents/skills/work-epic/REFERENCE.md: sha256:381e630b777faa518bc5308db3689db049ff2888f4c9a015b9926e8f472bab08
+    .agents/skills/work-epic/SKILL.md: sha256:b7f03a9fa3cd85d78bc4da164ff545c31ee84dcecb873ee0f548f70c9c840c3d
+    .agents/skills/work-epic/prompts/repairer.md: sha256:aa7368018d9e41f052d8adc4dd3fbdde4c4a1119b2d11a90590933ebb427738b
+    .agents/skills/work-epic/prompts/repairer_local.md: sha256:314fba84bcee05aefe0eccda6bd9d3fe43f2872029de9206fab16d520ab7f4fd
+    .agents/skills/work-epic/prompts/reviewer.md: sha256:656565b592f73729a72eda48d8c7dd52c3744849b2df6a42c4af2d85978eaac5
+    .agents/skills/work-epic/prompts/reviewer_local.md: sha256:a889772bf9d8ee43a5a2eadbbc602493fdedcccfe07b65f6a04befecc0597558
+    .agents/skills/work-epic/prompts/worker.md: sha256:5cede0233131ae2030479e55a53f2cb98956d6b768017fcec1829d2e60e22d47
+    .agents/skills/work-epic/prompts/worker_local.md: sha256:32afeb3413d289a7eac9431647c2a91469958893853071b6d623014199ba9eda
+    .agents/skills/work-epic/scripts/findings.py: sha256:3d4586d18d9b0abb417b3fa8a1bb80f6884fcd74f2d62374f9adef1e8893a172
+    .agents/skills/work-epic/scripts/local_state.py: sha256:798ec5cba2a80d499941d1ef0716af64ecaf96649e74712abc2787a5d33a98a5
+    .agents/skills/work-epic/scripts/orca_api.py: sha256:e694bead146cba762f248c31e0424ccc8ee211d824e2a2639ff4f6a00d8e804a
+    .agents/skills/work-epic/scripts/pr_state.py: sha256:30881a453b8f84b5a6e82b80100ce963b4d22c73960b8e9504d48511e9bcd82b
+    .agents/skills/work-epic/scripts/pump.py: sha256:3fe6118d6bb931d767bdd30b950bef93210ec746a68a7715f1ca25571977cd67
+    .agents/skills/work-epic/scripts/repo_state.py: sha256:eb32354c2b6288c06c7b42c20355f1dbd9b86e5049f45f4550556ae0667c2766
+    .agents/skills/work-epic/scripts/resolve_ready.py: sha256:2bd3b087d53a1ff80ab46ab7fca2a8f19c72ca6932ff6c3d26fa452314adeb8a
+    .agents/skills/work-epic/scripts/work_epic.py: sha256:8abb8190aeabbf66e4206a8f3ce5856a75369bf3febcac82c70e07c261f70a4f
+    .claude/skills/work-epic/REFERENCE.md: sha256:381e630b777faa518bc5308db3689db049ff2888f4c9a015b9926e8f472bab08
+    .claude/skills/work-epic/SKILL.md: sha256:b7f03a9fa3cd85d78bc4da164ff545c31ee84dcecb873ee0f548f70c9c840c3d
+    .claude/skills/work-epic/prompts/repairer.md: sha256:aa7368018d9e41f052d8adc4dd3fbdde4c4a1119b2d11a90590933ebb427738b
+    .claude/skills/work-epic/prompts/repairer_local.md: sha256:314fba84bcee05aefe0eccda6bd9d3fe43f2872029de9206fab16d520ab7f4fd
+    .claude/skills/work-epic/prompts/reviewer.md: sha256:656565b592f73729a72eda48d8c7dd52c3744849b2df6a42c4af2d85978eaac5
+    .claude/skills/work-epic/prompts/reviewer_local.md: sha256:a889772bf9d8ee43a5a2eadbbc602493fdedcccfe07b65f6a04befecc0597558
+    .claude/skills/work-epic/prompts/worker.md: sha256:5cede0233131ae2030479e55a53f2cb98956d6b768017fcec1829d2e60e22d47
+    .claude/skills/work-epic/prompts/worker_local.md: sha256:32afeb3413d289a7eac9431647c2a91469958893853071b6d623014199ba9eda
+    .claude/skills/work-epic/scripts/findings.py: sha256:3d4586d18d9b0abb417b3fa8a1bb80f6884fcd74f2d62374f9adef1e8893a172
+    .claude/skills/work-epic/scripts/local_state.py: sha256:798ec5cba2a80d499941d1ef0716af64ecaf96649e74712abc2787a5d33a98a5
+    .claude/skills/work-epic/scripts/orca_api.py: sha256:e694bead146cba762f248c31e0424ccc8ee211d824e2a2639ff4f6a00d8e804a
+    .claude/skills/work-epic/scripts/pr_state.py: sha256:30881a453b8f84b5a6e82b80100ce963b4d22c73960b8e9504d48511e9bcd82b
+    .claude/skills/work-epic/scripts/pump.py: sha256:3fe6118d6bb931d767bdd30b950bef93210ec746a68a7715f1ca25571977cd67
+    .claude/skills/work-epic/scripts/repo_state.py: sha256:eb32354c2b6288c06c7b42c20355f1dbd9b86e5049f45f4550556ae0667c2766
+    .claude/skills/work-epic/scripts/resolve_ready.py: sha256:2bd3b087d53a1ff80ab46ab7fca2a8f19c72ca6932ff6c3d26fa452314adeb8a
+    .claude/skills/work-epic/scripts/work_epic.py: sha256:8abb8190aeabbf66e4206a8f3ce5856a75369bf3febcac82c70e07c261f70a4f
+  content_hash: sha256:86e4d71d9c319cce4ad7d17fa4665d931d23f49370ff41ab5ae94e452ad635f7
 deployments:
 - kind: project-relative
   target: claude
@@ -736,6 +813,159 @@ deployments:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
   content_hash: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/REFERENCE.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:381e630b777faa518bc5308db3689db049ff2888f4c9a015b9926e8f472bab08
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:b7f03a9fa3cd85d78bc4da164ff545c31ee84dcecb873ee0f548f70c9c840c3d
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/prompts/repairer.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:aa7368018d9e41f052d8adc4dd3fbdde4c4a1119b2d11a90590933ebb427738b
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/prompts/repairer_local.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:314fba84bcee05aefe0eccda6bd9d3fe43f2872029de9206fab16d520ab7f4fd
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/prompts/reviewer.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:656565b592f73729a72eda48d8c7dd52c3744849b2df6a42c4af2d85978eaac5
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/prompts/reviewer_local.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:a889772bf9d8ee43a5a2eadbbc602493fdedcccfe07b65f6a04befecc0597558
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/prompts/worker.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:5cede0233131ae2030479e55a53f2cb98956d6b768017fcec1829d2e60e22d47
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/prompts/worker_local.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:32afeb3413d289a7eac9431647c2a91469958893853071b6d623014199ba9eda
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/scripts/findings.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:3d4586d18d9b0abb417b3fa8a1bb80f6884fcd74f2d62374f9adef1e8893a172
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/scripts/local_state.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:798ec5cba2a80d499941d1ef0716af64ecaf96649e74712abc2787a5d33a98a5
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/scripts/orca_api.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:e694bead146cba762f248c31e0424ccc8ee211d824e2a2639ff4f6a00d8e804a
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/scripts/pr_state.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:30881a453b8f84b5a6e82b80100ce963b4d22c73960b8e9504d48511e9bcd82b
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/scripts/pump.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:3fe6118d6bb931d767bdd30b950bef93210ec746a68a7715f1ca25571977cd67
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/scripts/repo_state.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:eb32354c2b6288c06c7b42c20355f1dbd9b86e5049f45f4550556ae0667c2766
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/scripts/resolve_ready.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:2bd3b087d53a1ff80ab46ab7fca2a8f19c72ca6932ff6c3d26fa452314adeb8a
+- kind: project-relative
+  target: claude
+  value: .claude/skills/work-epic/scripts/work_epic.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:8abb8190aeabbf66e4206a8f3ce5856a75369bf3febcac82c70e07c261f70a4f
 - kind: project-relative
   target: claude
   value: .claude/skills/work-issue
@@ -1249,6 +1479,159 @@ deployments:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
   content_hash: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: null
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/REFERENCE.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:381e630b777faa518bc5308db3689db049ff2888f4c9a015b9926e8f472bab08
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:b7f03a9fa3cd85d78bc4da164ff545c31ee84dcecb873ee0f548f70c9c840c3d
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/prompts/repairer.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:aa7368018d9e41f052d8adc4dd3fbdde4c4a1119b2d11a90590933ebb427738b
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/prompts/repairer_local.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:314fba84bcee05aefe0eccda6bd9d3fe43f2872029de9206fab16d520ab7f4fd
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/prompts/reviewer.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:656565b592f73729a72eda48d8c7dd52c3744849b2df6a42c4af2d85978eaac5
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/prompts/reviewer_local.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:a889772bf9d8ee43a5a2eadbbc602493fdedcccfe07b65f6a04befecc0597558
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/prompts/worker.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:5cede0233131ae2030479e55a53f2cb98956d6b768017fcec1829d2e60e22d47
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/prompts/worker_local.md
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:32afeb3413d289a7eac9431647c2a91469958893853071b6d623014199ba9eda
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/scripts/findings.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:3d4586d18d9b0abb417b3fa8a1bb80f6884fcd74f2d62374f9adef1e8893a172
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/scripts/local_state.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:798ec5cba2a80d499941d1ef0716af64ecaf96649e74712abc2787a5d33a98a5
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/scripts/orca_api.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:e694bead146cba762f248c31e0424ccc8ee211d824e2a2639ff4f6a00d8e804a
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/scripts/pr_state.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:30881a453b8f84b5a6e82b80100ce963b4d22c73960b8e9504d48511e9bcd82b
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/scripts/pump.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:3fe6118d6bb931d767bdd30b950bef93210ec746a68a7715f1ca25571977cd67
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/scripts/repo_state.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:eb32354c2b6288c06c7b42c20355f1dbd9b86e5049f45f4550556ae0667c2766
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/scripts/resolve_ready.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:2bd3b087d53a1ff80ab46ab7fca2a8f19c72ca6932ff6c3d26fa452314adeb8a
+- kind: project-relative
+  target: codex
+  value: .agents/skills/work-epic/scripts/work_epic.py
+  runtime: null
+  scope: project
+  owners:
+  - lumberbarons/lumber-mart/plugins/work-epic
+  active_owner: lumberbarons/lumber-mart/plugins/work-epic
+  content_hash: sha256:8abb8190aeabbf66e4206a8f3ce5856a75369bf3febcac82c70e07c261f70a4f
 - kind: project-relative
   target: codex
   value: .agents/skills/work-issue
