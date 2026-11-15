@@ -38,6 +38,12 @@ func (t *Tracker) Close(ctx context.Context, number int, opts CloseOptions) (Clo
 	if opts.Completed && opts.DuplicateOf > 0 {
 		return CloseResult{}, &InvalidInputError{Field: "completed", Reason: "cannot be combined with duplicateOf"}
 	}
+	if opts.DuplicateOf < 0 {
+		// Zero means "not a duplicate"; a negative number is a caller's
+		// arithmetic gone wrong, and ignoring it would close the issue as
+		// not planned instead of refusing.
+		return CloseResult{}, &InvalidInputError{Field: "duplicateOf", Reason: "must be an issue number"}
+	}
 	if opts.DuplicateOf == number {
 		return CloseResult{}, &InvalidInputError{Field: "duplicateOf", Reason: "is the issue being closed"}
 	}

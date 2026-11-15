@@ -116,6 +116,12 @@ func TestCloseRefusalsLeaveTheIssueUntouched(t *testing.T) {
 				t.Errorf("err = %v, want invalid input on duplicateOf", err)
 			}
 		}},
+		{"negative duplicate", CloseOptions{Reason: "r", DuplicateOf: -3}, func(t *testing.T, err error) {
+			var invalid *InvalidInputError
+			if !errors.As(err, &invalid) || invalid.Field != "duplicateOf" {
+				t.Errorf("err = %v, want invalid input on duplicateOf", err)
+			}
+		}},
 		{"duplicate of a missing issue", CloseOptions{DuplicateOf: 99}, func(t *testing.T, err error) {
 			var notFound *NotFoundError
 			if !errors.As(err, &notFound) || notFound.Issue != 99 {

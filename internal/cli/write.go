@@ -652,7 +652,10 @@ func closeError(number, duplicateOf int, err error) error {
 		case "completed":
 			return usageErr("--completed and --duplicate-of are mutually exclusive")
 		case "duplicateOf":
-			return usageErr("--duplicate-of #%d is the issue being closed", number)
+			if duplicateOf == number {
+				return usageErr("--duplicate-of #%d is the issue being closed", number)
+			}
+			return usageErr("--duplicate-of must be a positive issue number")
 		case "reason":
 			return usageErr("--reason is required")
 		}
