@@ -278,6 +278,13 @@ obvious from a flag name.
   empty file is refused rather than blanking it. A closed target is refused,
   naming the close state, unless `--closed` — see Enshrined conventions. `block`
   and `unblock` follow the same closed-target rule, and `block` is cycle-checked.
+  Both take `--on` / `--from` repeatedly (or comma-separated), as `create
+  --blocked-by` does. `block` validates every blocker — open, not already an
+  edge, cycle-free against the graph as it stands — before the first write, so a
+  refusal never leaves half a set; each new edge starts at the target, so a cycle
+  through two of them would revisit it and is already a cycle through one. A write
+  that fails after others landed says which landed. An edge already present (or,
+  for `unblock`, absent) is named and skipped, as a lone one is a no-op.
 - **`release`** gives up a claim without re-claiming or changing the issue's
   state, body, or triage. The sole assignee can release it; `--force` explicitly
   allows clearing any owner's claim, including label-only and mixed-owner
@@ -382,6 +389,21 @@ which puts the removal in the PR diff where a reviewer sees it.
 Scope is the surface only. A flag that keeps its name but changes meaning, and
 parse-position bugs, are invisible to a surface diff; they need behavior-level
 tests.
+
+One shape change is not a removal: a single-value flag that becomes repeatable
+(`block --on`) still accepts every command line it did, so the differ treats
+`int repeatable` as covering an old `int`. Narrowing it back fails.
+
+A flag name means one thing across commands. `--state` is an issue-state filter
+(`list`) and `--closed` is the closed-target override (`set`, `block`,
+`unblock`); a batch writer's resume file is `--checkpoint` (`apply`,
+`migrate beads`, `migrate local`), and `apply` and `migrate beads` take their
+input as an argument or `--file`, never both. The spellings that used to
+collide (`list --closed`, `--state` on the batch writers) stay as hidden flags
+of their own, not aliases: an alias answers to both names through one value, so
+nothing could tell which was typed, and the stderr note naming the replacement
+has to fire only for the old one. `TestFlagNamesKeepOneMeaning` pins the
+vocabulary; the hidden flags leave with the next major release.
 
 ### `hew pr`
 

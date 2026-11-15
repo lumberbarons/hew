@@ -40,7 +40,7 @@ type ApplyOpts struct {
 // the role of bead IDs.
 func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	if opts.File == "" {
-		return usageErr("usage: hew apply <plan.jsonl>")
+		return usageErr("usage: hew apply <plan.jsonl> (or --file FILE)")
 	}
 	if opts.StatePath == "" {
 		opts.StatePath = opts.File + ".state.json"

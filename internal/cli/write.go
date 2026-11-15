@@ -867,11 +867,20 @@ func (a *App) releaseClaim(ctx context.Context, issue model.Issue) (string, erro
 	return "@" + render.SanitizeInline(strings.Join(issue.Assignees, " and @")) + "'s stale claim", nil
 }
 
-// Block adds a native dependency after a transitive client-side cycle
+// Block adds native dependencies after a transitive client-side cycle
 // check — GitHub itself only rejects self-blocks and direct two-issue
 // cycles. It refuses a closed target unless allowClosed is set; a closed
 // blocker is refused outright, since closed blockers don't block.
-func (a *App) Block(ctx context.Context, number, blocker int, allowClosed bool) error {
+//
+// Several blockers are validated together and written only once every one has
+// passed, so a refusal never leaves a half-applied set. Each is checked against
+// the graph as it stands: every new edge starts at number, so a cycle through
+// two of them would revisit number and is already a cycle through one.
+func (a *App) Block(ctx context.Context, number int, blockers []int, allowClosed bool) error {
+	if len(blockers) == 0 {
+		return usageErr("usage: hew block <n> --on <m>")
+	}
+	blockers = uniqueInts(blockers)
 	issues, err := a.Client.ListIssues(ctx, openStates)
 	if err != nil {
 		return err
@@ -894,28 +903,47 @@ func (a *App) Block(ctx context.Context, number, blocker int, allowClosed bool) 
 		// vacuously safe for it.
 		issue = target
 	}
-	if _, ok := byNum[blocker]; !ok {
-		return genericErr("#%d is not an open issue in %s; closed blockers don't block", blocker, a.Repo)
+	var add, existing []int
+	for _, blocker := range blockers {
+		if _, ok := byNum[blocker]; !ok {
+			return genericErr("#%d is not an open issue in %s; closed blockers don't block", blocker, a.Repo)
+		}
+		if slices.Contains(issue.OpenBlockers(), blocker) {
+			existing = append(existing, blocker)
+			continue
+		}
+		check := model.CheckBlockedBy(issues, number, blocker)
+		if check.Cycle != nil {
+			return genericErr("refusing: would create dependency cycle %s", render.FormatCycle(check.Cycle))
+		}
+		if !check.Verifiable {
+			return genericErr("refusing: cannot verify #%d → #%d is cycle-free because some issues have more blockers than were fetched; reduce blockers on the issues involved and retry", number, blocker)
+		}
+		add = append(add, blocker)
 	}
-	if slices.Contains(issue.OpenBlockers(), blocker) {
-		return a.reportNoOp(ctx, number, "#%d is already blocked by #%d\n", number, blocker)
+	if len(add) == 0 {
+		return a.reportNoOp(ctx, number, "#%d is already blocked by %s\n", number, commaRefs(existing))
 	}
-	check := model.CheckBlockedBy(issues, number, blocker)
-	if check.Cycle != nil {
-		return genericErr("refusing: would create dependency cycle %s", render.FormatCycle(check.Cycle))
+	for i, blocker := range add {
+		if err := a.Client.AddBlockedBy(ctx, number, blocker); err != nil {
+			return partialWriteError(err, "already blocked #%d on", "blocking on", number, add, i)
+		}
 	}
-	if !check.Verifiable {
-		return genericErr("refusing: cannot verify #%d → #%d is cycle-free because some issues have more blockers than were fetched; reduce blockers on the issues involved and retry", number, blocker)
+	note := ""
+	if len(existing) > 0 {
+		note = "; already blocked by " + commaRefs(existing)
 	}
-	if err := a.Client.AddBlockedBy(ctx, number, blocker); err != nil {
-		return err
-	}
-	return a.reportMutation(ctx, number, "blocked #%d on #%d\n", number, blocker)
+	return a.reportMutation(ctx, number, "blocked #%d on %s%s\n", number, commaRefs(add), note)
 }
 
-// Unblock removes a dependency. It refuses a closed target unless allowClosed
-// is set.
-func (a *App) Unblock(ctx context.Context, number, blocker int, allowClosed bool) error {
+// Unblock removes dependencies. It refuses a closed target unless allowClosed
+// is set. A blocker that is not there is skipped and named rather than
+// failing the call, as a single one is reported as a no-op.
+func (a *App) Unblock(ctx context.Context, number int, blockers []int, allowClosed bool) error {
+	if len(blockers) == 0 {
+		return usageErr("usage: hew unblock <n> --from <m>")
+	}
+	blockers = uniqueInts(blockers)
 	issue, err := a.Client.GetIssue(ctx, number)
 	if err != nil {
 		return err
@@ -923,19 +951,53 @@ func (a *App) Unblock(ctx context.Context, number, blocker int, allowClosed bool
 	if err := guardClosed(issue, allowClosed); err != nil {
 		return err
 	}
-	found := false
-	for _, b := range issue.BlockedBy {
-		if b.Number == blocker {
-			found = true
+	var remove, missing []int
+	for _, blocker := range blockers {
+		if slices.ContainsFunc(issue.BlockedBy, func(b model.Ref) bool { return b.Number == blocker }) {
+			remove = append(remove, blocker)
+		} else {
+			missing = append(missing, blocker)
 		}
 	}
-	if !found {
-		return a.emitNoOp(issue, "#%d is not blocked by #%d\n", number, blocker)
+	if len(remove) == 0 {
+		return a.emitNoOp(issue, "#%d is not blocked by %s\n", number, commaRefs(missing))
 	}
-	if err := a.Client.RemoveBlockedBy(ctx, number, blocker); err != nil {
+	for i, blocker := range remove {
+		if err := a.Client.RemoveBlockedBy(ctx, number, blocker); err != nil {
+			return partialWriteError(err, "already unblocked #%d from", "unblocking from", number, remove, i)
+		}
+	}
+	note := ""
+	if len(missing) > 0 {
+		note = "; not blocked by " + commaRefs(missing)
+	}
+	return a.reportMutation(ctx, number, "unblocked #%d from %s%s\n", number, commaRefs(remove), note)
+}
+
+// partialWriteError reports the write at index failed in a run of edge writes.
+// When it was the first nothing has changed and err stands as it is; otherwise
+// the caller must be told which edges did land, because neither retrying them
+// nor assuming the rest exist is safe. landed is a format taking the issue
+// number and ending in the preposition ("already blocked #%d on").
+func partialWriteError(err error, landed, doing string, number int, writes []int, index int) error {
+	if index == 0 {
 		return err
 	}
-	return a.reportMutation(ctx, number, "unblocked #%d from #%d\n", number, blocker)
+	head := fmt.Sprintf(landed+" %s, but %s #%d failed", number, commaRefs(writes[:index]), doing, writes[index])
+	tail := ""
+	if rest := writes[index+1:]; len(rest) > 0 {
+		tail = "; not attempted: " + commaRefs(rest)
+	}
+	return fmt.Errorf("%s: %w%s", head, err, tail)
+}
+
+// commaRefs formats issue numbers as "#2, #3" for a sentence.
+func commaRefs(numbers []int) string {
+	parts := make([]string, len(numbers))
+	for i, n := range numbers {
+		parts[i] = fmt.Sprintf("#%d", n)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // EpicCreateOpts are the epic create inputs. The body paths match create:

@@ -166,7 +166,7 @@ hew ready [--limit N]          # open, non-epic, triaged, zero open blockers; P0
 hew list [--label X] [--epic N] [--state open|closed|all]
             [--bodies]           # with --json: body on every line, dedup in one call;
                                    # untriaged issues are omitted — hew triage holds them
-                                   # (--closed is an alias for --state closed)
+                                   # (--closed still works, deprecated: use --state closed)
 hew show <n>                   # body, deps, parent, children, recent comments
 hew search <terms>             # text search over vetted issues, open+closed, best-match
                                    # order — check for an existing issue before filing one
@@ -215,19 +215,22 @@ hew pr [--for N ...] [--title "..."] [--amend]
 hew close <n> --reason "..." [--completed | --duplicate-of M]
 hew reopen <n> --reason "..."          # comment + reopen; releases a stale claim,
                                        # no-op on an open issue
-hew block <n> --on <m> [--closed]      # native dependency, cycle-checked
-hew unblock <n> --from <m> [--closed]
+hew block <n> --on <m> [--on <m> ...] [--closed]
+                                       # native dependencies, cycle-checked; every blocker
+                                       # is validated before the first is written
+hew unblock <n> --from <m> [--from <m> ...] [--closed]
 hew epic create --title "..." [--children N,N]
                    [--goal "..." --done-when "..." | --body-file F | --edit]
 hew epic status [<n>]                    # rollup per open epic; with <n>, that epic's
                                          # children plus "next:" — the next workable
                                          # child (open, unblocked, in child order);
                                          # also reachable as: hew epic list
-hew apply <plan.jsonl> [--dry-run] [--state F] [--throttle D]
+hew apply <plan.jsonl> [--dry-run] [--checkpoint F] [--throttle D]
                                  # batch-create a whole set of issues from a JSONL
                                  # plan — labels, bodies, parents, dependencies —
-                                 # checkpointed and resumable (see "Plan files")
-                                 # defaults: --state <plan>.state.json, --throttle 500ms
+                                 # checkpointed and resumable (see "Plan files");
+                                 # the plan is an argument or --file F
+                                 # defaults: --checkpoint <plan>.state.json, --throttle 500ms
 hew config                     # read-only: the active backend and its target —
                                # repo (GitHub) or path + id (local)
 hew init [--local]            # --local: create a local-only tracker in .hew
@@ -235,19 +238,19 @@ hew hooks install|remove <claude|codex|cursor|opencode>
                               # add/remove a session-start hook running `hew prime`
                               # in the selected agent's project configuration;
                               # preserves the rest of the file; needs a git repo
-hew migrate beads [--file F] [--state F] [--throttle D]
+hew migrate beads [<issues.jsonl> | --file F] [--checkpoint F] [--throttle D]
                      [--dry-run] [--include-closed]
                                  # import a beads (bd) database: priorities, types,
                                  # deps, epics, in-progress state; resumable
-                                 # defaults: --file .beads/issues.jsonl, --state
+                                 # defaults: .beads/issues.jsonl, --checkpoint
                                  # github-migration.json next to it, --throttle 500ms
-hew migrate local [--state F] [--dry-run] [--throttle D]
+hew migrate local [--checkpoint F] [--dry-run] [--throttle D]
                                  # move a local tracker to GitHub (the --repo or git
                                  # remote repository): every issue, close reasons,
                                  # comments, edges, #n references rewritten; then
                                  # .hew/migrated.json records the number map and the
                                  # repo switches to GitHub, keeping the local file as
-                                 # an archive. Resumable; default --state
+                                 # an archive. Resumable; default --checkpoint
                                  # .hew/migration-state.json
 ```
 
@@ -422,22 +425,22 @@ long-form text instead (mutually exclusive with the section fields). Shapes:
 are a single value (a local `id` or an issue number for `parent`, an issue number
 for `discovered-from`); `hew apply --help` lists every field.
 
-Creation and dependency wiring are both checkpointed to the `--state` file as
+Creation and dependency wiring are both checkpointed to the `--checkpoint` file as
 they happen, so a failed run resumes without creating duplicates or
 re-attempting edges that already landed; unknown fields, dangling
 references, and dependency cycles between entries are all rejected before
 anything is written. An edge that still fails to wire after the issues are
 created (a GitHub error) exits non-zero, so a script can tell; rerun to retry it.
 
-The state file is trusted local scratch, not an input you can hand around: it
+The checkpoint file is trusted local scratch, not an input you can hand around: it
 records the repository and a digest of the plan it was written for, and every
 issue it maps is checked for a marker `apply` embedded in the body it created.
-A state file from another repository or another plan, one written by an older
+A checkpoint from another repository or another plan, one written by an older
 hew, or one pointing at an issue this plan did not create is refused before
 any write — including under `--dry-run`, so the plan-only pass reaches the same
 verdict as the real one. Editing the plan between runs invalidates the
 checkpoint by design; if you need to change it mid-flight, start a fresh run
-with a new `--state` path and expect the entries already created to be created
+with a new `--checkpoint` path and expect the entries already created to be created
 again. The same rules apply to `migrate beads` and its snapshot, and to `migrate local` and `.hew/issues.jsonl`.
 
 ## Auto-triage in CI

@@ -64,7 +64,7 @@ func TestBlockAlreadyBlockedIsJSON(t *testing.T) {
 	f := newFake(a, issue(2, "B", "P2", "bug"))
 	app, out, _ := newApp(f)
 	app.JSON = true
-	if err := app.Block(ctx, 1, 2, false); err != nil {
+	if err := app.Block(ctx, 1, []int{2}, false); err != nil {
 		t.Fatal(err)
 	}
 	got := decodeJSON(t, out)
@@ -89,12 +89,12 @@ func TestBlockNoOpJSONHasTheSameKeysAsAChangedBlock(t *testing.T) {
 	f := newFake(issue(1, "A", "P2", "bug"), issue(2, "B", "P2", "bug"))
 	app, out, _ := newApp(f)
 	app.JSON = true
-	if err := app.Block(ctx, 1, 2, false); err != nil {
+	if err := app.Block(ctx, 1, []int{2}, false); err != nil {
 		t.Fatal(err)
 	}
 	changed := decodeJSON(t, out)
 	out.Reset()
-	if err := app.Block(ctx, 1, 2, false); err != nil {
+	if err := app.Block(ctx, 1, []int{2}, false); err != nil {
 		t.Fatal(err)
 	}
 	noop := decodeJSON(t, out)
@@ -119,7 +119,7 @@ func TestUnblockNotBlockedIsJSON(t *testing.T) {
 	f := newFake(issue(1, "A", "P2", "bug"), issue(2, "B", "P2", "bug"))
 	app, out, _ := newApp(f)
 	app.JSON = true
-	if err := app.Unblock(ctx, 1, 2, false); err != nil {
+	if err := app.Unblock(ctx, 1, []int{2}, false); err != nil {
 		t.Fatal(err)
 	}
 	assertUnchangedIssue(t, decodeJSON(t, out), 1)
