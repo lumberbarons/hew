@@ -1,0 +1,129 @@
+args hew apply <plan.jsonl>
+args hew block <n> --on <m>
+args hew close <n>
+args hew epic status [<n>]
+args hew hooks install <claude|codex|cursor|opencode>
+args hew hooks remove <claude|codex|cursor|opencode>
+args hew release <n>
+args hew reopen <n>
+args hew search <terms>
+args hew set <n>
+args hew show <n>
+args hew start <n>
+args hew unblock <n> --from <m>
+command hew
+command hew apply
+command hew block
+command hew close
+command hew config
+command hew create
+command hew draft
+command hew epic
+command hew epic create
+command hew epic list [alias of status]
+command hew epic status
+command hew hooks
+command hew hooks install
+command hew hooks remove
+command hew init
+command hew list
+command hew migrate
+command hew migrate beads
+command hew migrate local
+command hew pr
+command hew prime
+command hew ready
+command hew release
+command hew reopen
+command hew search
+command hew set
+command hew show
+command hew start
+command hew triage
+command hew unblock
+flag hew --json bool
+flag hew --repo string
+flag hew apply --dry-run bool
+flag hew apply --state string
+flag hew apply --throttle duration
+flag hew block --closed bool
+flag hew block --on int
+flag hew close --completed bool
+flag hew close --duplicate-of int
+flag hew close --reason string
+flag hew create --approach string
+flag hew create --area string repeatable
+flag hew create --blocked-by int repeatable
+flag hew create --body-file string
+flag hew create --discovered-from int
+flag hew create --done-when string repeatable
+flag hew create --edit bool
+flag hew create --fix string
+flag hew create --goal string
+flag hew create --parent int
+flag hew create --priority string
+flag hew create --problem string
+flag hew create --title string
+flag hew create --type string
+flag hew create --where string
+flag hew draft --approach string
+flag hew draft --check string
+flag hew draft --done-when string repeatable
+flag hew draft --fix string
+flag hew draft --goal string
+flag hew draft --out string
+flag hew draft --problem string
+flag hew draft --where string
+flag hew epic create --approach string
+flag hew epic create --body-file string
+flag hew epic create --children int repeatable
+flag hew epic create --done-when string repeatable
+flag hew epic create --edit bool
+flag hew epic create --fix string
+flag hew epic create --goal string
+flag hew epic create --problem string
+flag hew epic create --title string
+flag hew epic create --where string
+flag hew init --local bool
+flag hew list --bodies bool
+flag hew list --closed bool
+flag hew list --epic int
+flag hew list --label string
+flag hew list --state string
+flag hew migrate beads --dry-run bool
+flag hew migrate beads --file string
+flag hew migrate beads --include-closed bool
+flag hew migrate beads --state string
+flag hew migrate beads --throttle duration
+flag hew migrate local --dry-run bool
+flag hew migrate local --state string
+flag hew migrate local --throttle duration
+flag hew pr --amend bool
+flag hew pr --base string
+flag hew pr --body-file string
+flag hew pr --for int repeatable
+flag hew pr --ready bool
+flag hew pr --risk string repeatable
+flag hew pr --testing string repeatable
+flag hew pr --title string
+flag hew pr --what string repeatable
+flag hew pr --why string repeatable
+flag hew prime --hook-format string
+flag hew ready --limit int
+flag hew release --force bool
+flag hew reopen --reason string
+flag hew set --add-area string repeatable
+flag hew set --body-file string
+flag hew set --closed bool
+flag hew set --no-parent bool
+flag hew set --parent int
+flag hew set --priority string
+flag hew set --remove-area string repeatable
+flag hew set --title string
+flag hew set --type string
+flag hew start --force bool
+flag hew start --priority string
+flag hew start --show bool
+flag hew triage --search string
+flag hew unblock --closed bool
+flag hew unblock --from int
