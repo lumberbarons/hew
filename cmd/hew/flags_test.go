@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -236,5 +238,56 @@ func TestBlockAndUnblockCollectRepeatedIssues(t *testing.T) {
 				t.Errorf("without --%s: exit = %d, err = %v; want usage", tc.flag, appcli.ExitCode(err), err)
 			}
 		})
+	}
+}
+
+// The tests above replace each command's action, so they prove the flags parse
+// but not that the app receives what was typed. These run the real actions: a
+// corrupt file at the checkpoint path is rejected by name before any network
+// call, so the error is only reachable if the path (and, for the plan or
+// snapshot, the input file) actually arrived.
+func TestBatchWritersReceiveTheCheckpointAndInputFiles(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	dir := t.TempDir()
+	plan := filepath.Join(dir, "plan.jsonl")
+	if err := os.WriteFile(plan, []byte(`{"title":"T","type":"task"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := filepath.Join(dir, "issues.jsonl")
+	bead := `{"_type":"issue","id":"sc-1","title":"Open","status":"open","priority":2,"issue_type":"task","created_at":"2026-05-01T00:00:00Z"}`
+	if err := os.WriteFile(snapshot, []byte(bead+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		args []string
+		// local runs the command inside a linked worktree of a local tracker.
+		local bool
+	}{
+		{"apply argument", []string{"apply", plan}, false},
+		{"apply --file", []string{"apply", "--file", plan}, false},
+		{"migrate beads argument", []string{"migrate", "beads", snapshot}, false},
+		{"migrate beads --file", []string{"migrate", "beads", "--file", snapshot}, false},
+		{"migrate local", []string{"migrate", "local"}, true},
+	}
+	for _, tc := range cases {
+		for _, spelling := range []string{"--checkpoint", "--state"} {
+			t.Run(tc.name+" "+spelling, func(t *testing.T) {
+				if tc.local {
+					_, wt := localRepo(t)
+					t.Chdir(wt)
+				}
+				checkpoint := filepath.Join(t.TempDir(), "cp.json")
+				if err := os.WriteFile(checkpoint, []byte("{not json"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				args := append(slices.Clone(tc.args), "--dry-run", spelling, checkpoint, "--repo", "octo/hello")
+				_, err := capture(t, args...)
+				if err == nil || !strings.Contains(err.Error(), "not a valid resume-state file") || !strings.Contains(err.Error(), checkpoint) {
+					t.Fatalf("err = %v; want the corrupt checkpoint %s rejected by name", err, checkpoint)
+				}
+			})
+		}
 	}
 }

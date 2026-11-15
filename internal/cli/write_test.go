@@ -2729,6 +2729,10 @@ func TestUnblockSeveralNamesWhatLandedWhenAWriteFails(t *testing.T) {
 		t.Fatalf("err = %v; want %q", err, want)
 	}
 	// A failure on the first write changed nothing, so the error stands as is.
+	// Fresh issues: the fake keeps the caller's pointers, so reusing a would
+	// start from the edges the first scenario already removed.
+	a = issue(1, "A", "P2", "bug")
+	a.BlockedBy = []model.Ref{{Number: 2, State: "OPEN"}, {Number: 3, State: "OPEN"}}
 	f = newFake(a, issue(2, "B", "P2", "bug"), issue(3, "C", "P2", "bug"))
 	f.failOn["RemoveBlockedBy"] = errors.New("boom")
 	app, _, _ = newApp(f)
