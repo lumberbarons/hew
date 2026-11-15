@@ -70,6 +70,32 @@ func fixtureIssues() []model.Issue {
 	}
 }
 
+// A closed issue carries no claim (#237): whatever closed it ended the work,
+// so the line reads [closed] instead of the contradictory
+// [in progress @jim; closed]. The claim stays in the data — close is not the
+// claim's owner, reopen's release is — so an open issue still shows it.
+func TestClosedClaimedIssueRendersClosedOnly(t *testing.T) {
+	i := model.Issue{
+		Number: 208, Title: "Closed while claimed", State: "CLOSED", CreatedAt: ts(10),
+		Labels: []string{"P2", "task", "in-progress"}, Assignees: []string{"jim"},
+	}
+	var buf bytes.Buffer
+	List(&buf, []model.Issue{i}, Style{})
+	got := buf.String()
+	if strings.Contains(got, "in progress") {
+		t.Errorf("closed issue rendered as in progress:\n%s", got)
+	}
+	if !strings.Contains(got, "[closed]") {
+		t.Errorf("closed annotation missing:\n%s", got)
+	}
+	i.State = "OPEN"
+	buf.Reset()
+	List(&buf, []model.Issue{i}, Style{})
+	if got := buf.String(); !strings.Contains(got, "[in progress @jim]") {
+		t.Errorf("open claim annotation missing:\n%s", got)
+	}
+}
+
 func TestList(t *testing.T) {
 	issues := fixtureIssues()
 	blocked := model.Issue{
@@ -87,8 +113,14 @@ func TestList(t *testing.T) {
 		Number: 124, Title: "Claimed one", State: "OPEN", CreatedAt: ts(8),
 		Labels: []string{"P2", "bug", "in-progress"}, Assignees: []string{"lumberbarons"},
 	}
+	// The claim data stays on a closed issue, but the line must not read as
+	// both claimed and closed (#237).
+	closedClaimed := model.Issue{
+		Number: 208, Title: "Closed while claimed", State: "CLOSED", CreatedAt: ts(10),
+		Labels: []string{"P2", "task", "in-progress"}, Assignees: []string{"jim"},
+	}
 	var buf bytes.Buffer
-	List(&buf, append(issues, blocked, epic, claimed), Style{})
+	List(&buf, append(issues, blocked, epic, claimed, closedClaimed), Style{})
 	checkGolden(t, "list", buf.Bytes())
 }
 

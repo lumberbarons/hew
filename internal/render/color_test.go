@@ -134,8 +134,13 @@ func TestListColored(t *testing.T) {
 		Number: 124, Title: "Claimed one", State: "OPEN", CreatedAt: ts(8),
 		Labels: []string{"P2", "bug", "in-progress"}, Assignees: []string{"lumberbarons"},
 	}
+	// Shared with TestList: a closed issue renders [closed], not its claim.
+	closedClaimed := model.Issue{
+		Number: 208, Title: "Closed while claimed", State: "CLOSED", CreatedAt: ts(10),
+		Labels: []string{"P2", "task", "in-progress"}, Assignees: []string{"jim"},
+	}
 	var buf bytes.Buffer
-	List(&buf, append(issues, blocked, epic, claimed), StyleFor(true))
+	List(&buf, append(issues, blocked, epic, claimed, closedClaimed), StyleFor(true))
 	checkGolden(t, "list_color", buf.Bytes())
 }
 

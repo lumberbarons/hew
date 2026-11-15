@@ -705,6 +705,7 @@ func closeCmd() *ucli.Command {
 			&ucli.StringFlag{Name: "reason", Usage: "closing comment (required unless --duplicate-of, which appends \"Duplicate of #N\" if the reason does not name it)"},
 			&ucli.BoolFlag{Name: "completed", Usage: "close as completed"},
 			&ucli.IntFlag{Name: "duplicate-of", Usage: "close as duplicate of existing issue `N` (not the issue itself)"},
+			&ucli.BoolFlag{Name: "force", Usage: "close an epic that still has open sub-issues"},
 		},
 		Before: fixedArgs(1, 1),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
@@ -716,7 +717,7 @@ func closeCmd() *ucli.Command {
 			if err != nil {
 				return err
 			}
-			return app.Close(ctx, n, cmd.String("reason"), cmd.Bool("completed"), cmd.Int("duplicate-of"))
+			return app.Close(ctx, n, cmd.String("reason"), cmd.Bool("completed"), cmd.Int("duplicate-of"), cmd.Bool("force"))
 		},
 	}
 }
