@@ -44,6 +44,114 @@ jobs:
         with:
           config: ./.testcoverage.yml
 
+  # `tracker` is a library API, not just an internal package: a consumer
+  # imports it in-process (DESIGN.md, "Tracker library"), so an exported symbol
+  # that disappears is a compile error there even though every CLI command
+  # still works. This is the library's counterpart to the CLI surface snapshot
+  # (#167), except the "old" surface is whatever the base commit exported
+  # rather than a committed golden, which is why it needs a tool.
+  #
+  # It annotates rather than fails on purpose. The API is experimental until
+  # 1.0, and DESIGN.md makes a deliberate breaking change a `feat!:`/`fix!:`
+  # commit that the release notes file under Breaking changes — a change to
+  # announce, not one to forbid. The 1.0 compatibility policy (#171) decides
+  # whether this same diff should block a merge; until then the job's contract
+  # is that a removal is visible in review instead of surfacing in a
+  # consumer's build.
+  api-surface:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The base commit's tree is half of the comparison, and a shallow
+          # checkout does not carry it.
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # apidiff lives in x/exp, which promises no compatibility of its own:
+      # flags and output shape move between commits. The pseudo-version's
+      # suffix is the commit it was cut from, and pinning it avoids the failure
+      # mode govulncheck's pin documents above — @latest resolving to a tool
+      # release that refuses to build under the toolchain go.mod pins.
+      - run: go install golang.org/x/exp/cmd/apidiff@v0.0.0-20261113113407-e3970619a1a4
+      # The base commit's exported surface is written to an export-data file,
+      # then compared with the package in the working tree. apidiff exits 0
+      # whether or not it found anything, so its output is the signal, not its
+      # status. `-incompatible` prints exactly the changes worth annotating,
+      # one line each; the full diff, additions included, goes to the run
+      # summary where a reviewer reads it beside the PR.
+      - name: diff the tracker API against the base commit
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          base_commit="${PR_BASE:-${PUSH_BEFORE:-}}"
+          if [ -z "$base_commit" ] || [ "$base_commit" = "0000000000000000000000000000000000000000" ]; then
+            echo "::notice::no base commit to compare against; nothing to diff"
+            exit 0
+          fi
+
+          # The event's base can be a commit this checkout does not carry: the
+          # base branch moved between the event and the job, or a force-push
+          # rewrote it. Ask for it once; a commit the repository no longer has
+          # is nothing to compare, not a failed check.
+          if ! git cat-file -e "$base_commit^{commit}" 2>/dev/null; then
+            git fetch --no-tags --quiet origin "$base_commit" || true
+          fi
+          if ! git cat-file -e "$base_commit^{commit}" 2>/dev/null; then
+            echo "::notice::$base_commit is not in this repository; skipping the diff"
+            exit 0
+          fi
+
+          base_tree="$RUNNER_TEMP/hew-base"
+          export_file="$RUNNER_TEMP/base.export"
+          git worktree add --quiet --detach "$base_tree" "$base_commit"
+          trap 'git worktree remove --force "$base_tree"' EXIT
+
+          if [ ! -d "$base_tree/tracker" ]; then
+            echo "::notice::$base_commit predates the tracker package; every symbol is new"
+            exit 0
+          fi
+
+          # apidiff resolves an import path through the module in the working
+          # directory, so the base's export data has to be written from inside
+          # the base tree.
+          ( cd "$base_tree" && apidiff -w "$export_file" github.com/lumberbarons/hew/tracker )
+
+          changes="$(apidiff "$export_file" github.com/lumberbarons/hew/tracker)"
+          if [ -z "$changes" ]; then
+            echo "tracker API: unchanged since $base_commit"
+            exit 0
+          fi
+
+          {
+            echo "### tracker API surface"
+            echo
+            echo "Changes against \`$base_commit\`:"
+            echo
+            echo '```'
+            printf '%s\n' "$changes"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          incompatible="$(apidiff -incompatible "$export_file" github.com/lumberbarons/hew/tracker)"
+          if [ -z "$incompatible" ]; then
+            echo "tracker API: additions only"
+            printf '%s\n' "$changes"
+            exit 0
+          fi
+
+          # One annotation per removal, so the change shows up on the PR rather
+          # than only in a log nobody opened. Percent signs are escaped because
+          # a workflow command treats them as escapes.
+          while IFS= read -r change; do
+            echo "::warning title=tracker API change::${change//'%'/'%25'}"
+          done <<< "$incompatible"
+          echo "tracker API: incompatible changes since $base_commit, annotated above"
+
   # evals/ is its own module, so the root job's ./... never reaches it.
   evals:
     runs-on: ubuntu-latest
