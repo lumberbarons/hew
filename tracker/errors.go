@@ -100,6 +100,41 @@ func (e *UnverifiableCycleError) Error() string {
 	return fmt.Sprintf("cannot verify dependency #%d -> #%d is cycle-free: blocker connections were capped", e.Issue, e.Blocker)
 }
 
+// NotOpenError reports a dependency reference that is not an open issue:
+// closed or absent from the tracker, and either way not something that
+// blocks. Blocker names the reference; Issue names the edge's source.
+type NotOpenError struct {
+	Issue   int
+	Blocker int
+}
+
+func (e *NotOpenError) Error() string {
+	return fmt.Sprintf("issue #%d is not an open issue, so it cannot block #%d", e.Blocker, e.Issue)
+}
+
+// PartialWriteError reports a run of dependency-edge writes that stopped
+// partway: the edges in Landed were written, Failed is the edge whose write
+// failed, and NotAttempted never ran. Err is the backend cause, retained for
+// errors.Is and errors.As.
+type PartialWriteError struct {
+	Issue        int
+	Landed       []int
+	Failed       int
+	NotAttempted []int
+	Err          error
+}
+
+func (e *PartialWriteError) Error() string {
+	msg := fmt.Sprintf("writing a dependency edge for #%d failed at #%d after %s: %v",
+		e.Issue, e.Failed, formatNumbers(e.Landed, ", "), e.Err)
+	if len(e.NotAttempted) > 0 {
+		msg += "; not attempted: " + formatNumbers(e.NotAttempted, ", ")
+	}
+	return msg
+}
+
+func (e *PartialWriteError) Unwrap() error { return e.Err }
+
 // MigratedError reports that a local tracker has moved to a GitHub repo.
 type MigratedError struct {
 	Path string
