@@ -367,7 +367,7 @@ func (d *data) find(number int) (*issueRec, error) {
 			return rec, nil
 		}
 	}
-	return nil, fmt.Errorf("issue #%d not found", number)
+	return nil, &gh.NotFoundError{Issue: number}
 }
 
 // build derives the read-side view of every issue. Nested connections are

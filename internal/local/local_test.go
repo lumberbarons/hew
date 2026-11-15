@@ -66,6 +66,20 @@ func TestStoreConforms(t *testing.T) {
 	conformance.Run(t, func(t *testing.T) gh.IssueStore { return newStore(t) })
 }
 
+// A missing issue is the shared type, not a formatted string, so the tracker
+// boundary can recognise it and a consumer can match it.
+func TestMissingIssueCarriesTheSharedNotFoundType(t *testing.T) {
+	s := newStore(t)
+	_, err := s.GetIssue(ctx, 999)
+	var notFound *gh.NotFoundError
+	if !errors.As(err, &notFound) || notFound.Issue != 999 {
+		t.Fatalf("GetIssue error = %v, want gh.NotFoundError for #999", err)
+	}
+	if got, want := err.Error(), "issue #999 not found"; got != want {
+		t.Errorf("error = %q, want %q", got, want)
+	}
+}
+
 func TestOpenGivesATrackerWithoutAnIDOne(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), DirName)
 	must(t, Init(dir))
