@@ -23,6 +23,8 @@ func TestTypedErrorsPreserveDetailsWhenWrapped(t *testing.T) {
 		{&NotFoundError{Issue: 42}, "issue #42 not found"},
 		{&ClosedError{Issue: 42, Reason: "completed"}, "issue #42 is closed (completed)"},
 		{&ClosedError{Issue: 42}, "issue #42 is closed"},
+		{&EpicError{Issue: 42}, "issue #42 is an epic; epics are never worked directly"},
+		{&UntriagedError{Issue: 42}, "issue #42 is untriaged; a priority is required to claim it"},
 		{&CycleError{Cycle: []int{42, 7, 8, 42}}, "dependency cycle: #42 -> #7 -> #8 -> #42"},
 		{&CycleError{Cycle: []int{42, 42}}, "dependency cycle: #42 -> #42"},
 		{&UnverifiableCycleError{Issue: 42, Blocker: 7}, "cannot verify dependency #42 -> #7 is cycle-free: blocker connections were capped"},
