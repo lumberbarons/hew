@@ -363,6 +363,26 @@ obvious from a flag name.
 Global flags: `--json` (structured output, stable schema), `--repo owner/name`
 (default: detect from git remote via go-gh).
 
+### CLI surface compatibility
+
+Command and flag spellings are contract, like exit codes and `--json` output:
+scripts and agent loops bind to them, and a rename that lands silently shows
+up first as a broken loop. `cmd/hew/testdata/surface.golden` snapshots every
+command path, every name a flag answers to (primary and aliases) with its type
+and repeatability, and each command's positional usage. `go test ./cmd/hew`
+fails when a snapshot entry is gone from the live tree; an addition passes.
+
+The policy the gate enforces: within a minor release a rename keeps the old
+spelling as an alias (renaming `--closed` to `--state` is `Name: "state",
+Aliases: []string{"closed"}`), and a removal waits for a major release. A failing diff is then
+actionable — add the alias — instead of noisy. An intended breaking change
+regenerates the golden with `go test ./cmd/hew -run TestSurfaceCompat -update`,
+which puts the removal in the PR diff where a reviewer sees it.
+
+Scope is the surface only. A flag that keeps its name but changes meaning, and
+parse-position bugs, are invisible to a surface diff; they need behavior-level
+tests.
+
 ### `hew pr`
 
 The last step of the claim lifecycle, and the only one the tool used not to
