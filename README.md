@@ -535,8 +535,9 @@ release. A breaking change ships as a `feat!:`/`fix!:` commit, so it lands under
 Breaking changes in the release notes rather than Features, and CI diffs the
 exported surface so every change is deliberate and visible in review; from 1.0
 it will be covered by the project's compatibility policy. The minimum toolchain
-is the `go` directive in [`go.mod`](go.mod) — Go 1.26.11 today — which is also
-what CI builds with. The GitHub backend needs the same `gh auth login`
+is the `go` directive in [`go.mod`](go.mod), which carries an explicit patch
+release and is raised when a standard-library advisory lands; it is also what CI
+builds with. The GitHub backend needs the same `gh auth login`
 credentials as the CLI; the local backend needs neither `gh` nor a network.
 
 ## Design
