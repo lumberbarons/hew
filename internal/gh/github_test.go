@@ -329,6 +329,22 @@ func TestGetIssueNotFound(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "#404 not found") {
 		t.Fatalf("err = %v", err)
 	}
+	var notFound *NotFoundError
+	if !errors.As(err, &notFound) || notFound.Issue != 404 {
+		t.Errorf("err = %v, want a NotFoundError for #404", err)
+	}
+}
+
+// The message names the target the store searched: GitHub adds the
+// repository, a local store has none to name.
+func TestNotFoundErrorMessageNamesTheTarget(t *testing.T) {
+	if got, want := (&NotFoundError{Issue: 7}).Error(), "issue #7 not found"; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+	remote := &NotFoundError{Issue: 7, Repo: Repo{Owner: "o", Name: "r"}}
+	if got, want := remote.Error(), "issue #7 not found in o/r"; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
 }
 
 func TestCreateIssue(t *testing.T) {

@@ -84,6 +84,22 @@ func Open(ctx context.Context, cfg Config) (*Tracker, error) {
 	return openGitHub(ctx, cfg, target)
 }
 
+// WrapAs makes a Tracker around an already-open store, as actor: the seam
+// hew's own CLI uses for writes, where it opens the store once for every
+// command and already knows which backend it opened. External callers use
+// Open, which also resolves the worktree and the backend.
+//
+// An empty actor defers to the store's Viewer, read when an operation first
+// needs the identity rather than at WrapAs. That is what keeps the CLI's
+// identity rules — HEW_USER on a local tracker, the authenticated login on
+// GitHub — outside this package while still letting a command refuse a claim
+// before it has paid for the lookup: a refusal can name the claimant without
+// the acting identity, and only a claim has to know who is acting. Identity
+// reports the actor given, empty when it was deferred.
+func WrapAs(store gh.IssueStore, backend Backend, actor string) *Tracker {
+	return &Tracker{backend: backend, store: store, actor: actor}
+}
+
 // openLocal opens the tracker with the actor the caller named, or the OS login
 // qualified by the worktree when none was given. The identity never comes from
 // HEW_USER: that is the CLI's spelling of the same thing.
@@ -187,11 +203,13 @@ func defaultActor(dir string) (string, error) {
 }
 
 // asAuthError turns the GitHub client's auth failure into the library's typed
-// error, so a consumer matches one type on either side of the boundary.
+// error, so a consumer matches one type on either side of the boundary. The
+// store's error is the cause, keeping the message that names `gh auth login`
+// and the credential failure behind it.
 func asAuthError(err error) error {
 	var auth *gh.AuthError
 	if errors.As(err, &auth) {
-		return &AuthError{Err: auth.Err}
+		return &AuthError{Err: auth}
 	}
 	return err
 }

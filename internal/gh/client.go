@@ -177,6 +177,21 @@ type PullRequests interface {
 	UpdatePullRequest(ctx context.Context, number int, title, body string) error
 }
 
+// NotFoundError marks a lookup for an issue the store does not have. Repo is
+// the GitHub repository the lookup ran against and stays empty in a local
+// store, so the message names the same target it did before the type existed.
+type NotFoundError struct {
+	Issue int
+	Repo  Repo
+}
+
+func (e *NotFoundError) Error() string {
+	if e.Repo.Owner == "" || e.Repo.Name == "" {
+		return fmt.Sprintf("issue #%d not found", e.Issue)
+	}
+	return fmt.Sprintf("issue #%d not found in %s", e.Issue, e.Repo)
+}
+
 // AuthError marks failures that mean "run gh auth login", mapped to a
 // distinct exit code by main.
 type AuthError struct{ Err error }

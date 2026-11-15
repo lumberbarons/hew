@@ -1,19 +1,28 @@
 package tracker
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/lumberbarons/hew/internal/gh"
 )
 
 // ClaimedError reports an existing claim. Assignees may be empty for a
 // label-only claim. Actor is the effective acting identity; on GitHub it is
 // the authenticated login. ByActor means that identity owns the claim.
+//
+// Err is set when the acting identity could not be read while answering: Actor
+// is then empty and ByActor false, so a caller can tell "someone else holds
+// it" from "cannot say who holds it" instead of reading the empty fields as a
+// positive answer.
 type ClaimedError struct {
 	Issue     int
 	Assignees []string
 	Actor     string
 	ByActor   bool
+	Err       error
 }
 
 func (e *ClaimedError) Error() string {
@@ -47,10 +56,22 @@ func (e *AuthError) Error() string {
 }
 func (e *AuthError) Unwrap() error { return e.Err }
 
-// NotFoundError reports an issue absent from the tracker.
-type NotFoundError struct{ Issue int }
+// NotFoundError reports an issue absent from the tracker. Err carries the
+// store's own not-found error when the boundary translated one, so the
+// backend's message — which may name the repository — is what a caller prints.
+type NotFoundError struct {
+	Issue int
+	Err   error
+}
 
-func (e *NotFoundError) Error() string { return fmt.Sprintf("issue #%d not found", e.Issue) }
+func (e *NotFoundError) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return fmt.Sprintf("issue #%d not found", e.Issue)
+}
+
+func (e *NotFoundError) Unwrap() error { return e.Err }
 
 // ClosedError reports an operation refused on a closed target. Reason is
 // the backend's close reason, when available.
@@ -64,6 +85,22 @@ func (e *ClosedError) Error() string {
 		return fmt.Sprintf("issue #%d is closed (%s)", e.Issue, e.Reason)
 	}
 	return fmt.Sprintf("issue #%d is closed", e.Issue)
+}
+
+// EpicError reports a claim on an epic. Epics are containers: their children
+// are the workable issues.
+type EpicError struct{ Issue int }
+
+func (e *EpicError) Error() string {
+	return fmt.Sprintf("issue #%d is an epic; epics are never worked directly", e.Issue)
+}
+
+// UntriagedError reports a claim on an issue with no priority. Claiming an
+// untriaged issue is triage, so the caller has to supply the priority.
+type UntriagedError struct{ Issue int }
+
+func (e *UntriagedError) Error() string {
+	return fmt.Sprintf("issue #%d is untriaged; a priority is required to claim it", e.Issue)
 }
 
 // CycleError reports a dependency cycle, including self-blocks. Cycle is
@@ -149,6 +186,21 @@ type InvalidInputError struct {
 
 func (e *InvalidInputError) Error() string {
 	return fmt.Sprintf("invalid %s: %s", e.Field, e.Reason)
+}
+
+// asReadError types a store failure at the tracker boundary: an absent issue
+// becomes NotFoundError, an authentication failure AuthError. Each keeps the
+// store's error as the cause, so the message and errors.Is retain what the
+// backend actually reported rather than a generic retelling.
+func asReadError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var notFound *gh.NotFoundError
+	if errors.As(err, &notFound) {
+		return &NotFoundError{Issue: notFound.Issue, Err: notFound}
+	}
+	return asAuthError(err)
 }
 
 func formatNumbers(numbers []int, separator string) string {

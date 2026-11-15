@@ -243,7 +243,7 @@ func (g *GitHub) GetIssue(ctx context.Context, number int) (model.Issue, error) 
 		return model.Issue{}, wrapErr(err)
 	}
 	if resp.Repository.Issue == nil {
-		return model.Issue{}, fmt.Errorf("issue #%d not found in %s", number, g.repo)
+		return model.Issue{}, &NotFoundError{Issue: number, Repo: g.repo}
 	}
 	return resp.Repository.Issue.toModel(), nil
 }
@@ -302,7 +302,7 @@ func (g *GitHub) notFoundError(err error, number int) error {
 		if len(e.Path) == 1 && pathSegment(e.Path[0]) == "repository" {
 			return fmt.Errorf("repository %s not found or not accessible", g.repo)
 		}
-		return fmt.Errorf("issue #%d not found in %s", number, g.repo)
+		return &NotFoundError{Issue: number, Repo: g.repo}
 	}
 	return nil
 }
@@ -391,7 +391,7 @@ func (g *GitHub) nodeID(ctx context.Context, number int) (string, error) {
 		return "", wrapErr(err)
 	}
 	if resp.Repository.Issue == nil {
-		return "", fmt.Errorf("issue #%d not found in %s", number, g.repo)
+		return "", &NotFoundError{Issue: number, Repo: g.repo}
 	}
 	g.nodeIDs[number] = resp.Repository.Issue.ID
 	return resp.Repository.Issue.ID, nil

@@ -82,7 +82,7 @@ func snapshot(ctx context.Context, store gh.IssueStore, opts SnapshotOptions) (*
 	}
 	issues, err := store.ListIssues(ctx, fetch)
 	if err != nil {
-		return nil, err
+		return nil, asReadError(err)
 	}
 	return newSnapshot(issues, states), nil
 }
@@ -131,7 +131,7 @@ func newSnapshot(issues []model.Issue, states []State) *Snapshot {
 func get(ctx context.Context, store gh.IssueStore, number int) (Issue, error) {
 	issue, err := store.GetIssue(ctx, number)
 	if err != nil {
-		return Issue{}, err
+		return Issue{}, asReadError(err)
 	}
 	return issueFromModel(issue, true), nil
 }
