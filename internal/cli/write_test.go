@@ -1814,6 +1814,57 @@ func TestSetReportsPartialApplication(t *testing.T) {
 	}
 }
 
+func TestSetPartialApplicationNamesFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		failOn  string
+		opts    SetOpts
+		setup   func(*fakeClient)
+		applied string
+		failed  string
+	}{
+		{
+			name: "add-area", failOn: "AddLabels",
+			opts:    SetOpts{Priority: "P2", AddAreas: []string{"cli"}},
+			applied: "priority", failed: "add-area",
+		},
+		{
+			name: "remove-area", failOn: "RemoveLabel",
+			opts:    SetOpts{Priority: "P0", RemoveAreas: []string{"cli"}},
+			applied: "priority", failed: "remove-area",
+		},
+		{
+			name: "no-parent", failOn: "RemoveSubIssue",
+			opts: SetOpts{Title: "Renamed", NoParent: true},
+			setup: func(f *fakeClient) {
+				f.byNumber(1).Parent = &model.Ref{Number: 2}
+			},
+			applied: "title", failed: "no-parent",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFake(issue(1, "Work", "P2", "bug", "cli"), issue(2, "Epic", "P2", "epic"))
+			if tc.setup != nil {
+				tc.setup(f)
+			}
+			if tc.failOn == "RemoveLabel" {
+				// Swapping priority removes the old label first; let that one
+				// pass so the failure is the later area removal.
+				f.failAfter["RemoveLabel"] = failPoint{calls: 1, err: errors.New("boom")}
+			} else {
+				f.failOn[tc.failOn] = errors.New("boom")
+			}
+			app, _, _ := newApp(f)
+			err := app.Set(ctx, 1, tc.opts)
+			want := "partially updated (applied " + tc.applied + "); " + tc.failed + " failed"
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("err = %v, want it to contain %q", err, want)
+			}
+		})
+	}
+}
+
 func TestCloseReportsCommentedWhenCloseFails(t *testing.T) {
 	f := newFake(issue(1, "A", "P2", "bug"))
 	f.failOn["CloseIssue"] = errors.New("boom")

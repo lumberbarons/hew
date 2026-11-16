@@ -270,20 +270,6 @@ func closedState(reason string) string {
 	return " (" + formatStateReason(reason) + ")"
 }
 
-// guardClosed refuses a write aimed at a closed issue. Editing one is almost
-// always stale state rather than intent — the case this comes from is an issue
-// closed by a PR merge mid-session, quietly absorbing a later edit that nobody
-// noticed until much later. The close state is in the message because that is
-// what separates "the target moved under me" from "I typed the wrong number".
-// The override exists because a guard with no escape hatch just moves the rare
-// deliberate edit to the web UI, where none of the conventions are enforced.
-func guardClosed(issue model.Issue, allowClosed bool) error {
-	if issue.IsOpen() || allowClosed {
-		return nil
-	}
-	return genericErr("#%d is closed%s — pass --closed to edit anyway", issue.Number, closeState(issue))
-}
-
 // startRefusal maps tracker's typed start refusals back to the exit codes
 // agent loops branch on and to the message text the CLI has always printed:
 // someone else's claim is exit 3 (pick the next ready item), your own is exit
@@ -432,136 +418,105 @@ type SetOpts struct {
 	AllowClosed bool
 }
 
-func (o SetOpts) empty() bool {
-	return o.Priority == "" && o.Type == "" && len(o.AddAreas) == 0 &&
-		len(o.RemoveAreas) == 0 && o.Parent == 0 && !o.NoParent && o.Title == "" && !o.TitleSet &&
-		o.BodyFile == ""
-}
-
-// Set retriages or edits within the conventions, swapping the old
-// priority/type label rather than stacking a second one. It refuses a closed
-// target unless AllowClosed is set.
+// Set retriages or edits within the conventions. tracker.Edit owns the field
+// validation, the priority/type swaps, the parent move and the partial-failure
+// report; what stays here is reading the body file, the flag spelling of a
+// refusal and the exit codes.
 func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
-	if opts.empty() {
-		return usageErr("nothing to change; pass --priority, --type, --add-area, --remove-area, --parent, --no-parent, --title, or --body-file")
-	}
 	if opts.Parent > 0 && opts.NoParent {
 		return usageErr("--parent and --no-parent are mutually exclusive")
 	}
-	// Validate every flag up front: Set applies several mutations in
-	// sequence, so a usage error discovered mid-way would exit 2 ("nothing
-	// happened") after earlier changes had already been written.
-	if opts.TitleSet || opts.Title != "" {
-		if err := validateTitle(opts.Title); err != nil {
-			return err
-		}
+	req := tracker.EditRequest{
+		Issue:       number,
+		AddAreas:    opts.AddAreas,
+		RemoveAreas: opts.RemoveAreas,
+		NoParent:    opts.NoParent,
+		AllowClosed: opts.AllowClosed,
 	}
-	var priority model.Priority
 	if opts.Priority != "" {
-		p, ok := model.ParsePriority(opts.Priority)
-		if !ok {
-			return usageErr("--priority must be P0..P4")
-		}
-		priority = p
+		req.Priority = &opts.Priority
 	}
-	if opts.Type != "" && !model.IsType(opts.Type) {
-		return usageErr("--type must be one of %s", strings.Join(model.Types, "|"))
+	if opts.Type != "" {
+		req.Type = &opts.Type
 	}
-	addAreas, err := normalizeAreas("--add-area", opts.AddAreas)
-	if err != nil {
-		return err
+	if opts.TitleSet || opts.Title != "" {
+		req.Title = &opts.Title
 	}
-	// Removal must remain available for oversized labels older local
-	// trackers accepted, so they can be repaired before migrating to GitHub.
-	if err := validateAreaLabels("--remove-area", opts.RemoveAreas); err != nil {
-		return err
+	if opts.Parent > 0 {
+		req.Parent = &opts.Parent
 	}
-	// Read the replacement body before any mutation: a --body-file typo
-	// would otherwise surface after the label swaps had already landed.
-	var body string
+	// The replacement body is adapter input: read and compose it before the
+	// library call, so a --body-file typo cannot land after the label swaps.
 	if opts.BodyFile != "" {
-		b, err := a.composeBody(bodySource{bodyFile: opts.BodyFile})
+		body, err := a.composeBody(bodySource{bodyFile: opts.BodyFile})
 		if err != nil {
 			return err
 		}
-		if strings.TrimSpace(b) == "" {
+		if strings.TrimSpace(body) == "" {
 			return usageErr("--body-file %s is empty; set does not blank an issue body", opts.BodyFile)
 		}
-		body = b
+		req.Body = &body
 	}
-	issue, err := a.Client.GetIssue(ctx, number)
+
+	result, err := tracker.WrapAs(a.Client, a.backend(), "").Edit(ctx, req)
 	if err != nil {
-		return err
+		return setError(err)
 	}
-	// The pre-mutation read is already here, so the guard costs no extra call.
-	// It has to run before the first step below: Set applies its changes in
-	// sequence, and a refusal discovered halfway would leave a partial edit on
-	// an issue that should not have been touched at all.
-	if err := guardClosed(issue, opts.AllowClosed); err != nil {
-		return err
-	}
-
-	// Track applied changes so a later failure reports what already landed
-	// rather than looking like a clean no-op.
-	var applied []string
-	step := func(name string, err error) error {
-		if err == nil {
-			applied = append(applied, name)
-			return nil
-		}
-		if len(applied) == 0 {
-			return err
-		}
-		return fmt.Errorf("#%d partially updated (applied %s); %s failed: %w",
-			number, strings.Join(applied, ", "), name, err)
-	}
-
-	if opts.Priority != "" {
-		if err := step("priority", a.swapPriority(ctx, issue, priority)); err != nil {
-			return err
-		}
-	}
-	if opts.Type != "" {
-		if err := step("type", a.swapType(ctx, issue, opts.Type)); err != nil {
-			return err
-		}
-	}
-	if len(addAreas) > 0 {
-		if err := step("add-area", a.Client.AddLabels(ctx, number, addAreas)); err != nil {
-			return err
-		}
-	}
-	for _, area := range opts.RemoveAreas {
-		if err := step("remove-area", a.Client.RemoveLabel(ctx, number, area)); err != nil {
-			return err
-		}
-	}
-	if opts.Title != "" {
-		if err := step("title", a.Client.EditTitle(ctx, number, opts.Title)); err != nil {
-			return err
-		}
-	}
-	if opts.BodyFile != "" {
-		if err := step("body", a.Client.EditBody(ctx, number, body)); err != nil {
-			return err
-		}
-	}
-	if opts.Parent > 0 {
-		// AddSubIssue with replace moves the issue when it already has one.
-		if err := step("parent", a.Client.AddSubIssue(ctx, opts.Parent, number, true)); err != nil {
-			return err
-		}
-	}
-	if opts.NoParent {
-		if issue.Parent == nil {
-			a.warnf("#%d has no parent; --no-parent is a no-op", number)
-		} else {
-			if err := step("no-parent", a.Client.RemoveSubIssue(ctx, issue.Parent.Number, number)); err != nil {
-				return err
-			}
-		}
+	if result.ParentNoop {
+		a.warnf("#%d has no parent; --no-parent is a no-op", number)
 	}
 	return a.reportMutation(ctx, number, "updated #%d\n", number)
+}
+
+// setError maps tracker.Edit's typed refusals onto the command's flags and
+// exit codes: the field mistakes are usage errors, a closed target names its
+// override, and a partial edit keeps the applied-field report.
+func setError(err error) error {
+	var invalid *tracker.InvalidInputError
+	if errors.As(err, &invalid) {
+		switch invalid.Field {
+		case "edit":
+			return usageErr("nothing to change; pass --priority, --type, --add-area, --remove-area, --parent, --no-parent, --title, or --body-file")
+		case "priority", "type", "title":
+			return usageErr("--%s %s", invalid.Field, invalid.Reason)
+		case "addAreas":
+			return usageErr("--add-area %s", invalid.Reason)
+		case "removeAreas":
+			return usageErr("--remove-area %s", invalid.Reason)
+		case "body":
+			return usageErr("--body-file %s", invalid.Reason)
+		default:
+			return usageErr("--%s %s", invalid.Field, invalid.Reason)
+		}
+	}
+	var closed *tracker.ClosedError
+	if errors.As(err, &closed) {
+		return genericErr("#%d is closed%s — pass --closed to edit anyway", closed.Issue, closedState(closed.Reason))
+	}
+	var partial *tracker.PartialEditError
+	if errors.As(err, &partial) {
+		applied := make([]string, len(partial.Applied))
+		for i, field := range partial.Applied {
+			applied[i] = editFieldFlag(field)
+		}
+		return fmt.Errorf("#%d partially updated (applied %s); %s failed: %w",
+			partial.Issue, strings.Join(applied, ", "), editFieldFlag(partial.Failed), partial.Err)
+	}
+	return err
+}
+
+// editFieldFlag spells a tracker.EditRequest field the way the command's flags
+// do, so a partial-update report names options a caller can actually retry.
+func editFieldFlag(field string) string {
+	switch field {
+	case "addAreas":
+		return "add-area"
+	case "removeAreas":
+		return "remove-area"
+	case "noParent":
+		return "no-parent"
+	}
+	return field
 }
 
 // validateTitle checks the stored title, including any cosmetic epic prefix.
@@ -595,39 +550,6 @@ func normalizeAreas(flag string, areas []string) ([]string, error) {
 		return nil, err
 	}
 	return trimmed, nil
-}
-
-// validateAreaLabels checks names that must not be convention labels, without
-// the trim, length or comma rules normalizeAreas applies: a removal has to be
-// able to name an oversized area an older tracker stored, so it can be
-// repaired before a local migration.
-func validateAreaLabels(flag string, areas []string) error {
-	for _, area := range areas {
-		if err := tracker.ValidateAreaLabel(area); err != nil {
-			var invalid *tracker.InvalidInputError
-			if errors.As(err, &invalid) {
-				return usageErr("%s %s", flag, invalid.Reason)
-			}
-			return err
-		}
-	}
-	return nil
-}
-
-// swapType enforces the one-type-label invariant: remove the others, add the
-// target if absent.
-func (a *App) swapType(ctx context.Context, issue model.Issue, typ string) error {
-	for _, l := range issue.Labels {
-		if _, ok := model.LabelType(l); ok && !strings.EqualFold(l, typ) {
-			if err := a.Client.RemoveLabel(ctx, issue.Number, l); err != nil {
-				return err
-			}
-		}
-	}
-	if !issue.HasLabel(typ) {
-		return a.Client.AddLabels(ctx, issue.Number, []string{typ})
-	}
-	return nil
 }
 
 // Close comments the reason and closes: not-planned unless --completed or
@@ -739,78 +661,54 @@ func uniqueInts(numbers []int) []int {
 	return out
 }
 
-// Reopen is close's inverse: comment the reason, reopen the issue. Closing
-// comments routinely encode the condition to reopen on ("reopen only if #24
-// stalls"), and acting on one should keep close's comment-plus-state-change
-// shape rather than degrade to a bare state flip. No retriage — the issue
-// rejoins list/triage/ready with the priority, type, and area labels it
-// already had.
-//
-// A claim is the one thing reopen does clear. Neither close nor a PR merge
-// removes the in-progress label or the assignee, so most issues closed in
-// the normal workflow still carry the claim that produced the fix. Left in
-// place on a reopened issue it makes the claim guard lie: exit 5 tells the
-// old owner to resume merged work, exit 3 tells everyone else the issue is
-// taken, and ready hides it. Whoever wants it back runs start.
+// Reopen is close's inverse: comment the reason, reopen the issue. The
+// decisions — the comment-plus-state-change shape, the no-op on an already open
+// issue, and clearing the stale claim the close left behind — live in
+// tracker.Reopen. What stays here is the command's wording for what was
+// released and for its typed refusals.
 func (a *App) Reopen(ctx context.Context, number int, reason string) error {
-	if reason == "" {
-		return usageErr("--reason is required")
-	}
-	issue, err := a.Client.GetIssue(ctx, number)
+	result, err := tracker.WrapAs(a.Client, a.backend(), "").Reopen(ctx, number, tracker.ReopenOptions{Reason: reason})
 	if err != nil {
-		return err
+		return reopenError(number, err)
 	}
-	if issue.IsOpen() {
+	if !result.Reopened {
 		// The requested state already holds, so this is not an error to
 		// report: erroring would make an idempotent retry look like a
 		// failure. Commenting is skipped with it — the note would document a
 		// reopen that never happened.
-		return a.emitNoOp(issue, "#%d is already open\n", number)
+		return a.reportNoOp(ctx, number, "#%d is already open\n", number)
 	}
-	if err := a.Client.Comment(ctx, number, reason); err != nil {
-		return err
-	}
-	if err := a.Client.ReopenIssue(ctx, number); err != nil {
-		// The reason comment already posted; flag it so a retry isn't read as
-		// a clean redo — re-running would post the comment a second time.
-		return fmt.Errorf("posted the reason comment on #%d but reopening it failed (a retry will comment again): %w", number, err)
-	}
-	released, err := a.releaseClaim(ctx, issue)
-	if err != nil {
-		// The reopen landed; only the release failed. A retry is a no-op
-		// reopen and will not clear it, so name the remedy.
-		return fmt.Errorf("reopened #%d but releasing its stale claim failed (it is open and still claimed; hew release %d --force clears it): %w", number, number, err)
-	}
-	if released == "" {
+	if !result.ReleasedLabel && len(result.ReleasedAssignees) == 0 {
 		return a.reportMutation(ctx, number, "reopened #%d\n", number)
 	}
-	return a.reportMutation(ctx, number, "reopened #%d (released %s)\n", number, released)
+	return a.reportMutation(ctx, number, "reopened #%d (released %s)\n", number, releasedClaim(result))
 }
 
-// releaseClaim drops the in-progress label and every assignee from issue and
-// returns a description of what was released, or "" if it was not claimed.
-// The label goes first: if the assignee removal then fails the issue is
-// still claimed either way, and the error path reports exactly that.
-func (a *App) releaseClaim(ctx context.Context, issue model.Issue) (string, error) {
-	if !issue.Claimed() {
-		return "", nil
+// releasedClaim renders the halves tracker.Reopen cleared in the command's
+// wording; sanitizing a backend-supplied login stays with the renderer.
+func releasedClaim(result tracker.ReopenResult) string {
+	if len(result.ReleasedAssignees) == 0 {
+		return "stale in-progress label"
 	}
-	// Remove each in-progress label by the spelling the issue carries, so the
-	// removal does not depend on the backend resolving case.
-	for _, l := range issue.Labels {
-		if model.IsInProgressLabel(l) {
-			if err := a.Client.RemoveLabel(ctx, issue.Number, l); err != nil {
-				return "", err
-			}
+	return "@" + render.SanitizeInline(strings.Join(result.ReleasedAssignees, " and @")) + "'s stale claim"
+}
+
+// reopenError maps tracker.Reopen's typed outcomes onto the command's text:
+// the missing reason is a usage error, and each partial stage names the state
+// that survived so a retry is not read as a clean redo.
+func reopenError(number int, err error) error {
+	var invalid *tracker.InvalidInputError
+	if errors.As(err, &invalid) && invalid.Field == "reason" {
+		return usageErr("--reason is required")
+	}
+	var partial *tracker.PartialReopenError
+	if errors.As(err, &partial) {
+		if partial.Stage == tracker.ReopenStageClaim {
+			return fmt.Errorf("reopened #%d but releasing its stale claim failed (it is open and still claimed; hew release %d --force clears it): %w", number, number, partial.Err)
 		}
+		return fmt.Errorf("posted the reason comment on #%d but reopening it failed (a retry will comment again): %w", number, partial.Err)
 	}
-	if len(issue.Assignees) == 0 {
-		return "stale in-progress label", nil
-	}
-	if err := a.Client.RemoveAssignees(ctx, issue.Number, issue.Assignees); err != nil {
-		return "", err
-	}
-	return "@" + render.SanitizeInline(strings.Join(issue.Assignees, " and @")) + "'s stale claim", nil
+	return err
 }
 
 // Block adds native dependencies through tracker, which owns the transitive
@@ -1091,23 +989,6 @@ func (a *App) InitLocal(dir string) error {
 		a.printf("local tracker ready in %s\n", tracker)
 		a.printClaudeSnippet(conventions.ClaudeSnippetLocal)
 	})
-}
-
-// swapPriority enforces the one-priority-label invariant: remove the
-// others, add the target if absent.
-func (a *App) swapPriority(ctx context.Context, issue model.Issue, p model.Priority) error {
-	target := p.String()
-	for _, l := range issue.Labels {
-		if _, ok := model.LabelPriority(l); ok && !strings.EqualFold(l, target) {
-			if err := a.Client.RemoveLabel(ctx, issue.Number, l); err != nil {
-				return err
-			}
-		}
-	}
-	if !issue.HasLabel(target) {
-		return a.Client.AddLabels(ctx, issue.Number, []string{target})
-	}
-	return nil
 }
 
 // reportNoOp is reportMutation for a write that changed nothing: text, or a

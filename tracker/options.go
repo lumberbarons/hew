@@ -51,6 +51,43 @@ type BlockOptions struct {
 	AllowClosed bool
 }
 
+// EditRequest names the changes to make to one issue. Every field is optional:
+// a nil pointer, an empty slice or a false flag leaves that part of the issue
+// alone. The pointer fields carry presence rather than value, so an explicitly
+// empty title, body, priority or type is refused instead of being read as an
+// omitted field.
+type EditRequest struct {
+	// Issue is the issue to edit.
+	Issue int
+	// Priority is P0..P4; the old priority label is swapped, never stacked.
+	Priority *string
+	// Type is bug|enhancement|task; the old type label is swapped, never
+	// stacked.
+	Type *string
+	// Title replaces the issue's title.
+	Title *string
+	// Body replaces the whole issue body. An empty body is refused: an edit
+	// does not blank an issue.
+	Body *string
+	// AddAreas and RemoveAreas change the issue's area labels. Added names
+	// are trimmed and de-duplicated; neither list may name a convention
+	// label.
+	AddAreas    []string
+	RemoveAreas []string
+	// Parent moves the issue under that parent, replacing an existing one.
+	// NoParent removes the current parent. The two are mutually exclusive.
+	Parent   *int
+	NoParent bool
+	// AllowClosed permits editing an issue that is already closed.
+	AllowClosed bool
+}
+
+// ReopenOptions configures Reopen. The reason is required: it is the comment
+// that records why closed work is coming back.
+type ReopenOptions struct {
+	Reason string
+}
+
 // ApplyOptions configures plan application. The zero value applies the
 // plan without a delay between writes and with an in-memory checkpoint, so
 // nothing resumes across calls; DryRun validates without writing.
