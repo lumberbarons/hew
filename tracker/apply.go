@@ -126,7 +126,7 @@ func (t *Tracker) ApplyPlan(ctx context.Context, entries []PlanEntry, opts Apply
 		}
 		issue, err := t.store.CreateIssue(ctx, PlanTitle(e), PlanBodyWithProvenance(e, digest), planLabels(e))
 		if err != nil {
-			return result, fmt.Errorf("creating %s (rerun to resume): %w", e.Key(), asAuthError(err))
+			return result, fmt.Errorf("creating %s (rerun to resume): %w", e.Key(), asWriteError(err))
 		}
 		if err := checkpoint.RecordCreated(e.Key(), issue.Number); err != nil {
 			return result, err
@@ -225,7 +225,7 @@ func (t *Tracker) requirePlanRefs(ctx context.Context, entries []PlanEntry, chec
 func (t *Tracker) ensurePlanLabels(ctx context.Context, entries []PlanEntry) error {
 	existing, err := t.store.ListLabels(ctx)
 	if err != nil {
-		return asAuthError(err)
+		return asReadError(err)
 	}
 	have := map[string]bool{}
 	for _, l := range existing {
@@ -251,7 +251,7 @@ func (t *Tracker) ensurePlanLabels(ctx context.Context, entries []PlanEntry) err
 			continue
 		}
 		if err := t.store.CreateLabel(ctx, l); err != nil {
-			return fmt.Errorf("creating label %q: %w", l.Name, asAuthError(err))
+			return fmt.Errorf("creating label %q: %w", l.Name, asWriteError(err))
 		}
 		have[strings.ToLower(l.Name)] = true
 	}

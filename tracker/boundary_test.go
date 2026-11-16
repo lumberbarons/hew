@@ -570,3 +570,53 @@ func localFixture(t *testing.T) (context.Context, *local.Store, string, model.Is
 	}
 	return ctx, store, dir, issue
 }
+
+// TestApplyPlanLocalRefusalsReachThePublicTypes covers the mutations ApplyPlan
+// makes through the store's lock — creating labels and issues — which must
+// surface the same public types as every other write.
+func TestApplyPlanLocalRefusalsReachThePublicTypes(t *testing.T) {
+	plan := []PlanEntry{{Title: "Imported", Type: "task"}}
+
+	t.Run("a write after migration is a MigratedError", func(t *testing.T) {
+		ctx, store, dir, issue := localFixture(t)
+		frozen, err := local.Freeze(ctx, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := frozen.Seal("owner/repo", map[int]int{issue.Number: 1}); err != nil {
+			t.Fatal(err)
+		}
+		frozen.Release()
+
+		_, err = WrapAs(store, BackendLocal, "actor-a").ApplyPlan(ctx, plan, ApplyOptions{})
+		var migrated *MigratedError
+		if !errors.As(err, &migrated) {
+			t.Fatalf("err = %T (%v), want *tracker.MigratedError", err, err)
+		}
+		if migrated.Path != dir || migrated.Repo != "owner/repo" {
+			t.Errorf("MigratedError = %+v, want the tracker directory and the repository it moved to", migrated)
+		}
+	})
+
+	t.Run("a lock timeout is a LockTimeoutError", func(t *testing.T) {
+		ctx, _, dir, _ := localFixture(t)
+		frozen, err := local.Freeze(ctx, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer frozen.Release()
+
+		slow, err := local.OpenWithOptions(dir, local.Options{
+			Viewer:      "actor-a",
+			LockTimeout: 20 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = WrapAs(slow, BackendLocal, "actor-a").ApplyPlan(ctx, plan, ApplyOptions{})
+		var timeout *LockTimeoutError
+		if !errors.As(err, &timeout) {
+			t.Fatalf("err = %T (%v), want *tracker.LockTimeoutError", err, err)
+		}
+	})
+}
