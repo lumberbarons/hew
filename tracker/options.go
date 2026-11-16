@@ -34,12 +34,15 @@ type ReleaseOptions struct {
 	Force bool
 }
 
-// CloseOptions configures issue closure. Reason is required; the zero
-// values of Completed and DuplicateOf select a not-planned closure.
+// CloseOptions configures issue closure. Reason is required, except with
+// DuplicateOf, which supplies one; the zero values of Completed and
+// DuplicateOf select a not-planned closure.
 type CloseOptions struct {
 	Reason      string
 	Completed   bool
 	DuplicateOf int
+	// Force closes an epic that still has open sub-issues.
+	Force bool
 }
 
 // BlockOptions configures Block and Unblock. The zero value refuses a

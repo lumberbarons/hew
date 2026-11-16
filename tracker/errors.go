@@ -157,6 +157,63 @@ func (e *PartialWriteError) Error() string {
 
 func (e *PartialWriteError) Unwrap() error { return e.Err }
 
+// NotClaimedError reports a release of an issue nobody holds.
+type NotClaimedError struct{ Issue int }
+
+func (e *NotClaimedError) Error() string {
+	return fmt.Sprintf("issue #%d is not claimed", e.Issue)
+}
+
+// NotOwnerError reports a release the acting identity may not make: the claim
+// is not solely theirs. Assignees is empty for a label-only claim. Actor is the
+// acting identity the claim was compared with.
+type NotOwnerError struct {
+	Issue     int
+	Assignees []string
+	Actor     string
+}
+
+func (e *NotOwnerError) Error() string {
+	return fmt.Sprintf("issue #%d is not claimed solely by acting identity %s", e.Issue, e.Actor)
+}
+
+// PartialReleaseError reports a release that failed after it began clearing
+// the claim, so the claim may be partly cleared. Err is the backend cause.
+type PartialReleaseError struct {
+	Issue int
+	Err   error
+}
+
+func (e *PartialReleaseError) Error() string {
+	return fmt.Sprintf("releasing #%d failed; its claim may be partially cleared: %v", e.Issue, e.Err)
+}
+
+func (e *PartialReleaseError) Unwrap() error { return e.Err }
+
+// OpenChildrenError reports a close of an epic that still has Open open
+// sub-issues, which would be stranded under a closed parent.
+type OpenChildrenError struct {
+	Issue int
+	Open  int
+}
+
+func (e *OpenChildrenError) Error() string {
+	return fmt.Sprintf("issue #%d is an epic with %d open sub-issues", e.Issue, e.Open)
+}
+
+// PartialCloseError reports a close whose reason comment posted but whose
+// state change failed. A retry will comment again. Err is the backend cause.
+type PartialCloseError struct {
+	Issue int
+	Err   error
+}
+
+func (e *PartialCloseError) Error() string {
+	return fmt.Sprintf("posted the reason comment on #%d but closing it failed: %v", e.Issue, e.Err)
+}
+
+func (e *PartialCloseError) Unwrap() error { return e.Err }
+
 // MigratedError reports that a local tracker has moved to a GitHub repo.
 type MigratedError struct {
 	Path string

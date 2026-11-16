@@ -527,9 +527,11 @@ local tracker; GitHub claims as the `gh` CLI's authenticated login and detects
 the repository from the origin remote unless `Config.Repo` pins one. Notices go
 to the optional `Config.Notice` writer — the library never prints. Today it
 covers backend detection (`Detect`, `Open`), snapshot and single-issue reads,
-and `Block`/`Unblock`; the rest of the command surface is CLI-only. `ready`,
-`list`, `show`, `epic status`, `block` and `unblock` are implemented on top of
-it, so a library caller and the commands share one behavior.
+the claim lifecycle (`Start`, `Release`, `Close`), `Block`/`Unblock` and
+`ApplyPlan`; the rest of the command surface is CLI-only. `ready`, `list`,
+`show`, `epic status`, `start`, `release`, `close`, `block`, `unblock` and
+`apply` are implemented on top of it, so a library caller and the commands share
+one behavior.
 
 **Stability: experimental.** The `tracker` API may change in any v0.x minor
 release. A breaking change ships as a `feat!:`/`fix!:` commit, so it lands under
