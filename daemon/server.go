@@ -92,7 +92,13 @@ func (s *Server) Handler() http.Handler {
 	if err != nil {
 		panic(err) // the embed directive guarantees the directory
 	}
-	mux.Handle("/", http.FileServerFS(web))
+	// The assets are embedded and change with the binary, so never let a
+	// browser serve a stale script or stylesheet from a previous build.
+	static := http.FileServerFS(web)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		static.ServeHTTP(w, r)
+	})
 
 	return guard(mux)
 }

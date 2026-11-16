@@ -477,3 +477,19 @@ func TestListRoutesOmitBodies(t *testing.T) {
 		t.Error("detail dropped the body")
 	}
 }
+
+// TestAssetsAreServedUncached pins the cache header: the assets are embedded
+// and change with the binary, so a stale cached script must never be reused.
+func TestAssetsAreServedUncached(t *testing.T) {
+	e := newEnv(t, false)
+	for _, path := range []string{"/", "/app.js", "/markdown.js", "/style.css"} {
+		resp, err := http.Get(e.url + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != 200 || resp.Header.Get("Cache-Control") != "no-cache" {
+			t.Errorf("GET %s = %d, Cache-Control %q; want 200 and no-cache", path, resp.StatusCode, resp.Header.Get("Cache-Control"))
+		}
+	}
+}

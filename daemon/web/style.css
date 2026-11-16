@@ -58,3 +58,16 @@ pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px
 #toasts { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; max-width: min(380px, calc(100vw - 32px)); }
 .toast { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 6px; padding: 8px 12px; box-shadow: 0 4px 12px rgb(0 0 0 / .15); }
 .toast.bad { border-left-color: var(--bad); } .toast.ok { border-left-color: var(--ok); }
+.md { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 4px 16px; overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 12px; } .md > :last-child { margin-bottom: 12px; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 16px 0 4px; line-height: 1.3; text-transform: none; letter-spacing: 0; color: var(--fg); }
+.md h1 { font-size: 20px; } .md h2 { font-size: 17px; } .md h3 { font-size: 15px; } .md h4, .md h5, .md h6 { font-size: 14px; }
+.md p { margin: 6px 0; }
+.md ul, .md ol { margin: 6px 0; padding-left: 22px; }
+.md li.task { list-style: none; margin-left: -20px; }
+.md li.task input { margin-right: 4px; vertical-align: -1px; }
+.md code { font: 13px ui-monospace, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.md pre { margin: 8px 0; }
+.md pre code { background: none; border: 0; padding: 0; }
+.md blockquote { margin: 8px 0; padding: 0 12px; border-left: 3px solid var(--line); color: var(--muted); }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }

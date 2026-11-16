@@ -2,6 +2,8 @@
 // goes in through textContent (the h() helper); nothing here uses innerHTML,
 // because issue titles and bodies are untrusted input.
 
+import { renderMarkdown } from './markdown.js';
+
 const app = document.getElementById('app');
 let config = {};
 
@@ -131,10 +133,10 @@ async function viewBoard() {
   show(h('h1', {}, 'Board'),
     ...warnings(b.warnings),
     b.untriaged ? h('div', { class: 'note' }, `${b.untriaged} untriaged issue${b.untriaged === 1 ? '' : 's'} hidden. `, h('a', { href: '#/triage' }, 'Open triage')) : null,
+    ...section('Epics', b.epics),
     ...section('Ready', b.ready, 'No ready work.'),
     ...section('In progress', b.claimed),
-    ...section('Blocked', b.blocked),
-    ...section('Epics', b.epics));
+    ...section('Blocked', b.blocked));
 }
 
 async function viewIssue(n) {
@@ -209,11 +211,11 @@ async function viewIssue(n) {
       claimed ? h('span', { class: 'chip claim' }, 'in progress @' + (i.assignees || []).join(', @')) : null,
       i.parent ? h('span', { class: 'muted' }, 'in epic ', h('a', { href: `#/issue/${i.parent}` }, num(i.parent))) : null),
     ...findings, actions, closeRow, edit, deps,
-    h('h2', {}, 'Body'), h('pre', {}, i.body || '(empty)'),
+    h('h2', {}, 'Body'), i.body ? renderMarkdown(i.body) : h('p', { class: 'muted' }, '(empty)'),
     d.children.length ? [h('h2', {}, `Children (${d.children.length})${d.next ? ` — next: ${num(d.next)}` : ''}`),
       h('div', { class: 'list' }, d.children.map(issueRow))] : null,
     i.comments && i.comments.length ? [h('h2', {}, `Comments (${i.commentsTotal || i.comments.length})`),
-      ...i.comments.map(c => h('div', { class: 'comment' }, h('div', { class: 'muted' }, `${c.author} · ${new Date(c.createdAt).toLocaleString()}`), h('div', {}, c.body)))] : null);
+      ...i.comments.map(c => h('div', { class: 'comment' }, h('div', { class: 'muted' }, `${c.author} · ${new Date(c.createdAt).toLocaleString()}`), renderMarkdown(c.body)))] : null);
 }
 
 function viewNew() {
