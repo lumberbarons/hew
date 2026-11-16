@@ -55,14 +55,17 @@ func run() error {
 		return err
 	}
 
-	var prc *pr.Client
+	// A nil *pr.Client stored in the interface would not be a nil interface,
+	// so the routes' "no pull requests" check would pass and then panic.
+	var prs daemon.PullRequests
 	if tr.Backend() == tracker.BackendGitHub {
-		if prc, err = pr.Open(ctx, pr.Config{Worktree: *dir, Backend: tracker.BackendGitHub, Repo: *repo}); err != nil {
-			var none *pr.NoPullRequestsError
-			if !errors.As(err, &none) {
-				return err
-			}
-			prc = nil
+		prc, err := pr.Open(ctx, pr.Config{Worktree: *dir, Backend: tracker.BackendGitHub, Repo: *repo})
+		var none *pr.NoPullRequestsError
+		switch {
+		case err == nil:
+			prs = prc
+		case !errors.As(err, &none):
+			return err
 		}
 	}
 
@@ -71,7 +74,7 @@ func run() error {
 		return err
 	}
 	srv := &http.Server{
-		Handler:           daemon.New(tr, prc, target).Handler(),
+		Handler:           daemon.New(tr, prs, target).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {

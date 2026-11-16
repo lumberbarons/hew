@@ -7,7 +7,7 @@ counterpart to `consumer/`, and what it needed from the library is recorded belo
 It is a separate module (`replace github.com/lumberbarons/hew => ../`, like
 `consumer/`), so it can name only the public packages. CI runs it as its own `daemon`
 job (`make daemon` locally); it is outside the root module's coverage gate and
-goreleaser. Its `go` directive must match the root's.
+goreleaser, but has its own 90% statement floor (`cmd/` excluded, as at the root). Its `go` directive must match the root's.
 
 ```sh
 cd daemon && go run ./cmd/hew-daemon --dir /path/to/a/hew/checkout

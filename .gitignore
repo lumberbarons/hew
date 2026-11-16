@@ -7,6 +7,7 @@ coverage-consumer.out
 /evals/tokens
 # `go build ./cmd/hew-daemon` in daemon/ drops the server binary here.
 /daemon/hew-daemon
+coverage-daemon.out
 .opencode/worktrees/
 .opencode/plugins/worktree.ts
 .codex/worktrees

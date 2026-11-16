@@ -208,7 +208,8 @@ jobs:
   # daemon/ is a long-running consumer of the same public packages: a REST API
   # and web UI over a tracker. Like consumer/ it is a separate module that
   # cannot name internal/*, and like evals/ it is outside the root job's
-  # ./..., the coverage gate and goreleaser, so it needs its own gates.
+  # ./..., the coverage gate and goreleaser, so it needs its own gates,
+  # including its own coverage floor.
   daemon:
     runs-on: ubuntu-latest
     steps:
@@ -229,8 +230,16 @@ jobs:
       - name: formatting
         run: golangci-lint fmt --diff
         working-directory: daemon
-      - run: go test -race ./...
+      - run: go test -race -coverprofile=coverage-daemon.out ./...
         working-directory: daemon
+      # The same floor and action as the root module's gate. The action runs
+      # from the repository root, so the config's profile path is relative to
+      # it and source-dir points at the module whose import path to strip.
+      - name: coverage gate
+        uses: vladopajic/go-test-coverage@f94bcf0d6b9fa5fb8b783830b22648f6c17475e2 # v2.19.0
+        with:
+          config: ./daemon/.testcoverage.yml
+          source-dir: ./daemon
 
   # evals/ is its own module, so the root job's ./... never reaches it.
   evals:

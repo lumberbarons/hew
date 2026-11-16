@@ -8,6 +8,7 @@
 package daemon
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -26,15 +27,24 @@ import (
 //go:embed web
 var webFS embed.FS
 
+// PullRequests is the slice of *pr.Client the server uses. It is an interface
+// so the HTTP mapping can be tested without a GitHub checkout; the real client
+// satisfies it, and consumer/ covers the client itself.
+type PullRequests interface {
+	Create(ctx context.Context, req pr.CreateRequest) (pr.CreateResult, error)
+	Amend(ctx context.Context, req pr.AmendRequest) (pr.AmendResult, error)
+}
+
 // Server routes HTTP requests onto one open tracker.
 type Server struct {
 	tr     *tracker.Tracker
-	prc    *pr.Client // nil when the backend has no pull requests
+	prc    PullRequests // nil when the backend has no pull requests
 	target tracker.Target
 }
 
-// New wires a Server. prc may be nil; its routes then answer 501.
-func New(tr *tracker.Tracker, prc *pr.Client, target tracker.Target) *Server {
+// New wires a Server. prc must be a nil interface, not a nil *pr.Client, when
+// the backend has no pull requests; its routes then answer 501.
+func New(tr *tracker.Tracker, prc PullRequests, target tracker.Target) *Server {
 	return &Server{tr: tr, prc: prc, target: target}
 }
 

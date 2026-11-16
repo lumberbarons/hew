@@ -65,20 +65,41 @@ func checkout(t *testing.T, untriaged bool) (string, tracker.Target) {
 }
 
 type env struct {
-	t   *testing.T
-	url string
+	t    *testing.T
+	url  string
+	root string
 }
 
-func newEnv(t *testing.T, untriaged bool) *env {
+func newEnv(t *testing.T, untriaged bool) *env { return newEnvWith(t, untriaged, nil) }
+
+// newEnvWith is newEnv with a pull-request client, so the PR routes can be
+// driven without a GitHub checkout. nil means a backend without pull requests.
+func newEnvWith(t *testing.T, untriaged bool, prs daemon.PullRequests) *env {
 	t.Helper()
 	root, target := checkout(t, untriaged)
 	tr, err := tracker.Open(context.Background(), tracker.Config{Worktree: root, Actor: "daemon"})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	srv := httptest.NewServer(daemon.New(tr, nil, target).Handler())
+	srv := httptest.NewServer(daemon.New(tr, prs, target).Handler())
 	t.Cleanup(srv.Close)
-	return &env{t: t, url: srv.URL}
+	return &env{t: t, url: srv.URL, root: root}
+}
+
+// appendRaw writes lines the write path would never produce straight into the
+// tracker file: a dependency cycle, hostile text, or garbage that breaks reads.
+func (e *env) appendRaw(lines ...string) {
+	e.t.Helper()
+	f, err := os.OpenFile(filepath.Join(e.root, ".hew", "issues.jsonl"), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	for _, l := range lines {
+		if _, err := f.WriteString(l + "\n"); err != nil {
+			e.t.Fatal(err)
+		}
+	}
 }
 
 // call sends a JSON request as actor and returns the status and decoded body.

@@ -35,9 +35,10 @@ consumer: ## Test and lint the external-consumer module
 	cd consumer && golangci-lint run
 	cd consumer && golangci-lint fmt --diff
 
-daemon: ## Test and lint the hew-daemon module
+daemon: ## Test, lint and coverage-gate the hew-daemon module
 	cd daemon && go mod tidy -diff
-	cd daemon && go test -race ./...
+	cd daemon && go test -race -coverprofile=coverage-daemon.out ./...
+	go run github.com/vladopajic/go-test-coverage/v2@v2.19.0 --config=./daemon/.testcoverage.yml --source-dir=./daemon
 	cd daemon && golangci-lint run
 	cd daemon && golangci-lint fmt --diff
 
