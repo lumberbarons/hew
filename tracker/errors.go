@@ -291,6 +291,20 @@ func (e *MigratedError) Error() string {
 
 func (e *MigratedError) Unwrap() error { return e.Err }
 
+// InitializedElsewhereError reports a repository whose tracker belongs to
+// another backend, so initializing it locally would create a second tracker no
+// command would read. Path is the existing tracker's directory; Backend is the
+// backend its config names. Moving that tracker is a migration, not an
+// initialization.
+type InitializedElsewhereError struct {
+	Path    string
+	Backend Backend
+}
+
+func (e *InitializedElsewhereError) Error() string {
+	return fmt.Sprintf("%s already tracks issues in %q, not locally", e.Path, string(e.Backend))
+}
+
 // LockTimeoutError reports an expired wait for a local tracker's lock. Err
 // carries the store's own timeout when the boundary translated one, so the
 // message keeps the detail that explains the wait — a running migration, or
