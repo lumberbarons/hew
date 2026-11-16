@@ -242,7 +242,8 @@ The commands and their flags are documented where they run: `hew --help` and
 `hew <cmd> --help` are exact, the README is the user-facing tour, and the primer
 is what agents see. This document does not restate them — a listing here only
 drifts. What follows is the reasoning behind the command behaviors that are not
-obvious from a flag name.
+obvious from a flag name. The public operation behind each command is in
+[Tracker library](#tracker-library).
 
 - **Reads.** `ready` is open, non-epic, triaged issues with zero *open*
   blockers, sorted P0→P4 and oldest first within a priority. `list` hides
@@ -653,6 +654,11 @@ agent silently duplicating half a plan.
   (`subIssuesSummary`, `issueDependenciesSummary`), prefer them over fetching nested
   nodes just to count.
 - **Layout**:
+  - `tracker/`, `pr/`, `migrate/` — the public in-process workflow API: reads,
+    issue lifecycle, pull requests and migrations over an explicit worktree,
+    backend and actor (see [Tracker library](#tracker-library)). `internal/cli`
+    adapts flags, files, rendering and exit codes over these packages; the
+    dependency runs one way, and no public package imports the CLI or renderers.
   - `cmd/hew/` — main, urfave/cli command wiring
   - `internal/gh/` — thin API layer, split in two so commands are testable against
     a fake and a backend need not be GitHub: `IssueStore` is everything every
@@ -754,9 +760,11 @@ GitHub later is a one-way migration.
 - **Claims.** The store implements the atomic claim, so `start` has exactly one
   winner. Identity is per worktree (see open questions), which is what keeps
   exit 3 and exit 5 apart under one OS account; `HEW_USER` overrides it.
-- **What is absent.** There are no pull requests, so `App.PRs` is nil, `pr`
-  refuses, and the local primer finishes work with `hew close <n> --completed`
-  instead of a `Fixes #n` merge. `--repo` always means GitHub.
+- **What is absent.** There are no pull requests, so the backend does not
+  satisfy the PR workflow and `pr` refuses with the contract's
+  `NoPullRequestsError`, and the local primer finishes work with
+  `hew close <n> --completed` instead of a `Fixes #n` merge. `--repo` always
+  means GitHub.
 - **Migration.** `hew migrate local` is the only way out, and its rules are the
   `migrate local` entry under Command surface: it freezes the tracker, creates
   every issue on GitHub, and only then seals it — `.hew/migrated.json` records the
@@ -767,69 +775,358 @@ GitHub later is a one-way migration.
 
 ## Tracker library
 
-A Go program can use hew in-process through `github.com/lumberbarons/hew/tracker`
-instead of shelling out to the binary: typed results, typed errors, and an explicit
-worktree and actor in place of the process's cwd and environment. The first consumer
-is birl, an orchestrator that drives many workers against one tracker. `internal/cli`
-becomes a renderer and exit-code mapper over `tracker`, with no change to CLI
-behaviour, the `--json` schema or the exit codes. This section is the contract the
-implementing issues and the 1.0 compatibility policy share.
+A Go program can use hew in-process instead of shelling out to the binary. The
+public packages are `github.com/lumberbarons/hew/tracker`, `.../pr` and
+`.../migrate`; every operation takes the worktree, backend, actor and repository
+as arguments — never the process's working directory or environment — returns
+typed results and typed errors, and neither prints to stdout nor calls
+`os.Exit`. The first consumer is birl, an orchestrator that drives many workers
+against one tracker. `internal/cli` is an adapter over these packages: flags,
+input files, the editor, hooks, rendering and exit codes, with no workflow
+decisions of its own.
 
-- **Scope.** The library is the operations an orchestrator needs: reads
-  (`Snapshot`, `Get`), `Start`, `Close`, `Release`, `Block`/`Unblock`, `ApplyPlan`,
-  and backend detection. Everything else — `create`, `set`, `triage`, `pr`, `init`,
-  `migrate`, `prime`, rendering and flag parsing — stays CLI-only. An operation
-  moves into `tracker` when a consumer needs it and its behaviour can be stated
-  without reference to a terminal, not before.
-- **Types mirror `--json`.** `tracker.Issue` is shaped like the flat `--json` schema
-  (dependencies as number lists, GraphQL shapes hidden), not like
-  `internal/model.Issue`. The library's shape is therefore the schema consumers can
-  already read, and `internal/model` stays free to change. `tracker` must not import
-  `internal/render` or `internal/cli`, so a consumer pulls in neither.
-- **Identity is explicit, and only on the local backend.** The CLI resolves a local
-  claimant from `HEW_USER`, else the OS login qualified with the worktree (see
-  Local backend). The library reads neither the cwd nor the environment after
-  `Open`: the worktree is an argument, and `As(actor)` returns a tracker whose
-  claims are made as that actor. `HEW_USER` is the CLI agent's spelling of the same
-  thing; `As` is the in-process one. Both mean one claimant per worker.
-- **`As(actor)` on GitHub is a documented no-op.** Every claim on GitHub is the
-  authenticated login, and there is no per-worker identity to set. `As` on a
-  GitHub tracker returns a tracker whose claims are still made as the login, and
-  `Identity()` reports the effective claimant on either backend, so a caller can
-  see that its `As` took no effect instead of assuming it did. It follows that on
-  GitHub "claimed by you" cannot tell workers apart: every worker sharing the login
-  gets the same answer for every claim. A caller such as birl therefore keeps its
-  own record of which worker holds which issue, regardless of backend, and does not
-  treat the tracker's claimant as that record.
-- **The backend is pinned at startup.** Detection is a function of the filesystem
-  (see Backend selection), and a wholly absent `.hew` falls back to GitHub (see
-  Local backend). A long-lived process whose local tracker is deleted underneath it
-  would, if it re-detected, start sending writes to the remote's real issues. A
-  consumer detects once, pins the backend it expects, and treats a detection that
-  disagrees with the pin as an error rather than following it.
-- **Typed errors; exit codes stay a CLI contract.** The library returns typed errors
-  a caller matches with `errors.As`/`errors.Is`; it never returns an exit code, and
-  no library code calls `os.Exit`. The CLI maps each type to the code it has always
-  used, and that mapping lives in `internal/cli` alone:
+This section is the contract. It maps every command to the public operation that
+performs its workflow, or to the integration concern that justifies keeping it
+in the adapter; it names the request, result, warning and error types an external
+module can refer to; and it states the concurrency, identity, backend and
+authentication guarantees those operations carry. The extraction lands in
+#309–#317. Until an operation ships, its command still runs through the adapter,
+which is the only place a workflow decision may live while the contract is being
+implemented. Changing this contract changes the compatibility policy (#171) as
+much as it changes code.
 
-  | Error | CLI exit | Meaning |
-  |---|---|---|
-  | claimed by someone else (carries the claimant) | 3 | pick the next ready item |
-  | claimed by the acting identity (carries the actor) | 5 | resume that work |
-  | open blockers (carries the blockers) | 6 | pick the next ready item |
-  | authentication failure | 4 | `gh auth login` |
-  | invalid input: a malformed argument, or a plan entry whose own fields are invalid | 2 | fix the call |
-  | not found, a closed target, a dependency cycle (a self-block included), a plan that fails to parse or resolve, anything unclassified | 1 | report it |
+### Package layout
 
-  The claimant and actor ride in the error so the CLI's message and a consumer's
-  own handling read the same field instead of parsing a string. A new typed error
-  that the CLI cannot map is a bug in the mapping, not a reason to widen the table.
-- **Stability: experimental until 1.0.** The `tracker` API may change in any v0.x
-  minor release. A breaking change to it is committed as `feat!:` (or `fix!:`), so
-  goreleaser's changelog files it under Breaking changes rather than Features, and
-  a consumer reads the release notes to know what moved. The exported surface is
-  checked in CI so a change to it is deliberate and visible in review. From 1.0 it
-  is covered by the compatibility policy (#171).
+| Package | Holds | Imports within the module |
+|---|---|---|
+| `tracker` | Issue workflows: detection and opening, reads and queries, primer data, creation, editing and reopening, claims, closure, dependency writes, apply plans and checkpoints, initialization. | `internal/model`, `internal/gh`, `internal/local`, `internal/conventions`; never `internal/cli`, `internal/render`, `cmd/hew`, `pr` or `migrate` |
+| `pr` | Pull-request workflows: issue inference, body composition, creation and amendment. | `tracker`, `internal/git`, `internal/gh`, `internal/conventions`; never `internal/cli`, `internal/render` or `cmd/hew` |
+| `migrate` | The source-neutral migration engine and the beads and local-to-GitHub workflows, including checkpointed resume and the local tracker's seal. | `tracker`, `internal/beads`, `internal/local`, `internal/conventions`; never `internal/cli`, `internal/render` or `cmd/hew` |
+
+The table is the destination every extraction issue shares. Until a package
+lands, its workflows still live in `internal/cli`; the row for each command in
+the operation inventory below says which operation it will call and what the
+adapter keeps either way.
+
+The dependency rule is one-way: `internal/cli` may import every public package,
+and no public package may import the CLI, the renderers or the command wiring.
+Except for the module-internal seams below, every public signature names public
+types: `tracker.Issue`, never `internal/model.Issue`; `http.RoundTripper`, never
+a go-gh option struct. A public package may use `internal/conventions`,
+`internal/gh` and `internal/local` inside its implementation — an external module
+cannot, and does not have to.
+
+Convention enforcement belongs to the public operation, not the adapter: exactly
+one priority and one type label, the template body, title and area rules, the
+epic marker, native dependencies and the mandatory client-side cycle check are
+applied by `tracker`, `pr` or `migrate`; the adapter never re-derives them from
+flags. A consumer that calls a write operation gets the same enforcement the
+command does.
+
+`tracker.Wrap`, `tracker.WrapAs` and `tracker.WrapWriter` are the module-internal
+seam `internal/cli` uses to delegate over a store it already opened. Their store
+parameter is an internal interface, so an external module cannot call them;
+`tracker.Open`, `tracker.Detect`, `tracker.Init`, `pr.Open` and `migrate.Open`
+are the only constructors in the external contract. The exported-surface check
+records the seams like every other exported symbol, but they are not consumer
+entry points.
+
+### Operation inventory
+
+Every command path in the CLI surface appears here, including the `epic list`
+alias; the group commands (`epic`, `migrate`, `hooks`) have no workflow of their
+own, and the global flags belong to the adapter. "Adapter keeps" names what stays
+in `internal/cli`; where it is empty the command only renders values the library
+returned. Error types are in [Errors and exit codes](#errors-and-exit-codes);
+warnings in [Warnings and findings](#warnings-and-findings).
+
+| Command | Public operation | Adapter keeps |
+|---|---|---|
+| `prime` | `(*tracker.Tracker).Primer(ctx) (tracker.PrimerResult, error)` | section caps, text layout, `--hook-format cursor` JSON wrapper |
+| `ready` | `(*tracker.Tracker).Snapshot(ctx, tracker.SnapshotOptions{}).Ready() []tracker.Issue` | `--limit` truncation, text and NDJSON rendering |
+| `list` | `(*tracker.Tracker).Snapshot(ctx, tracker.SnapshotOptions{States: …})` then `(*tracker.Snapshot).List(tracker.ListFilter) []tracker.Issue` | `--state`/`--epic` default mapping, `--closed` deprecation, `--bodies` rendering |
+| `show <n>` | `(*tracker.Tracker).Detail(ctx, n) (tracker.IssueDetail, error)` | text annotations and `--json` rendering |
+| `search <terms>` | `(*tracker.Tracker).Search(ctx, tracker.SearchRequest) (tracker.SearchResult, error)` | no-triaged-match and truncation wording |
+| `create` | `(*tracker.Tracker).Create(ctx, tracker.CreateRequest) (tracker.CreateResult, error)` | title/body/area flags, `--body-file`, `--edit` |
+| `draft` | `tracker.ComposeBody(tracker.Body) (tracker.ComposedBody, error)`, `tracker.CheckBody(string) (tracker.BodyCheck, error)` | `--out`/`--check` file I/O and rendering |
+| `start <n>` | `(*tracker.Tracker).Start(ctx, n, tracker.StartOptions) (tracker.StartResult, error)` | `--show` rendering, exit 3/5/6 |
+| `release <n>` | `(*tracker.Tracker).Release(ctx, n, tracker.ReleaseOptions) error` | rendering and exit mapping |
+| `triage` | `(*tracker.Tracker).Triage(ctx, tracker.TriageRequest) (tracker.TriageResult, error)` | `--search` flag and rendering; this is the deliberate untriaged-list API |
+| `set <n>` | `(*tracker.Tracker).Edit(ctx, tracker.EditRequest) (tracker.EditResult, error)` | `--body-file` input, `--closed` flag mapping, rendering |
+| `pr` | `pr.Open(ctx, pr.Config)` then `(*pr.Client).Create(ctx, pr.CreateRequest) (pr.CreateResult, error)` or `(*pr.Client).Amend(ctx, pr.AmendRequest) (pr.AmendResult, error)` | section flags to `pr.Sections`, `--body-file`, `--title`/`--base`/`--ready` mapping, rendering |
+| `close <n>` | `(*tracker.Tracker).Close(ctx, n, tracker.CloseOptions) (tracker.CloseResult, error)` | wording and exit mapping |
+| `reopen <n>` | `(*tracker.Tracker).Reopen(ctx, n, tracker.ReopenOptions) (tracker.ReopenResult, error)` | wording and exit mapping |
+| `block <n> --on <m>` | `(*tracker.Tracker).Block(ctx, n, blockers, tracker.BlockOptions) (tracker.BlockResult, error)` | wording and exit mapping |
+| `unblock <n> --from <m>` | `(*tracker.Tracker).Unblock(ctx, n, blockers, tracker.BlockOptions) (tracker.UnblockResult, error)` | wording and exit mapping |
+| `epic create` | `(*tracker.Tracker).CreateEpic(ctx, tracker.CreateEpicRequest) (tracker.CreateResult, error)` | body input and rendering |
+| `epic status [<n>]` (alias `epic list`) | `(*tracker.Snapshot).Epics() []tracker.Issue` or `(*tracker.Tracker).Detail(ctx, n)` | rollup layout, `next:` line and warning wording |
+| `apply <plan.jsonl>` | `(*tracker.Tracker).ApplyPlan(ctx, []tracker.PlanEntry, tracker.ApplyOptions) (tracker.ApplyResult, error)` | JSONL codec (`internal/plan`), default checkpoint path, dry-run rendering |
+| `config` | `tracker.Detect(dir) (tracker.Target, error)` | `--repo` selection, text and JSON rendering |
+| `init` | `tracker.Init(ctx, tracker.InitConfig) (tracker.InitResult, error)` | `--local` flag mapping, CLAUDE.md snippet, rendering |
+| `hooks install <agent>` | — | Edits the selected agent's project configuration (`.claude/settings.json`, `.codex/hooks.json`, the opencode plugin) and refuses symlinks. It configures an editor session, not a tracker workflow. |
+| `hooks remove <agent>` | — | The inverse of the above, and adapter-only for the same reason. |
+| `migrate beads [<file>]` | `migrate.Open(ctx, migrate.Config)` then `(*migrate.Migrator).Beads(ctx, migrate.BeadsRequest) (migrate.Result, error)` | source-file discovery and default checkpoint path, `--include-closed` mapping, dry-run rendering |
+| `migrate local` | `migrate.Open(ctx, migrate.Config)` then `(*migrate.Migrator).Local(ctx, migrate.LocalRequest) (migrate.Result, error)` | worktree discovery, default checkpoint path, dry-run summary |
+
+Two supporting capabilities have no command of their own but are part of the
+contract because a workflow above needs them: `(*tracker.Tracker).Comment`
+(migration posts the source's comments and close reasons) and
+`CreateRequest.Assignees` (it preserves source claims). The migration engine
+writes through a narrow `migrate.Target` interface — create, edit, comment,
+close, dependency edges, read — which `*tracker.Tracker` satisfies and a test
+can fake, so the engine names no internal store. `apply`'s JSONL file format
+stays an adapter input deliberately: a library caller builds
+`[]tracker.PlanEntry` and is not tied to a file schema. `pr`'s and `migrate`'s
+GitHub operations go through the same transport seam as `tracker`'s, so a
+consumer's tests need no network and no `gh` process.
+
+The untriaged boundary is part of the contract, not a rendering preference. Every
+list-shaped query — `Snapshot.Ready`, `Snapshot.List`, `Snapshot.Epics`,
+`Search`, `Primer` — omits untriaged titles and bodies. `Get` and `Detail` on an
+explicitly named issue, the children of an explicitly named epic, and the
+deliberate `Triage` API are the only operations that return them. `Snapshot.Issues`
+is the raw fetched set behind those queries; a caller that surfaces it directly
+takes on the boundary, which is why the commands use the query methods.
+
+### Types an external module names
+
+The values below are the contract, not an implementation sketch: a consumer
+imports `tracker`, `pr` or `migrate` and never an `internal` path.
+
+| Package | Requests and inputs | Results and values |
+|---|---|---|
+| `tracker` | `Config`, `SnapshotOptions`, `ListFilter`, `SearchRequest`, `TriageRequest`, `Body`, `Sections`, `CreateRequest`, `CreateEpicRequest`, `EditRequest`, `ReopenOptions`, `StartOptions`, `ReleaseOptions`, `CloseOptions`, `BlockOptions`, `InitConfig`, `PlanEntry`, `PlanRef`, `Checkpoint`, `ApplyOptions` | `Target`, `Issue`, `Ref`, `Comment`, `Snapshot`, `IssueDetail`, `SearchResult`, `TriageResult`, `PrimerResult`, `ComposedBody`, `BodyCheck`, `CreateResult`, `EditResult`, `ReopenResult`, `StartResult`, `CloseResult`, `BlockResult`, `UnblockResult`, `InitResult`, `ApplyResult`, `PlannedEntry`, `AppliedEntry`, `CheckpointState`, `CheckpointEntry`, `MemoryCheckpoint`, `FileCheckpoint`, `RateLimit`, `Edge`, `Backend`, `State`, `EdgeKind` |
+| `pr` | `Config`, `CreateRequest`, `AmendRequest`, `Sections`, `Body`, `BodyEdit` | `Client`, `CreateResult`, `AmendResult`, `ComposedBody`, `BodyCheck` |
+| `migrate` | `Config`, `BeadsRequest`, `LocalRequest`, `RunRequest`, `Item`, `Options`, `Target` | `Migrator`, `Result`, `PlannedItem` |
+
+`IssueDetail` carries the issue, an epic's children, the next workable child
+(`Next`), advisory findings and snapshot warnings, so `show` and `epic status`
+assemble them the same way. `SearchResult` and `TriageResult` carry the matches
+plus `Total` and `Fetched`. `PrimerResult` carries the live sections and counts,
+the warnings and the backend's static convention text, so the CLI renders a
+primer without owning any of its policy. `Target` is the read-only backend
+report — `Backend`, `Repo`, `Dir`, `MainCheckout`, and the local tracker's stable
+`ID` — and `RateLimit` is the GitHub client's last observed budget.
+
+`pr.Config` takes the same worktree, repository, backend pin, actor, notice and
+transport inputs as `tracker.Config`; `pr.Open` opens the tracker it reads and
+the client it writes pull requests through, so a caller does not wire two
+handles together. `migrate.Config` adds the target `tracker.Config` to the
+checkpoint, throttle, dry-run mode and notice writer the run uses. `pr` also
+exposes `ComposeBody`/`CheckBody` with `ComposedBody` and `BodyCheck`, the PR
+half of the composition API `draft` and `create` use for issues.
+
+Composition separates a refusal from advice. A rule that rejects the text —
+mutually exclusive wording, an empty checklist item, a body source combined with
+another, a closing set that does not match the declared issues — is
+`*tracker.InvalidInputError`, with the field named in library terms. A markup
+finding is a `Finding` on the result and never fails the call, so
+`draft --check` reports unmarked code without refusing the body.
+
+`tracker.Issue` is shaped like the flat `--json` schema — dependencies as
+number lists, GraphQL shapes hidden — not like `internal/model.Issue`. The
+library's shape is therefore the schema consumers can already read, and
+`internal/model` stays free to change. A value rebuilt by unmarshaling that
+schema carries the exported fields only; the accessors that expose reference
+states, raw labels, the parent's title and the close reason come from a library
+read.
+
+### Warnings and findings
+
+A warning is a typed value on the result, never a line printed by a library call
+and never an error. A finding is advisory input about text being written; it
+never blocks the write and never rewrites the author's words. Both carry a
+`Kind`, so a consumer decides whether to surface, log or ignore them.
+
+| Package | Type | Kinds |
+|---|---|---|
+| `tracker` | `Warning` + `WarningKind` | `WarnDependencyCycle`, `WarnBlockersCapped`, `WarnSubIssuesCapped` |
+| `tracker` | `Finding` + `FindingKind` | `FindingUnmarkedCode` (prose that looks like code and should be in a backtick span) |
+| `pr` | `Warning` + `WarningKind` | `WarnBranchPrefix`, `WarnUnclaimed`, `WarnUnrelatedSet`, `WarnPrimaryTitle`, `WarnMissingTesting`, `WarnMissingRisk` |
+| `migrate` | `Warning` + `WarningKind` | `WarnEdgeDropped`, `WarnWriteFailed`, `WarnBodyEdited`, `WarnAlreadyClosed` |
+
+Truncation a caller can act on is a count, not prose: `SearchResult` and
+`TriageResult` carry `Total` and `Fetched`, and `Snapshot.Warnings()` names a
+capped connection. The adapter decides the sentence; the library keeps the fact.
+`pr`'s Risk warning is conditional exactly as the command is: required once the
+PR is ready for review, permitted to be absent on a draft.
+
+### Errors and exit codes
+
+The library returns typed errors a caller matches with `errors.As`/`errors.Is`;
+it never returns an exit code, and no library code calls `os.Exit`. The CLI maps
+each type to the code it has always used, and that mapping lives in
+`internal/cli` alone:
+
+| Error | CLI exit | Meaning |
+|---|---|---|
+| claimed by someone else (carries the claimant) | 3 | pick the next ready item |
+| claimed by the acting identity (carries the actor) | 5 | resume that work |
+| open blockers (carries the blockers) | 6 | pick the next ready item |
+| authentication failure | 4 | `gh auth login` |
+| invalid input: a malformed argument, or a plan entry whose own fields are invalid | 2 | fix the call |
+| not found, a closed target, a dependency cycle (a self-block included), a plan that fails to parse or resolve, anything unclassified | 1 | report it |
+
+The claimant and actor ride in the error so the CLI's message and a consumer's
+own handling read the same field instead of parsing a string. A new typed error
+that the CLI cannot map is a bug in the mapping, not a reason to widen the table.
+
+`tracker` owns the vocabulary every package shares: `AuthError`,
+`InvalidInputError`, `NotFoundError`, `ClosedError`, `ClaimedError`,
+`BlockedError`, `CycleError`, `UnverifiableCycleError`, `NotOpenError`,
+`EpicError`, `UntriagedError`, `NotClaimedError`, `NotOwnerError`,
+`OpenChildrenError`, `PartialWriteError`, `PartialReleaseError`,
+`PartialCloseError`, `LockTimeoutError`, `MigratedError`. A workflow in another
+package that adds a refusal names its own type and wraps the tracker cause
+rather than inventing a second auth or not-found error:
+
+| Package | Errors |
+|---|---|
+| `tracker` | `PartialCreateError`, `PartialEditError`, `PartialReopenError` — the created issue or the applied field names ride in the error |
+| `pr` | `NoPullRequestsError`, `NoUpstreamError`, `IssueInferenceError`, `ExistingPullRequestError`, `NoOpenPullRequestError`, `AmbiguousPullRequestError` |
+| `migrate` | `CheckpointError`, `SourceChangedError`, `SealError`, `NotLocalError`, `DuplicateKeyError`, `ItemError` |
+
+Cancellation keeps its identity through every wrapper: `errors.Is(err,
+context.Canceled)` and `errors.Is(err, context.DeadlineExceeded)` hold even when
+the cause is inside a partial-operation error. A refusal the CLI reports as a
+usage mistake is `InvalidInputError` with the field named in library terms, not
+in flag terms; the adapter supplies the flag spelling. Exit 4 is auth from any
+package, 2 is invalid input, 3/5/6 are `start`'s distinctions, and every other
+workflow refusal is 1.
+
+### Concurrency and cancellation
+
+Every operation that reads or writes a backend takes a `context.Context` and
+honors it through to the backend and to a local lock wait. No operation starts a
+goroutine, keeps a background loop, or caches across calls beyond the open
+client; a returned `Snapshot`, `Issue`, result or warning value is immutable, and
+independent goroutines may read one at the same time. A `*tracker.Tracker` and a
+`*pr.Client` are safe for concurrent use; a `*migrate.Migrator` owns a
+checkpoint and a run, so callers run one migration at a time per migrator.
+
+- **Local backend.** Every mutation takes the exclusive `flock` on `.hew/lock`,
+  re-reads, applies and atomically renames, so concurrent writers in different
+  worktrees cannot lose each other's writes. Reads take no lock and see the old
+  whole file or the new one. The lock wait honors the caller's context and is
+  bounded (15 seconds by default); expiry is `LockTimeoutError`. The local store
+  implements the claim and release atomically, so two `Start` calls have exactly
+  one winner and a `Release` cannot clear a concurrent forced claim from a stale
+  read. A long-running `migrate local` holds the lock for the run and writes the
+  advisory `.hew/migrating` marker; a writer that waits reports it and then fails
+  with `LockTimeoutError` rather than proceeding.
+- **GitHub backend.** One `Open` builds one client shared by every operation on
+  it. Until #279 ships, the guarantees in this bullet are the target and not yet
+  true: the node-ID cache is an unsynchronized map, so a GitHub-backed `Tracker`
+  must not be shared across goroutines, and there is no token refresh, secondary
+  rate-limit retry, `RateLimit` or `Config.Transport` yet. Once it ships, the
+  client is safe for concurrent use: the node-ID cache is synchronized,
+  `Viewer` is cached, an expired token is refreshed or rebuilt on an auth error,
+  and a 403/429 secondary limit is retried with `Retry-After` backoff up to the
+  caller's deadline; the observed budget is available as `tracker.RateLimit`.
+  GitHub offers no transaction across calls: a claim is check-then-act, `Start`
+  re-reads the issue afterwards, and two workers racing the same issue can both
+  observe success; with a shared login the tracker cannot even tell them apart.
+  `StartResult.Claimant` is always the acting identity, never a lookup of who
+  won; the re-read `StartResult.Issue` carries the resulting assignees, which a
+  caller compares with `Claimant` to notice a racing claim, and `ClaimedError`
+  carries the existing claimant when a claim is refused up front. The library
+  does not pretend to prevent the race.
+- **Multi-write operations.** Create (issue, then edges), edit (a sequence of
+  scalar and label writes), close and reopen (comment then state, plus release),
+  block/unblock (validated, then edge by edge), apply and migrations (every
+  write checkpointed) can stop partway. Each reports what landed: the
+  `Partial*Error` types, `ApplyResult.Unwired`, or `migrate.Result`'s counts and
+  warnings. Cancellation is not special-cased — the partial state is the same,
+  and a checkpointed run resumes from it. A checkpoint record that cannot be
+  saved after its issue was created is reported rather than hidden; a rerun then
+  duplicates that one issue, which is the failure the digest and provenance
+  checks are designed to make visible rather than silent.
+- **Reads.** A `Snapshot` is the result of one paginated fetch, not a
+  transaction: issues created or edited while pages are being read may or may not
+  appear, and the result never claims a point-in-time view it did not take. Its
+  query methods are pure and call the backend no further. `Get` and `Detail` are
+  live reads.
+
+### Identity, backend and authentication
+
+- **Local identity is explicit.** The CLI resolves a local claimant from
+  `HEW_USER`, else the OS login qualified with the linked worktree's name and a
+  short digest of its path (the main checkout keeps the bare login), and errors
+  rather than guessing when git cannot say which checkout this is. The library
+  reads neither cwd nor environment after `Open`: `Config.Actor` and `As(actor)`
+  are the in-process spelling of the same identity. It is per worktree, not per
+  session: two sessions sharing a worktree, or both in the main checkout, are one
+  claimant, and the second `Start` gets "claimed by you" rather than a conflict.
+  `HEW_USER` must be unique per agent wherever sessions share a checkout.
+  `Identity()` reports the effective claimant.
+- **GitHub identity is the login, and `As` is a documented no-op there.** Every
+  claim on GitHub is the authenticated login; `As` returns a tracker whose claims
+  are still made as that login, and `Identity()` reports it, so a caller can see
+  that the override took no effect. It follows that "claimed by you" cannot tell
+  workers apart: every worker sharing the login gets the same answer, and two
+  sessions racing a claim are indistinguishable to the tracker. A consumer such
+  as birl keeps its own record of which worker holds which issue and treats
+  `StartResult.Claimant` as the identity the claim was made as, not as that
+  record or as proof this worker won.
+- **The backend is pinned at startup.** `Detect(dir)` reports the backend and
+  where it lives — `Backend`, `Repo`, `Dir`, `MainCheckout`, and the local
+  tracker's stable `ID` — from the filesystem and git, reading no store. `Open`
+  detects once and fixes the backend for the life of the tracker; setting
+  `Config.Backend` pins it without consulting the other backend. `BackendLocal`
+  refuses to fall back to GitHub when the tracker is gone, and `BackendGitHub`
+  opens GitHub even where a local tracker exists (the CLI's `--repo`). A
+  long-lived process detects once, pins what it expects, and treats a `Detect`
+  that disagrees as an error rather than following it: a local tracker deleted
+  underneath it must not silently send writes to the remote's real issues.
+- **Authentication is the `gh` CLI's, not hew's.** The GitHub backend reuses the
+  host's `gh auth login` credentials (including `GH_TOKEN`/`GITHUB_TOKEN`, which
+  go-gh honors) and has no auth flow, token parameter or credential store of its
+  own; the CLI's `--repo` selects a repository, never a credential. A missing or
+  expired credential is `AuthError`, which the CLI maps to exit 4. The local
+  backend needs no `gh`, credentials or network. `Config.Transport`
+  (`http.RoundTripper`, not yet on `tracker.Config`) is the test seam: a consumer's tests serve GitHub
+  responses from an `httptest` transport with no network and no `gh` process,
+  and the CLI leaves it nil. github.com is the only host in the contract; an
+  enterprise host would be a new field and a new guarantee, not a hidden
+  fallback.
+
+### The CLI adapter boundary
+
+The adapter is `cmd/hew` plus `internal/cli`, and it owns everything whose input
+or output is a terminal or a local file the user chose. None of it is a workflow
+decision; when a line here grows one, it moves into a public package. The
+extraction preserves the CLI contract: text and `--json`/NDJSON output, the
+warning surface, exit codes and both backends' guarantees are what the commands
+have today, and the existing tests pin them. A command that delegates renders the
+same bytes and maps the same typed error to the same exit code.
+
+- **Surface.** Flag and positional parsing, help text, deprecation aliases,
+  `--json`, `--repo` (mapped to `Config.Repo`) and the exit-code mapping.
+- **Input the user chose.** `--body-file`, `--file`, stdin, `--edit` and its
+  `$EDITOR` launch, `--out`/`--check`, default source paths (`.beads/issues.jsonl`,
+  the checkpoint beside a plan), and the checkpoint path itself.
+- **Rendering.** Text columns, colour, NDJSON, `--bodies`, `--limit`, the primer's
+  section caps and `--hook-format cursor` wrapper, progress lines, dry-run
+  summaries, and the CLAUDE.md snippet `init` prints.
+- **Agent configuration.** `hooks install|remove` edits `.claude/settings.json`,
+  `.codex/hooks.json` or the opencode plugin, preserving unknown fields and
+  refusing symlinks. It is editor configuration, not tracker state.
+- **File formats that are not API.** The `apply` JSONL codec lives in
+  `internal/plan`, and choosing or defaulting an input path (the plan, a beads
+  snapshot, `issues.jsonl`) is the adapter's. `migrate.Beads` accepts the bytes or
+  a reader and owns the source conversion; a consumer builds `migrate.Item`s for
+  the engine instead of filling in a file.
+
+### Stability
+
+All three public packages are experimental until 1.0: the API may change in any
+v0.x minor release. A breaking change ships as a `feat!:`/`fix!:` commit, so it
+lands under Breaking changes in the release notes rather than Features, and the
+CI API-surface check diffs every public package against the base commit so the
+change is deliberate and visible in review (#317 extends the check from
+`tracker` alone). From 1.0 the compatibility policy (#171) governs the same
+surface. The minimum toolchain is the `go` directive in `go.mod`; a consumer that
+pins an older toolchain than that is out of contract.
 
 ## Build & distribution
 

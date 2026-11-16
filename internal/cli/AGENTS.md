@@ -1,6 +1,8 @@
 # internal/cli
 
-The commands themselves, written against the `gh.IssueStore` interface (and `gh.PullRequests`, for `pr` alone, which `App.PRs` leaves nil on a backend with no pull requests) so `cmd/hew` stays pure wiring and every behavior is testable without hitting GitHub. The tracker-shaped reads and the dependency writes delegate to the public `tracker` package — `tracker.Wrap` for reads, `tracker.WrapWriter` for `block`/`unblock` — so this package filters, renders, and maps the library's typed errors onto exit codes rather than owning those behaviors.
+The CLI adapter for the public workflow packages: `cmd/hew` parses flags, this package reads the inputs the user chose, calls the public operation and renders the result. It is written against the `gh.IssueStore` interface (and `gh.PullRequests`, for `pr` alone, which `App.PRs` leaves nil on a backend with no pull requests) so `cmd/hew` stays pure wiring and every behavior is testable without hitting GitHub. The tracker-shaped reads and the claim, close and dependency writes already delegate to the public `tracker` package — `tracker.Wrap` for reads, `tracker.WrapAs` for `release`/`close`, `tracker.WrapWriter` for `block`/`unblock` — so this package filters, renders, and maps the library's typed errors onto exit codes rather than owning those behaviors.
+
+Where a row below says a command still calls the client directly or owns a workflow, that is the current implementation, not the boundary. DESIGN.md ("Tracker library") is the operation inventory: it assigns each command's workflow to `tracker`, `pr` or `migrate` and leaves this package flags, input files, the editor, hooks, rendering and exit codes. Moving an operation out means moving its tests and its contract row with it, and no workflow decision stays here once its public operation ships.
 
 | File | What | When to read |
 |---|---|---|
