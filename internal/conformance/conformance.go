@@ -453,6 +453,11 @@ func search(t *testing.T, s gh.IssueStore) {
 		t.Errorf("search retry = %v (total %d), want %v (total 3)", got, total, want)
 	}
 
+	bothStates, total, err := s.SearchIssues(ctx, "retry", []gh.IssueState{gh.StateOpen, gh.StateClosed})
+	must(t, err)
+	if len(bothStates) != 3 || total != 3 {
+		t.Errorf("both-states search = %d results (total %d), want the same three as an unfiltered search", len(bothStates), total)
+	}
 	onlyClosed, total, err := s.SearchIssues(ctx, "retry", []gh.IssueState{gh.StateClosed})
 	must(t, err)
 	if len(onlyClosed) != 1 || onlyClosed[0].Number != closed.Number || total != 1 {
