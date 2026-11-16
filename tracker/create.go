@@ -164,94 +164,12 @@ func (e *ParentedError) Error() string {
 // *PartialCreateError naming the created issue, the stage and the edges that
 // landed.
 func (t *Tracker) Create(ctx context.Context, req CreateRequest) (CreateResult, error) {
-	title := req.Title
-	if err := ValidateTitle(title); err != nil {
-		return CreateResult{}, err
-	}
-	if req.Type == PlanTypeEpic {
-		return CreateResult{}, &InvalidInputError{Field: "type", Reason: "epic issues are created with CreateEpic"}
-	}
-	if !model.IsType(req.Type) {
-		return CreateResult{}, &InvalidInputError{Field: "type", Reason: fmt.Sprintf("must be one of %s", strings.Join(model.Types, "|"))}
-	}
-	priority := model.DefaultPriority
-	if req.Priority != "" {
-		p, ok := model.ParsePriority(req.Priority)
-		if !ok {
-			return CreateResult{}, &InvalidInputError{Field: "priority", Reason: "must be P0..P4"}
-		}
-		priority = p
-	}
-	areas, err := NormalizeAreas(req.Areas)
+	plan, err := t.prepareCreate(ctx, req)
 	if err != nil {
 		return CreateResult{}, err
 	}
-	assignees, err := normalizeAssignees(req.Assignees)
-	if err != nil {
-		return CreateResult{}, err
-	}
-	blockedBy, err := issueNumbers("blockedBy", req.BlockedBy)
-	if err != nil {
-		return CreateResult{}, err
-	}
-	if req.Parent < 0 {
-		return CreateResult{}, &InvalidInputError{Field: "parent", Reason: "must be an issue number"}
-	}
-	if req.DiscoveredFrom < 0 {
-		return CreateResult{}, &InvalidInputError{Field: "discoveredFrom", Reason: "must be an issue number"}
-	}
-	discoveredFrom := req.DiscoveredFrom
-	if discoveredFrom == 0 {
-		discoveredFrom = req.Body.DiscoveredFrom
-	} else if req.Body.DiscoveredFrom != 0 && req.Body.DiscoveredFrom != discoveredFrom {
-		// The body would name one issue and the request another; picking
-		// either silently writes a link the caller did not mean.
-		return CreateResult{}, &InvalidInputError{Field: "discoveredFrom", Reason: "is set on both the request and its body"}
-	}
-	body := req.Body
-	body.DiscoveredFrom = discoveredFrom
-	composed, err := ComposeBody(body)
-	if err != nil {
-		return CreateResult{}, err
-	}
-
-	// Every reference is resolved before the first write, so a typo leaves
-	// nothing behind. A closed issue is still a valid parent or discovered-from
-	// reference: discovery follows a close. A closed blocker is refused, as
-	// Block refuses it: it blocks nothing.
-	if discoveredFrom > 0 {
-		if _, err := t.store.GetIssue(ctx, discoveredFrom); err != nil {
-			return CreateResult{}, asReadError(err)
-		}
-	}
-	blockerRefs := make([]model.Ref, 0, len(blockedBy))
-	for _, number := range blockedBy {
-		blocker, err := t.store.GetIssue(ctx, number)
-		if err != nil {
-			return CreateResult{}, asReadError(err)
-		}
-		if !blocker.IsOpen() {
-			return CreateResult{}, &ClosedError{Issue: number, Reason: blocker.StateReason}
-		}
-		blockerRefs = append(blockerRefs, model.Ref{Number: number, State: blocker.State})
-	}
-	var parentRef *model.Ref
-	parentTitle := ""
-	if req.Parent > 0 {
-		parent, err := t.store.GetIssue(ctx, req.Parent)
-		if err != nil {
-			return CreateResult{}, asReadError(err)
-		}
-		parentRef = &model.Ref{Number: parent.Number, State: parent.State}
-		parentTitle = parent.Title
-	}
-
-	labels := append([]string{priority.String(), req.Type}, areas...)
-	if len(assignees) > 0 {
-		// Assignees is a claim, not a bare assignment: the label is the half
-		// that keeps ready and the claim guard agreeing about it.
-		labels = append(labels, model.InProgressLabel)
-	}
+	title, composed, labels := plan.title, plan.composed, plan.labels
+	assignees, blockerRefs, parentRef, parentTitle := plan.assignees, plan.blockers, plan.parent, plan.parentTitle
 	created, err := t.store.CreateIssue(ctx, title, composed.Body, labels)
 	if err != nil {
 		return CreateResult{}, asWriteError(err)
@@ -287,6 +205,127 @@ func (t *Tracker) Create(ctx context.Context, req CreateRequest) (CreateResult, 
 	return CreateResult{Issue: issueFromModel(issue, true), Edges: applied, Findings: composed.Findings}, nil
 }
 
+func (t *Tracker) prepareCreate(ctx context.Context, req CreateRequest) (createPlan, error) {
+	title := req.Title
+	if err := ValidateTitle(title); err != nil {
+		return createPlan{}, err
+	}
+	if req.Type == PlanTypeEpic {
+		return createPlan{}, &InvalidInputError{Field: "type", Reason: "epic issues are created with CreateEpic"}
+	}
+	if !model.IsType(req.Type) {
+		return createPlan{}, &InvalidInputError{Field: "type", Reason: fmt.Sprintf("must be one of %s", strings.Join(model.Types, "|"))}
+	}
+	priority := model.DefaultPriority
+	if req.Priority != "" {
+		p, ok := model.ParsePriority(req.Priority)
+		if !ok {
+			return createPlan{}, &InvalidInputError{Field: "priority", Reason: "must be P0..P4"}
+		}
+		priority = p
+	}
+	areas, err := NormalizeAreas(req.Areas)
+	if err != nil {
+		return createPlan{}, err
+	}
+	assignees, err := normalizeAssignees(req.Assignees)
+	if err != nil {
+		return createPlan{}, err
+	}
+	blockedBy, err := issueNumbers("blockedBy", req.BlockedBy)
+	if err != nil {
+		return createPlan{}, err
+	}
+	if req.Parent < 0 {
+		return createPlan{}, &InvalidInputError{Field: "parent", Reason: "must be an issue number"}
+	}
+	if req.DiscoveredFrom < 0 {
+		return createPlan{}, &InvalidInputError{Field: "discoveredFrom", Reason: "must be an issue number"}
+	}
+	discoveredFrom := req.DiscoveredFrom
+	if discoveredFrom == 0 {
+		discoveredFrom = req.Body.DiscoveredFrom
+	} else if req.Body.DiscoveredFrom != 0 && req.Body.DiscoveredFrom != discoveredFrom {
+		// The body would name one issue and the request another; picking
+		// either silently writes a link the caller did not mean.
+		return createPlan{}, &InvalidInputError{Field: "discoveredFrom", Reason: "is set on both the request and its body"}
+	}
+	body := req.Body
+	body.DiscoveredFrom = discoveredFrom
+	composed, err := ComposeBody(body)
+	if err != nil {
+		return createPlan{}, err
+	}
+
+	// Every reference is resolved before the first write, so a typo leaves
+	// nothing behind. A closed issue is still a valid parent or discovered-from
+	// reference: discovery follows a close. A closed blocker is refused, as
+	// Block refuses it: it blocks nothing.
+	if discoveredFrom > 0 {
+		if _, err := t.store.GetIssue(ctx, discoveredFrom); err != nil {
+			return createPlan{}, asReadError(err)
+		}
+	}
+	blockerRefs := make([]model.Ref, 0, len(blockedBy))
+	for _, number := range blockedBy {
+		blocker, err := t.store.GetIssue(ctx, number)
+		if err != nil {
+			return createPlan{}, asReadError(err)
+		}
+		if !blocker.IsOpen() {
+			return createPlan{}, &ClosedError{Issue: number, Reason: blocker.StateReason}
+		}
+		blockerRefs = append(blockerRefs, model.Ref{Number: number, State: blocker.State})
+	}
+	var parentRef *model.Ref
+	parentTitle := ""
+	if req.Parent > 0 {
+		parent, err := t.store.GetIssue(ctx, req.Parent)
+		if err != nil {
+			return createPlan{}, asReadError(err)
+		}
+		parentRef = &model.Ref{Number: parent.Number, State: parent.State}
+		parentTitle = parent.Title
+	}
+
+	labels := append([]string{priority.String(), req.Type}, areas...)
+	if len(assignees) > 0 {
+		// Assignees is a claim, not a bare assignment: the label is the half
+		// that keeps ready and the claim guard agreeing about it.
+		labels = append(labels, model.InProgressLabel)
+	}
+	return createPlan{
+		title: title, composed: composed, labels: labels, assignees: assignees,
+		blockers: blockerRefs, parent: parentRef, parentTitle: parentTitle,
+	}, nil
+}
+
+// CheckCreate runs everything Create does before its first write — the field
+// validation and the reference reads — and writes nothing. An adapter that
+// must collect the body interactively calls it first, so a typo in a reference
+// or a flag fails before the author has typed anything. The request's Body is
+// validated as given; a caller that has not collected it yet passes the zero
+// Body, and Create validates the real one.
+//
+// Create runs the same preparation, so the pre-flight and the creation cannot
+// disagree about what is refused.
+func (t *Tracker) CheckCreate(ctx context.Context, req CreateRequest) error {
+	_, err := t.prepareCreate(ctx, req)
+	return err
+}
+
+// createPlan is a validated CreateRequest: everything Create writes, resolved
+// before the first write.
+type createPlan struct {
+	title       string
+	composed    ComposedBody
+	labels      []string
+	assignees   []string
+	blockers    []model.Ref
+	parent      *model.Ref
+	parentTitle string
+}
+
 // CreateEpic files a parent issue with the cosmetic Epic title prefix, a
 // priority label and the epic label but no type, then attaches its children.
 // The epic label is what keeps a childless epic triaged, listed and unworkable
@@ -298,40 +337,11 @@ func (t *Tracker) Create(ctx context.Context, req CreateRequest) (CreateResult, 
 // exists is a *PartialCreateError naming it, the child that failed, and the
 // children already attached.
 func (t *Tracker) CreateEpic(ctx context.Context, req CreateEpicRequest) (CreateResult, error) {
-	title := req.Title
-	if strings.TrimSpace(title) == "" {
-		return CreateResult{}, &InvalidInputError{Field: "title", Reason: "must not be empty"}
-	}
-	if !strings.HasPrefix(title, conventions.EpicTitlePrefix) {
-		title = conventions.EpicTitlePrefix + title
-	}
-	if err := ValidateTitle(title); err != nil {
-		return CreateResult{}, err
-	}
-	children, err := issueNumbers("children", req.Children)
+	plan, err := t.prepareCreateEpic(ctx, req)
 	if err != nil {
 		return CreateResult{}, err
 	}
-	composed, err := ComposeBody(req.Body)
-	if err != nil {
-		return CreateResult{}, err
-	}
-	if req.Body.DiscoveredFrom > 0 {
-		if _, err := t.store.GetIssue(ctx, req.Body.DiscoveredFrom); err != nil {
-			return CreateResult{}, asReadError(err)
-		}
-	}
-	childRefs := make([]model.Ref, 0, len(children))
-	for _, number := range children {
-		child, err := t.store.GetIssue(ctx, number)
-		if err != nil {
-			return CreateResult{}, asReadError(err)
-		}
-		if child.Parent != nil {
-			return CreateResult{}, &ParentedError{Issue: number, Parent: child.Parent.Number}
-		}
-		childRefs = append(childRefs, model.Ref{Number: number, State: child.State})
-	}
+	title, composed, childRefs := plan.title, plan.composed, plan.children
 
 	labels := []string{model.DefaultPriority.String(), model.EpicLabel}
 	created, err := t.store.CreateIssue(ctx, title, composed.Body, labels)
@@ -351,6 +361,63 @@ func (t *Tracker) CreateEpic(ctx context.Context, req CreateEpicRequest) (Create
 		issue.SubIssuesTotal = len(issue.SubIssues)
 	}
 	return CreateResult{Issue: issueFromModel(issue, true), Edges: applied, Findings: composed.Findings}, nil
+}
+
+func (t *Tracker) prepareCreateEpic(ctx context.Context, req CreateEpicRequest) (epicPlan, error) {
+	title := req.Title
+	if strings.TrimSpace(title) == "" {
+		return epicPlan{}, &InvalidInputError{Field: "title", Reason: "must not be empty"}
+	}
+	if !strings.HasPrefix(title, conventions.EpicTitlePrefix) {
+		title = conventions.EpicTitlePrefix + title
+	}
+	if err := ValidateTitle(title); err != nil {
+		return epicPlan{}, err
+	}
+	children, err := issueNumbers("children", req.Children)
+	if err != nil {
+		return epicPlan{}, err
+	}
+	composed, err := ComposeBody(req.Body)
+	if err != nil {
+		return epicPlan{}, err
+	}
+	if req.Body.DiscoveredFrom > 0 {
+		if _, err := t.store.GetIssue(ctx, req.Body.DiscoveredFrom); err != nil {
+			return epicPlan{}, asReadError(err)
+		}
+	}
+	childRefs := make([]model.Ref, 0, len(children))
+	for _, number := range children {
+		child, err := t.store.GetIssue(ctx, number)
+		if err != nil {
+			return epicPlan{}, asReadError(err)
+		}
+		if child.Parent != nil {
+			return epicPlan{}, &ParentedError{Issue: number, Parent: child.Parent.Number}
+		}
+		childRefs = append(childRefs, model.Ref{Number: number, State: child.State})
+	}
+
+	return epicPlan{title: title, composed: composed, children: childRefs}, nil
+}
+
+// CheckCreateEpic is CheckCreate for an epic: the title, children and body
+// validation and every reference read CreateEpic does before its first write,
+// with nothing written. It exists so an adapter can refuse a missing or
+// already-parented child before opening an editor; CreateEpic runs the same
+// preparation, so the two cannot drift.
+func (t *Tracker) CheckCreateEpic(ctx context.Context, req CreateEpicRequest) error {
+	_, err := t.prepareCreateEpic(ctx, req)
+	return err
+}
+
+// epicPlan is a validated CreateEpicRequest: the prefixed title, the composed
+// body and the children, resolved before the first write.
+type epicPlan struct {
+	title    string
+	composed ComposedBody
+	children []model.Ref
 }
 
 // createdIssue is the create response carrying what the request wrote, which

@@ -837,3 +837,94 @@ func TestCreateEpicReportsAPartialFailure(t *testing.T) {
 		t.Errorf("SubIssues = %v, want only the first child", epic.SubIssues)
 	}
 }
+
+// TestCheckCreateAgreesWithCreate pins that the pre-flight and the creation
+// share one validation: every request Create refuses, CheckCreate refuses with
+// the same error, and neither writes.
+func TestCheckCreateAgreesWithCreate(t *testing.T) {
+	ctx, tr, store := createTracker(t)
+	open := seed(t, store, "Open", "P2", "task")
+	closed := seed(t, store, "Done", "P2", "task")
+	if err := store.CloseIssue(ctx, closed.Number, "COMPLETED"); err != nil {
+		t.Fatal(err)
+	}
+	before := len(allIssues(t, store))
+
+	for name, req := range map[string]CreateRequest{
+		"invalid priority":        {Title: "T", Type: "bug", Priority: "P9"},
+		"invalid type":            {Title: "T", Type: "story"},
+		"blank title":             {Title: " ", Type: "bug"},
+		"missing parent":          {Title: "T", Type: "bug", Parent: 999},
+		"missing blocker":         {Title: "T", Type: "bug", BlockedBy: []int{open.Number, 999}},
+		"closed blocker":          {Title: "T", Type: "bug", BlockedBy: []int{closed.Number}},
+		"missing discovered-from": {Title: "T", Type: "bug", DiscoveredFrom: 999},
+	} {
+		t.Run(name, func(t *testing.T) {
+			checkErr := tr.CheckCreate(ctx, req)
+			_, createErr := tr.Create(ctx, req)
+			if checkErr == nil || createErr == nil {
+				t.Fatalf("CheckCreate = %v, Create = %v; both should refuse", checkErr, createErr)
+			}
+			if checkErr.Error() != createErr.Error() {
+				t.Errorf("CheckCreate = %q, Create = %q", checkErr, createErr)
+			}
+			if got := len(allIssues(t, store)); got != before {
+				t.Errorf("refused request wrote %d issue(s)", got-before)
+			}
+		})
+	}
+}
+
+// TestCheckCreateWritesNothingForAValidRequest is the other half: a request that
+// passes the pre-flight leaves the tracker untouched, since the adapter still
+// has to collect the body before Create files it.
+func TestCheckCreateWritesNothingForAValidRequest(t *testing.T) {
+	ctx, tr, store := createTracker(t)
+	open := seed(t, store, "Open", "P2", "task")
+	before := len(allIssues(t, store))
+
+	req := CreateRequest{Title: "T", Type: "bug", Parent: open.Number, BlockedBy: []int{open.Number}, DiscoveredFrom: open.Number}
+	if err := tr.CheckCreate(ctx, req); err != nil {
+		t.Fatalf("CheckCreate = %v", err)
+	}
+	if got := len(allIssues(t, store)); got != before {
+		t.Errorf("CheckCreate wrote %d issue(s)", got-before)
+	}
+}
+
+func TestCheckCreateEpicAgreesWithCreateEpic(t *testing.T) {
+	ctx, tr, store := createTracker(t)
+	parent := seed(t, store, "Epic: existing", "P2", "epic")
+	child := seed(t, store, "Child", "P2", "task")
+	if err := store.AddSubIssue(ctx, parent.Number, child.Number, false); err != nil {
+		t.Fatal(err)
+	}
+	before := len(allIssues(t, store))
+
+	for name, req := range map[string]CreateEpicRequest{
+		"blank title":     {Title: " "},
+		"missing child":   {Title: "Big", Children: []int{999}},
+		"parented child":  {Title: "Big", Children: []int{child.Number}},
+		"discovered-from": {Title: "Big", Body: Body{DiscoveredFrom: 999}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			checkErr := tr.CheckCreateEpic(ctx, req)
+			_, createErr := tr.CreateEpic(ctx, req)
+			if checkErr == nil || createErr == nil {
+				t.Fatalf("CheckCreateEpic = %v, CreateEpic = %v; both should refuse", checkErr, createErr)
+			}
+			if checkErr.Error() != createErr.Error() {
+				t.Errorf("CheckCreateEpic = %q, CreateEpic = %q", checkErr, createErr)
+			}
+			if got := len(allIssues(t, store)); got != before {
+				t.Errorf("refused request wrote %d issue(s)", got-before)
+			}
+		})
+	}
+	if err := tr.CheckCreateEpic(ctx, CreateEpicRequest{Title: "Big"}); err != nil {
+		t.Errorf("CheckCreateEpic on a valid request = %v", err)
+	}
+	if got := len(allIssues(t, store)); got != before {
+		t.Errorf("CheckCreateEpic wrote %d issue(s)", got-before)
+	}
+}
