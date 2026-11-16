@@ -15,6 +15,7 @@ import (
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/local"
 	"github.com/lumberbarons/hew/internal/model"
+	"github.com/lumberbarons/hew/migrate"
 )
 
 // localTracker makes a local tracker in a temp dir and opens it as "dev".
@@ -465,11 +466,11 @@ func TestMigrateLocalDryRunSummarisesALargeTracker(t *testing.T) {
 // what is left to do, so it agrees with its own "already migrated" figure.
 func TestMigrateLocalPlanSummaryCountsAResumedRun(t *testing.T) {
 	_, app, _ := migrateLocalSetup(t.TempDir())
-	var items []migrationItem
+	var items []migrate.Item
 	state := map[string]int{}
 	for i := 1; i <= planLineLimit+10; i++ {
 		key := localKey(i)
-		items = append(items, migrationItem{Key: key, Title: key, Labels: []string{"P2", "task"}})
+		items = append(items, migrate.Item{Key: key, Title: key, Labels: []string{"P2", "task"}})
 		if i <= 4 {
 			state[key] = 100 + i
 		}
@@ -921,7 +922,7 @@ func TestLocalItemsDropTheClaimFromClosedIssues(t *testing.T) {
 	if items[0].CloseReason != "" {
 		t.Errorf("close reason = %q, want the engine's default for an unrecognised reason", items[0].CloseReason)
 	}
-	if !slices.Equal(items[1].Assignees, []string{assigneeViewer}) {
+	if !slices.Equal(items[1].Assignees, []string{migrate.AssigneeViewer}) {
 		t.Errorf("open item assignees = %v, want one claim for the migrating user", items[1].Assignees)
 	}
 }

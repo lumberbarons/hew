@@ -18,6 +18,8 @@ import (
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/local"
 	"github.com/lumberbarons/hew/internal/model"
+	"github.com/lumberbarons/hew/migrate"
+	"github.com/lumberbarons/hew/tracker"
 )
 
 // MigrateLocalOpts configure the local-to-GitHub migration.
@@ -89,7 +91,7 @@ func (a *App) MigrateLocal(ctx context.Context, opts MigrateLocalOpts) error {
 		return a.localMigrationPlan(localItems(snap), map[string]int{})
 	}
 
-	state, err := loadBatchState(opts.StatePath, a.stateRepo(), snap.Digest, "issues.jsonl")
+	checkpoint, err := tracker.OpenFileCheckpoint(opts.StatePath, a.stateRepo(), snap.Digest, "issues.jsonl")
 	if err != nil {
 		return err
 	}
@@ -97,43 +99,57 @@ func (a *App) MigrateLocal(ctx context.Context, opts MigrateLocalOpts) error {
 	for _, i := range snap.Issues {
 		valid[localKey(i.Number)] = true
 	}
-	// Reads GitHub, writes nothing, so the dry run vouches for the checkpoint
-	// exactly as the real run would (#81).
-	if err := a.verifyBatchState(ctx, state, conventions.ProvenanceMigrate, valid, "local issue number"); err != nil {
-		return err
-	}
 
-	items := localItems(snap)
-	if opts.DryRun {
-		return a.localMigrationPlan(items, state.Mapping)
-	}
-
-	if err := a.ensureLabels(ctx, localLabels(snap)); err != nil {
-		return err
-	}
-	res, err := a.runMigration(ctx, migrationEngine{
-		Kind: conventions.ProvenanceMigrate, ItemNoun: "local issue", SourceNoun: "issues.jsonl",
-		Items: items, StatePath: opts.StatePath, Throttle: opts.Throttle,
-		Relink: func(text string, mapping map[string]int) string {
-			return rewriteLocalRefs(text, localNumbers(mapping))
+	engine := migrate.Wrap(migrationTarget{a.Client}, checkpoint)
+	req := migrate.RunRequest{
+		Items: localItems(snap),
+		Options: migrate.Options{
+			Kind:       conventions.ProvenanceMigrate,
+			ItemNoun:   "local issue",
+			SourceNoun: "issues.jsonl",
+			KeyNoun:    "local issue number",
+			Throttle:   opts.Throttle,
+			KnownKeys:  valid,
+			Progress:   a.progressf,
+			Relink: func(text string, mapping map[string]int) string {
+				return rewriteLocalRefs(text, localNumbers(mapping))
+			},
+			// Labels are bootstrapped only after the engine's checkpoint and
+			// provenance checks pass, so a refused state file costs no write
+			// (#81). A dry run writes nothing, so the hook is not called.
+			BeforeCreate: func(ctx context.Context) error {
+				return a.ensureLabels(ctx, localLabels(snap))
+			},
 		},
-	}, state)
+	}
+
+	if opts.DryRun {
+		req.Options.DryRun = true
+		res, err := engine.Run(ctx, req)
+		if err != nil {
+			return err
+		}
+		return a.localMigrationPlan(req.Items, res.Mapping)
+	}
+
+	res, err := engine.Run(ctx, req)
+	a.printWarnings(res.Warnings)
 	if err != nil {
 		return err
 	}
 	if res.Failed > 0 {
 		return genericErr("%d migration steps did not finish, so the tracker is still local: fix the cause and rerun `hew migrate local` to finish", res.Failed)
 	}
-	if err := frozen.Seal(a.Repo.String(), localNumbers(state.Mapping)); err != nil {
+	if err := frozen.Seal(a.Repo.String(), localNumbers(res.Mapping)); err != nil {
 		return genericErr("everything is on GitHub but the tracker could not be switched over (rerun `hew migrate local` to retry): %v", err)
 	}
 
 	return a.emitResult(map[string]any{
 		"created": res.Created, "wired": res.Wired, "closed": res.Closed, "relinked": res.Relinked,
-		"warnings": res.Warnings, "mapping": state.Mapping, "backend": local.BackendGitHub,
+		"warnings": warningTexts(res.Warnings), "mapping": res.Mapping, "backend": local.BackendGitHub,
 	}, func() {
 		a.printf("migrated %d local issues to %s: %d created, %d dependencies wired, %d closed, %d bodies relinked\n",
-			len(items), a.Repo, res.Created, res.Wired, res.Closed, res.Relinked)
+			len(req.Items), a.Repo, res.Created, res.Wired, res.Closed, res.Relinked)
 		a.printf("number map saved to %s; this repository now uses GitHub, and %s is kept as an archive\n",
 			filepath.Join(opts.Dir, local.MigratedFile), filepath.Join(opts.Dir, "issues.jsonl"))
 	})
@@ -176,8 +192,8 @@ func localNumbers(mapping map[string]int) map[int]int {
 // carry over as written; assignees do not, because a local handle is not a
 // GitHub login — an open issue that was claimed is claimed by the person
 // migrating, and a closed one keeps no claim at all.
-func localItems(snap *local.Snapshot) []migrationItem {
-	items := make([]migrationItem, 0, len(snap.Issues))
+func localItems(snap *local.Snapshot) []migrate.Item {
+	items := make([]migrate.Item, 0, len(snap.Issues))
 	for _, i := range snap.Issues {
 		closed := i.State == string(gh.StateClosed)
 		labels := make([]string, 0, len(i.Labels))
@@ -187,17 +203,21 @@ func localItems(snap *local.Snapshot) []migrationItem {
 			}
 			labels = append(labels, migratedLabel(l))
 		}
-		item := migrationItem{
+		item := migrate.Item{
 			Key: localKey(i.Number), Title: i.Title, Body: localBody(i), Labels: labels,
 			Closed: closed,
 		}
 		if !closed && len(i.Assignees) > 0 {
-			item.Assignees = []string{assigneeViewer}
+			item.Assignees = []string{migrate.AssigneeViewer}
 		}
 		if closed {
-			switch reason := gh.CloseReason(i.StateReason); reason {
-			case gh.CloseCompleted, gh.CloseNotPlanned, gh.CloseDuplicate:
-				item.CloseReason = reason
+			switch gh.CloseReason(i.StateReason) {
+			case gh.CloseCompleted:
+				item.CloseReason = migrate.CloseCompleted
+			case gh.CloseNotPlanned:
+				item.CloseReason = migrate.CloseNotPlanned
+			case gh.CloseDuplicate:
+				item.CloseReason = migrate.CloseDuplicate
 			}
 		}
 		if i.Parent != 0 {
@@ -281,7 +301,7 @@ const planLineLimit = 20
 
 // localMigrationPlan reports what a real run would do, in the same shape
 // `migrate beads --dry-run` uses.
-func (a *App) localMigrationPlan(items []migrationItem, state map[string]int) error {
+func (a *App) localMigrationPlan(items []migrate.Item, state map[string]int) error {
 	wouldMigrate := []migrationPlanEntry{}
 	already := map[string]int{}
 	type step struct {
@@ -327,7 +347,7 @@ func (a *App) localMigrationPlan(items []migrationItem, state map[string]int) er
 }
 
 // planEntry describes one item a dry run would create.
-func planEntry(it migrationItem) migrationPlanEntry {
+func planEntry(it migrate.Item) migrationPlanEntry {
 	view := model.Issue{Labels: it.Labels}
 	p, _ := view.Priority()
 	entry := migrationPlanEntry{

@@ -13,6 +13,8 @@ import (
 	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/model"
+	"github.com/lumberbarons/hew/migrate"
+	"github.com/lumberbarons/hew/tracker"
 )
 
 // MigrateOpts configure the beads migration.
@@ -102,7 +104,7 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 	}
 
 	digest := fileDigest(data)
-	state, err := loadBatchState(opts.StatePath, a.stateRepo(), digest, "snapshot")
+	checkpoint, err := tracker.OpenFileCheckpoint(opts.StatePath, a.stateRepo(), digest, "snapshot")
 	if err != nil {
 		return err
 	}
@@ -115,32 +117,45 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 		validIDs[b.ID] = true
 	}
 
-	// Reads GitHub, writes nothing — so the dry run makes the same pass and
-	// can show the failure the real run would hit (#81).
-	if err := a.verifyBatchState(ctx, state, conventions.ProvenanceMigrate, validIDs, "bead ID"); err != nil {
-		return err
+	engine := migrate.Wrap(migrationTarget{a.Client}, checkpoint)
+	req := migrate.RunRequest{
+		Items: beadItems(selected),
+		Options: migrate.Options{
+			Kind:       conventions.ProvenanceMigrate,
+			ItemNoun:   "bead",
+			SourceNoun: "snapshot",
+			KeyNoun:    "bead ID",
+			Throttle:   opts.Throttle,
+			KnownKeys:  validIDs,
+			Progress:   a.progressf,
+			// Labels are bootstrapped only after the engine's checkpoint and
+			// provenance checks pass, so a refused state file costs no write
+			// (#81). A dry run writes nothing, so the hook is not called.
+			BeforeCreate: func(ctx context.Context) error {
+				return a.ensureLabels(ctx, beadAreaLabels(selected))
+			},
+		},
 	}
 
 	if opts.DryRun {
-		return a.migrationPlan(selected, state.Mapping, skippedClosed)
+		req.Options.DryRun = true
+		res, err := engine.Run(ctx, req)
+		if err != nil {
+			return err
+		}
+		return a.migrationPlan(selected, res.Mapping, skippedClosed)
 	}
 
-	if err := a.ensureLabels(ctx, beadAreaLabels(selected)); err != nil {
-		return err
-	}
-
-	res, err := a.runMigration(ctx, migrationEngine{
-		Kind: conventions.ProvenanceMigrate, ItemNoun: "bead", SourceNoun: "snapshot",
-		Items: beadItems(selected), StatePath: opts.StatePath, Throttle: opts.Throttle,
-	}, state)
+	res, err := engine.Run(ctx, req)
+	a.printWarnings(res.Warnings)
 	if err != nil {
 		return err
 	}
 
 	return a.emitResult(map[string]any{
 		"created": res.Created, "wired": res.Wired, "closed": res.Closed,
-		"skippedClosed": skippedClosed, "warnings": res.Warnings,
-		"mapping": state.Mapping,
+		"skippedClosed": skippedClosed, "warnings": warningTexts(res.Warnings),
+		"mapping": res.Mapping,
 	}, func() {
 		a.printf("migrated %d beads: %d created, %d dependencies wired, %d closed", len(selected), res.Created, res.Wired, res.Closed)
 		if skippedClosed > 0 {
@@ -264,8 +279,8 @@ func beadAreaLabels(selected []beads.Bead) []gh.Label {
 // derived from priority, type and status, the epic title prefix, the viewer as
 // assignee for in-progress beads, and the close reason as a comment on closed
 // ones. The provenance marker is the engine's to add.
-func beadItems(selected []beads.Bead) []migrationItem {
-	items := make([]migrationItem, 0, len(selected))
+func beadItems(selected []beads.Bead) []migrate.Item {
+	items := make([]migrate.Item, 0, len(selected))
 	for _, b := range selected {
 		labels := []string{model.Priority(clampPriority(b.Priority)).String()}
 		if t := beadTypeLabels[b.IssueType]; t != "" {
@@ -277,7 +292,7 @@ func beadItems(selected []beads.Bead) []migrationItem {
 		var assignees []string
 		if b.Status == "in_progress" {
 			labels = append(labels, model.InProgressLabel)
-			assignees = []string{assigneeViewer}
+			assignees = []string{migrate.AssigneeViewer}
 		}
 		labels = append(labels, areaLabels(b.Labels)...)
 
@@ -286,7 +301,7 @@ func beadItems(selected []beads.Bead) []migrationItem {
 			title = conventions.EpicTitlePrefix + title
 		}
 
-		item := migrationItem{
+		item := migrate.Item{
 			Key: b.ID, Title: title, Body: beadBody(b), Labels: labels,
 			Assignees: assignees, Parent: b.Parent(), BlockedBy: b.BlockedBy(),
 		}
