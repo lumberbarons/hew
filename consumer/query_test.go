@@ -1,4 +1,4 @@
-package tracker_test
+package consumer_test
 
 import (
 	"context"

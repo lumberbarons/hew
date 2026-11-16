@@ -44,12 +44,14 @@ jobs:
         with:
           config: ./.testcoverage.yml
 
-  # `tracker` is a library API, not just an internal package: a consumer
-  # imports it in-process (DESIGN.md, "Tracker library"), so an exported symbol
-  # that disappears is a compile error there even though every CLI command
-  # still works. This is the library's counterpart to the CLI surface snapshot
-  # (#167), except the "old" surface is whatever the base commit exported
-  # rather than a committed golden, which is why it needs a tool.
+  # `tracker`, `pr` and `migrate` are a library API, not just internal
+  # packages: a consumer imports them in-process (DESIGN.md, "Tracker
+  # library"), so an exported symbol that disappears is a compile error there
+  # even though every CLI command still works. This is the library's
+  # counterpart to the CLI surface snapshot (#167), except the "old" surface is
+  # whatever the base commit exported rather than a committed golden, which is
+  # why it needs a tool. #317 extended it from `tracker` alone to every public
+  # package.
   #
   # It annotates rather than fails on purpose. The API is experimental until
   # 1.0, and DESIGN.md makes a deliberate breaking change a `feat!:`/`fix!:`
@@ -81,7 +83,7 @@ jobs:
       # status. `-incompatible` prints exactly the changes worth annotating,
       # one line each; the full diff, additions included, goes to the run
       # summary where a reviewer reads it beside the PR.
-      - name: diff the tracker API against the base commit
+      - name: diff the public API against the base commit
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE: ${{ github.event.before }}
@@ -107,50 +109,91 @@ jobs:
           fi
 
           base_tree="$RUNNER_TEMP/hew-base"
-          export_file="$RUNNER_TEMP/base.export"
           git worktree add --quiet --detach "$base_tree" "$base_commit"
           trap 'git worktree remove --force "$base_tree"' EXIT
 
-          if [ ! -d "$base_tree/tracker" ]; then
-            echo "::notice::$base_commit predates the tracker package; every symbol is new"
-            exit 0
+          for pkg in tracker pr migrate; do
+            if [ ! -d "$base_tree/$pkg" ]; then
+              echo "::notice::$base_commit predates the $pkg package; every symbol is new"
+              continue
+            fi
+
+            # apidiff resolves an import path through the module in the working
+            # directory, so the base's export data has to be written from
+            # inside the base tree.
+            export_file="$RUNNER_TEMP/$pkg.export"
+            ( cd "$base_tree" && apidiff -w "$export_file" "github.com/lumberbarons/hew/$pkg" )
+
+            changes="$(apidiff "$export_file" "github.com/lumberbarons/hew/$pkg")"
+            if [ -z "$changes" ]; then
+              echo "$pkg API: unchanged since $base_commit"
+              continue
+            fi
+
+            {
+              echo "### $pkg API surface"
+              echo
+              echo "Changes against \`$base_commit\`:"
+              echo
+              echo '```'
+              printf '%s\n' "$changes"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            incompatible="$(apidiff -incompatible "$export_file" "github.com/lumberbarons/hew/$pkg")"
+            if [ -z "$incompatible" ]; then
+              echo "$pkg API: additions only"
+              printf '%s\n' "$changes"
+              continue
+            fi
+
+            # One annotation per removal, so the change shows up on the PR
+            # rather than only in a log nobody opened. Percent signs are
+            # escaped because a workflow command treats them as escapes.
+            while IFS= read -r change; do
+              echo "::warning title=$pkg API change::${change//'%'/'%25'}"
+            done <<< "$incompatible"
+            echo "$pkg API: incompatible changes since $base_commit, annotated above"
+          done
+
+  # The consumer module is outside the hew module on purpose: it can import
+  # only `tracker`, `pr` and `migrate`, so a workflow that needs an internal
+  # type fails to compile here instead of passing its own unit tests. It is the
+  # completion gate DESIGN.md's "Tracker library" contract promises (#317):
+  # initialization, queries, creation, claims, dependencies, plans, pull
+  # requests and both migrations, against a real local tracker and an isolated
+  # GitHub transport. No hew binary is installed or built for it.
+  consumer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # A hew binary on PATH would let a test pass by shelling out instead of
+      # importing the library, which is the one thing this job exists to
+      # forbid. The runner does not install one; this asserts it stays that way.
+      - name: no hew executable on the workflow path
+        run: |
+          if command -v hew >/dev/null 2>&1; then
+            echo "::error::the consumer must build against the library, not a hew binary"
+            exit 1
           fi
-
-          # apidiff resolves an import path through the module in the working
-          # directory, so the base's export data has to be written from inside
-          # the base tree.
-          ( cd "$base_tree" && apidiff -w "$export_file" github.com/lumberbarons/hew/tracker )
-
-          changes="$(apidiff "$export_file" github.com/lumberbarons/hew/tracker)"
-          if [ -z "$changes" ]; then
-            echo "tracker API: unchanged since $base_commit"
-            exit 0
-          fi
-
-          {
-            echo "### tracker API surface"
-            echo
-            echo "Changes against \`$base_commit\`:"
-            echo
-            echo '```'
-            printf '%s\n' "$changes"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          incompatible="$(apidiff -incompatible "$export_file" github.com/lumberbarons/hew/tracker)"
-          if [ -z "$incompatible" ]; then
-            echo "tracker API: additions only"
-            printf '%s\n' "$changes"
-            exit 0
-          fi
-
-          # One annotation per removal, so the change shows up on the PR rather
-          # than only in a log nobody opened. Percent signs are escaped because
-          # a workflow command treats them as escapes.
-          while IFS= read -r change; do
-            echo "::warning title=tracker API change::${change//'%'/'%25'}"
-          done <<< "$incompatible"
-          echo "tracker API: incompatible changes since $base_commit, annotated above"
+      # The module replaces hew with the checkout, so its go.mod and go.sum
+      # must agree with the root's requirements.
+      - name: module is tidy
+        run: go mod tidy -diff
+        working-directory: consumer
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          working-directory: consumer
+      # Same reason as the lint job: the action never checks formatting, and
+      # the root job's formatting step does not reach a nested module.
+      - name: formatting
+        run: golangci-lint fmt --diff
+        working-directory: consumer
+      - run: go test -race ./...
+        working-directory: consumer
 
   # evals/ is its own module, so the root job's ./... never reaches it.
   evals:

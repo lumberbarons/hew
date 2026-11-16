@@ -20,6 +20,8 @@ goreleaser check && goreleaser build --snapshot --clean   # release config dry r
 actionlint                                 # workflow lint (CI-blocking); also covers examples/auto-triage.yml
 cd evals && go test ./...                  # the evals module has its own go.mod
 cd evals && golangci-lint run && golangci-lint fmt --diff  # ...and its own lint/format gates
+cd consumer && go test -race ./...         # the external-consumer module's contract tests
+cd consumer && golangci-lint run && golangci-lint fmt --diff  # ...and its own lint/format gates
 shellcheck install.sh                      # install.sh is linted in CI too
 ```
 
@@ -54,6 +56,7 @@ The layering exists so everything with behavior is testable without hitting GitH
 | `site/` | Self-contained landing page for lumberbarons.github.io/hew (no build step, no external assets), published to `gh-pages` by `publish-install` | Changing the landing page |
 | `examples/` | Copy-pasteable GitHub Actions recipes (`auto-triage.yml`), documented in README | Changing the auto-triage workflow or its documented guarantees |
 | `evals/` | Separate module (keeps the tokenizer out of the CLI's dependency graph): the token-efficiency harness and its committed fixtures — see [evals/README.md](evals/README.md). A renderer change invalidates the fixtures' hew side; re-capture and re-publish the numbers in DESIGN.md | Changing renderer output, or the published token figures |
+| `consumer/` | Separate module with a local replace to the checkout: the external-consumer gate that imports only `tracker`, `pr` and `migrate` and runs the contract's workflows against a real local tracker and an isolated GitHub transport. It is why an operation needing an internal type fails CI instead of passing its own tests — see [consumer/README.md](consumer/README.md) | Changing a public API, a workflow, or the consumer scenarios |
 
 The public packages are one API in three parts: `tracker`, `pr` and `migrate`,
 including the beads and local-to-GitHub workflows. DESIGN.md's

@@ -2,7 +2,12 @@
 
 The CLI adapter for the public workflow packages: `cmd/hew` parses flags, this package reads the inputs the user chose, calls the public operation and renders the result. It is written against the `gh.IssueStore` interface (and `gh.PullRequests`, for `pr` alone, which `App.PRs` leaves nil on a backend with no pull requests) so `cmd/hew` stays pure wiring and every behavior is testable without hitting GitHub. The tracker-shaped reads and the write workflows already delegate to the public `tracker` package — `tracker.Wrap` for reads, `tracker.WrapAs` for `start`/`release`/`close`/`set`/`reopen`/`init`, `tracker.WrapWriter` for `block`/`unblock`, and `tracker.Init` for local initialization — and `pr` delegates its whole workflow to the public `pr` package (`pr.Wrap` over the store the command opened). The migration workflows delegate to the public `migrate` package (`migrate.Wrap` over a `migrate.Target` adapter and the checkpoint path and repo identity the command resolved): the `Beads` and `Local` operations map the source, run the checkpointed engine, freeze and seal the local tracker, and return their warnings and dry-run plan, so this package reads the user's file, renders the result and maps the library's typed errors onto exit codes rather than owning those behaviors.
 
-Where a row below says a command still calls the client directly or owns a workflow, that is the current implementation, not the boundary. DESIGN.md ("Tracker library") is the operation inventory: it assigns each command's workflow to `tracker`, `pr` or `migrate` and leaves this package flags, input files, the editor, hooks, rendering and exit codes. Moving an operation out means moving its tests and its contract row with it, and no workflow decision stays here once its public operation ships.
+Every row below delegates its workflow to a public package: the tracker-shaped
+reads and writes to `tracker`, the pull-request workflow to `pr`, and both
+migrations to `migrate`. A row that grows a workflow decision of its own is a
+regression against DESIGN.md's operation inventory, which `consumer/` enforces
+by importing only those packages and running the workflows from outside this
+module.
 
 | File | What | When to read |
 |---|---|---|

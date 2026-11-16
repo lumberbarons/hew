@@ -1,4 +1,4 @@
-.PHONY: help build test lint fmt vuln evals ci
+.PHONY: help build test lint fmt vuln evals consumer ci
 
 help: ## Show this help
 	@echo "Usage: make [target]"
@@ -29,7 +29,13 @@ evals: ## Test and lint the evals module
 	cd evals && golangci-lint run
 	cd evals && golangci-lint fmt --diff
 
+consumer: ## Test and lint the external-consumer module
+	cd consumer && go mod tidy -diff
+	cd consumer && go test -race ./...
+	cd consumer && golangci-lint run
+	cd consumer && golangci-lint fmt --diff
+
 ci: ## Run everything CI blocks on
-	$(MAKE) lint fmt test vuln evals
+	$(MAKE) lint fmt test vuln evals consumer
 
 .DEFAULT_GOAL := help

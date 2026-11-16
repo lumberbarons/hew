@@ -1,9 +1,8 @@
-// Package migrate_test exercises the public migration workflows the way an
-// external module does: only public imports, a real local tracker created
-// through tracker.Init, and an isolated HTTP transport standing in for GitHub.
-// Nothing here runs the hew binary, reads a gh credential or reaches the
-// network.
-package migrate_test
+// This file exercises the public migration workflows the way an external
+// module does: only public imports, a real local tracker created through
+// tracker.Init, and an isolated HTTP transport standing in for GitHub. Nothing
+// here runs the hew binary, reads a gh credential or reaches the network.
+package consumer_test
 
 import (
 	"context"
@@ -15,8 +14,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,6 +57,15 @@ type githubFake struct {
 	failed   int
 	onCreate func()
 	next     int
+	// authFailures is how many upcoming requests answer 401 before the fake
+	// behaves, which is how a consumer test exercises the client's re-auth.
+	authFailures int
+	// rateLimits is how many upcoming requests answer 429 with a zero-second
+	// Retry-After, which is the secondary-limit path the client backs off on.
+	rateLimits int
+	// failEdges makes every dependency mutation fail with a 500, so a
+	// multi-write operation can be stopped after its first write landed.
+	failEdges bool
 }
 
 func newGitHubFake() *githubFake {
@@ -68,7 +76,24 @@ func (f *githubFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	f.mu.Lock()
 	f.requests = append(f.requests, r.Method+" "+r.URL.Path)
+	authFailure := f.authFailures > 0
+	if authFailure {
+		f.authFailures--
+	}
+	rateLimited := !authFailure && f.rateLimits > 0
+	if rateLimited {
+		f.rateLimits--
+	}
 	f.mu.Unlock()
+	if authFailure {
+		http.Error(w, `{"message":"Bad credentials"}`, http.StatusUnauthorized)
+		return
+	}
+	if rateLimited {
+		w.Header().Set("Retry-After", "0")
+		http.Error(w, `{"message":"secondary rate limit"}`, http.StatusTooManyRequests)
+		return
+	}
 	if r.URL.Path == "/graphql" {
 		f.graphql(w, body)
 		return
@@ -96,6 +121,19 @@ func (f *githubFake) rest(w http.ResponseWriter, r *http.Request, body []byte) {
 		f.mu.Unlock()
 		writeJSON(w, out)
 	case r.Method == "POST" && strings.HasSuffix(path, "/labels"):
+		if n, ok := issueSuffix("/labels"); ok {
+			var payload struct {
+				Labels []string `json:"labels"`
+			}
+			_ = json.Unmarshal(body, &payload)
+			f.mu.Lock()
+			if issue := f.issues[n]; issue != nil {
+				issue.labels = append(issue.labels, payload.Labels...)
+			}
+			f.mu.Unlock()
+			writeJSON(w, []map[string]any{})
+			return
+		}
 		var label struct {
 			Name string `json:"name"`
 		}
@@ -104,6 +142,41 @@ func (f *githubFake) rest(w http.ResponseWriter, r *http.Request, body []byte) {
 		f.labels = append(f.labels, label.Name)
 		f.mu.Unlock()
 		writeJSON(w, map[string]any{"name": label.Name})
+	case r.Method == "DELETE" && strings.Contains(path, "/labels/"):
+		trimmed := path[:strings.LastIndex(path, "/labels/")]
+		n, err := strconv.Atoi(trimmed[strings.LastIndex(trimmed, "/")+1:])
+		if err != nil {
+			http.Error(w, "bad label path", http.StatusBadRequest)
+			return
+		}
+		name := path[strings.LastIndex(path, "/")+1:]
+		if decoded, derr := url.PathUnescape(name); derr == nil {
+			name = decoded
+		}
+		f.mu.Lock()
+		if issue := f.issues[n]; issue != nil {
+			issue.labels = remove(issue.labels, name)
+		}
+		f.mu.Unlock()
+		writeJSON(w, []map[string]any{})
+	case r.Method == "DELETE" && strings.HasSuffix(path, "/assignees"):
+		n, ok := issueSuffix("/assignees")
+		if !ok {
+			http.Error(w, "bad assignee path", http.StatusBadRequest)
+			return
+		}
+		var payload struct {
+			Assignees []string `json:"assignees"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		f.mu.Lock()
+		if issue := f.issues[n]; issue != nil {
+			for _, login := range payload.Assignees {
+				issue.assignees = remove(issue.assignees, login)
+			}
+		}
+		f.mu.Unlock()
+		writeJSON(w, []map[string]any{})
 	case r.Method == "POST" && strings.HasSuffix(path, "/assignees"):
 		n, ok := issueSuffix("/assignees")
 		if !ok {
@@ -208,6 +281,33 @@ func (f *githubFake) graphql(w http.ResponseWriter, body []byte) {
 	switch {
 	case strings.Contains(query, "viewer"):
 		writeJSON(w, map[string]any{"data": map[string]any{"viewer": map[string]any{"login": "octocat"}}})
+	case strings.Contains(query, "issues("):
+		f.mu.Lock()
+		nodes := make([]map[string]any, 0, len(f.issues))
+		for _, issue := range f.sortedIssues() {
+			nodes = append(nodes, f.issueNode(issue))
+		}
+		f.mu.Unlock()
+		writeJSON(w, map[string]any{"data": map[string]any{
+			"rateLimit": map[string]any{"cost": 1, "remaining": 4999, "resetAt": "2026-07-01T00:05:00Z"},
+			"repository": map[string]any{"issues": map[string]any{
+				"pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""},
+				"nodes":    nodes,
+			}},
+		}})
+	case strings.Contains(query, "search("):
+		q, _ := payload.Variables["q"].(string)
+		f.mu.Lock()
+		matches := make([]map[string]any, 0)
+		for _, issue := range f.sortedIssues() {
+			if searchMatches(q, issue) {
+				matches = append(matches, f.issueNode(issue))
+			}
+		}
+		f.mu.Unlock()
+		writeJSON(w, map[string]any{"data": map[string]any{"search": map[string]any{
+			"issueCount": len(matches), "nodes": matches,
+		}}})
 	case strings.Contains(query, "issue(number: $number) { id }"):
 		n := number(payload.Variables["number"])
 		writeJSON(w, map[string]any{"data": map[string]any{"repository": map[string]any{"issue": map[string]any{"id": nodeID(n)}}}})
@@ -221,6 +321,15 @@ func (f *githubFake) graphql(w http.ResponseWriter, body []byte) {
 		}
 		f.mu.Unlock()
 		writeJSON(w, map[string]any{"data": map[string]any{}})
+	case strings.Contains(query, "reopenIssue("):
+		n := fromNodeID(payload.Variables["id"])
+		f.mu.Lock()
+		if issue := f.issues[n]; issue != nil {
+			issue.state = "OPEN"
+			issue.reason = ""
+		}
+		f.mu.Unlock()
+		writeJSON(w, map[string]any{"data": map[string]any{}})
 	case strings.Contains(query, "addSubIssue("):
 		parent := fromNodeID(payload.Variables["parent"])
 		child := fromNodeID(payload.Variables["child"])
@@ -230,7 +339,28 @@ func (f *githubFake) graphql(w http.ResponseWriter, body []byte) {
 		}
 		f.mu.Unlock()
 		writeJSON(w, map[string]any{"data": map[string]any{}})
+	case strings.Contains(query, "removeSubIssue("):
+		child := fromNodeID(payload.Variables["child"])
+		f.mu.Lock()
+		if issue := f.issues[child]; issue != nil {
+			issue.parent = 0
+		}
+		f.mu.Unlock()
+		writeJSON(w, map[string]any{"data": map[string]any{}})
+	case strings.Contains(query, "removeBlockedBy("):
+		issueNumber := fromNodeID(payload.Variables["id"])
+		blocking := fromNodeID(payload.Variables["blocking"])
+		f.mu.Lock()
+		if issue := f.issues[issueNumber]; issue != nil {
+			issue.blockedBy = removeInt(issue.blockedBy, blocking)
+		}
+		f.mu.Unlock()
+		writeJSON(w, map[string]any{"data": map[string]any{}})
 	case strings.Contains(query, "addBlockedBy("):
+		if f.failEdges {
+			http.Error(w, `{"message":"injected edge failure"}`, http.StatusInternalServerError)
+			return
+		}
 		issueNumber := fromNodeID(payload.Variables["id"])
 		blocking := fromNodeID(payload.Variables["blocking"])
 		f.mu.Lock()
@@ -245,13 +375,47 @@ func (f *githubFake) graphql(w http.ResponseWriter, body []byte) {
 		issue := f.issues[n]
 		var issueValue any
 		if issue != nil {
-			issueValue = issueNode(issue)
+			issueValue = f.issueNode(issue)
 		}
 		f.mu.Unlock()
 		writeJSON(w, map[string]any{"data": map[string]any{"repository": map[string]any{"issue": issueValue}}})
 	default:
 		http.Error(w, "unexpected GraphQL query: "+query, http.StatusBadRequest)
 	}
+}
+
+// sortedIssues returns the fake's issues in creation order. The caller holds
+// the lock.
+func (f *githubFake) sortedIssues() []*fakeIssue {
+	numbers := make([]int, 0, len(f.issues))
+	for n := range f.issues {
+		numbers = append(numbers, n)
+	}
+	slices.Sort(numbers)
+	out := make([]*fakeIssue, 0, len(numbers))
+	for _, n := range numbers {
+		out = append(out, f.issues[n])
+	}
+	return out
+}
+
+// searchMatches applies the one qualifier the fake understands — the terms
+// after GitHub's `repo:` and `is:issue` scoping — to title and body.
+func searchMatches(q string, issue *fakeIssue) bool {
+	terms := q
+	if idx := strings.Index(q, "is:issue"); idx >= 0 {
+		terms = q[idx+len("is:issue"):]
+	}
+	for _, term := range strings.Fields(terms) {
+		if strings.Contains(term, ":") {
+			continue
+		}
+		if strings.Contains(strings.ToLower(issue.title), strings.ToLower(term)) ||
+			strings.Contains(strings.ToLower(issue.body), strings.ToLower(term)) {
+			return true
+		}
+	}
+	return false
 }
 
 func nodeID(number int) string { return "NODE" + strconv.Itoa(number) }
@@ -261,7 +425,9 @@ func fromNodeID(v any) int {
 	return n
 }
 
-func issueNode(issue *fakeIssue) map[string]any {
+// issueNode renders one issue in the GraphQL shape the client reads. The
+// caller holds the lock: it derives sub-issues from the fake's own set.
+func (f *githubFake) issueNode(issue *fakeIssue) map[string]any {
 	labels := make([]map[string]any, 0, len(issue.labels))
 	for _, name := range issue.labels {
 		labels = append(labels, map[string]any{"name": name})
@@ -273,6 +439,17 @@ func issueNode(issue *fakeIssue) map[string]any {
 	blockedBy := make([]map[string]any, 0, len(issue.blockedBy))
 	for _, n := range issue.blockedBy {
 		blockedBy = append(blockedBy, map[string]any{"number": n, "state": "OPEN"})
+	}
+	children := make([]map[string]any, 0)
+	completed := 0
+	for _, candidate := range f.sortedIssues() {
+		if candidate.parent != issue.number {
+			continue
+		}
+		children = append(children, map[string]any{"number": candidate.number, "state": candidate.state})
+		if candidate.state == "CLOSED" {
+			completed++
+		}
 	}
 	var parent any
 	if issue.parent != 0 {
@@ -293,11 +470,31 @@ func issueNode(issue *fakeIssue) map[string]any {
 		"labels":           map[string]any{"nodes": labels},
 		"assignees":        map[string]any{"nodes": assignees},
 		"parent":           parent,
-		"subIssues":        map[string]any{"totalCount": 0, "nodes": []any{}},
-		"subIssuesSummary": map[string]any{"total": 0, "completed": 0},
+		"subIssues":        map[string]any{"totalCount": len(children), "nodes": children},
+		"subIssuesSummary": map[string]any{"total": len(children), "completed": completed},
 		"blockedBy":        map[string]any{"totalCount": len(blockedBy), "nodes": blockedBy},
 		"comments":         map[string]any{"totalCount": len(comments), "nodes": comments},
 	}
+}
+
+func remove(values []string, value string) []string {
+	out := make([]string, 0, len(values))
+	for _, candidate := range values {
+		if candidate != value {
+			out = append(out, candidate)
+		}
+	}
+	return out
+}
+
+func removeInt(values []int, value int) []int {
+	out := make([]int, 0, len(values))
+	for _, candidate := range values {
+		if candidate != value {
+			out = append(out, candidate)
+		}
+	}
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, value any) {
@@ -335,32 +532,6 @@ func openFake(t *testing.T, fake *githubFake) http.RoundTripper {
 // ---------------------------------------------------------------------------
 // A real checkout and local tracker.
 // ---------------------------------------------------------------------------
-
-func externalCheckout(t *testing.T) string {
-	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not installed")
-	}
-	for _, kv := range os.Environ() {
-		if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "GIT_") {
-			t.Setenv(k, os.Getenv(k)) // registers the restore
-			if err := os.Unsetenv(k); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
-	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
-	root := t.TempDir()
-	if out, err := exec.Command("git", "-C", root, "init", "--initial-branch=main").CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v: %s", err, out)
-	}
-	resolved, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return resolved
-}
 
 // localWork creates a real local tracker and returns its main checkout plus
 // the tracker handles the workflows read and the probes write through.
