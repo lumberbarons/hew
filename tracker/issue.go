@@ -1,7 +1,7 @@
-// Package tracker provides an in-process API for hew's tracker: open a local
-// or GitHub tracker with an explicit worktree and actor, apply typed plans,
-// and read structured results and typed errors. Its API is experimental until
-// hew 1.0.
+// Package tracker provides an in-process API for hew's tracker: initialize and
+// open a local or GitHub tracker with an explicit worktree and actor, apply
+// typed plans, and read structured results and typed errors. Its API is
+// experimental until hew 1.0.
 package tracker
 
 import (

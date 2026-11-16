@@ -4,15 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/lumberbarons/hew/internal/conventions"
-	"github.com/lumberbarons/hew/internal/gh"
-	"github.com/lumberbarons/hew/internal/git"
-	"github.com/lumberbarons/hew/internal/local"
 	"github.com/lumberbarons/hew/internal/model"
 	"github.com/lumberbarons/hew/internal/render"
 	"github.com/lumberbarons/hew/tracker"
@@ -894,41 +889,49 @@ type initResult struct {
 
 // Init bootstraps the convention labels in the repo and prints the
 // CLAUDE.md snippet. On the local backend there are no labels to bootstrap:
-// the store carries them, so init reports the tracker instead of pretending a
-// local repo is GitHub.
+// tracker.Init reports the tracker instead of pretending a local repo is
+// GitHub, and the adapter keeps only the snippet and the rendering.
 func (a *App) Init(ctx context.Context) error {
 	if a.Local {
-		return a.InitLocal("")
+		return a.InitLocal(ctx, "")
 	}
-	existing, err := a.Client.ListLabels(ctx)
+	res, err := tracker.WrapAs(a.Client, tracker.BackendGitHub, "").Init(ctx)
 	if err != nil {
-		return err
+		return initError(err)
 	}
-	have := map[string]bool{}
-	for _, l := range existing {
-		have[l.Name] = true
-	}
-	var created []string
-	for _, l := range conventions.Labels {
-		if have[l.Name] {
-			continue
-		}
-		if err := a.Client.CreateLabel(ctx, gh.Label{Name: l.Name, Color: l.Color, Description: l.Description}); err != nil {
-			return fmt.Errorf("creating label %q: %w", l.Name, err)
-		}
-		created = append(created, l.Name)
-	}
-	if created == nil {
-		created = []string{}
-	}
-	return a.emitResult(initResult{Backend: local.BackendGitHub, CreatedLabels: created}, func() {
-		if len(created) == 0 {
+	return a.emitResult(initResult{
+		Backend:       string(res.Backend),
+		Path:          res.Path,
+		CreatedLabels: res.CreatedLabels,
+	}, func() {
+		if len(res.CreatedLabels) == 0 {
 			a.printf("all convention labels already exist in %s\n", a.Repo)
 		} else {
-			a.printf("created labels: %s\n", strings.Join(created, ", "))
+			a.printf("created labels: %s\n", strings.Join(res.CreatedLabels, ", "))
 		}
 		a.printClaudeSnippet(a.claudeSnippet())
 	})
+}
+
+// initError maps tracker.Init's typed refusals onto the messages and exit codes
+// init has always used. An authentication failure passes through untouched so
+// ExitCode can still see it; a tracker that belongs to another backend keeps its
+// wording; a worktree or backend the library rejects stays a generic failure,
+// because init's target is a repository state rather than a flag value.
+func initError(err error) error {
+	var auth *tracker.AuthError
+	if errors.As(err, &auth) {
+		return err
+	}
+	var elsewhere *tracker.InitializedElsewhereError
+	if errors.As(err, &elsewhere) {
+		return genericErr("%s already tracks issues in %q, not locally", elsewhere.Path, string(elsewhere.Backend))
+	}
+	var invalid *tracker.InvalidInputError
+	if errors.As(err, &invalid) {
+		return genericErr("%s", invalid.Reason)
+	}
+	return genericErr("%v", err)
 }
 
 // claudeSnippet is the CLAUDE.md text for the backend this App talks to.
@@ -949,44 +952,29 @@ func (a *App) printClaudeSnippet(snippet string) {
 // tracker lives at the main checkout, so running it from a linked worktree
 // sets up the one every worktree shares. It is safe to repeat, and refuses a
 // repo whose tracker has moved to another backend rather than reporting a
-// local one that no command would use.
-func (a *App) InitLocal(dir string) error {
-	tracker, err := local.MainDir(dir)
-	if git.IsNotRepo(err) {
-		return genericErr("the local tracker needs a git checkout (run `git init` first): %v", err)
+// local one that no command would use. tracker.Init owns the workflow; the
+// adapter keeps resolving the working directory, the warnings and the snippet.
+func (a *App) InitLocal(ctx context.Context, dir string) error {
+	if dir == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return genericErr("cannot determine the working directory: %v", err)
+		}
+		dir = wd
 	}
+	res, err := tracker.Init(ctx, tracker.InitConfig{Worktree: dir, Backend: tracker.BackendLocal})
 	if err != nil {
-		return genericErr("%v", err)
+		return initError(err)
 	}
-	// Read before writing: a repo that has moved to another backend must be
-	// refused without touching its archived tracker.
-	fresh := false
-	switch cfg, err := local.ReadConfig(tracker); {
-	case err == nil && cfg.Backend != local.BackendLocal:
-		return genericErr("%s already tracks issues in %q, not locally", tracker, cfg.Backend)
-	case errors.Is(err, fs.ErrNotExist):
-		fresh = true
-	case err != nil:
-		return genericErr("%v", err)
+	for _, notice := range res.Notices {
+		a.warnf("%s", notice)
 	}
-	// A config beside no issues.jsonl is a tracker that lost its issues; init
-	// is the documented way out, so it recreates the file but says so.
-	res, err := local.InitTracker(tracker)
-	if err != nil {
-		return genericErr("creating %s: %v", tracker, err)
-	}
-	if res.IssuesRecreated {
-		a.warnf("%s", local.RecreatedIssuesNotice(filepath.Join(tracker, "issues.jsonl")))
-	}
-	if fresh {
-		// Nothing outside .hew records that this repo is local, so a deleted
-		// .hew (git clean -fdx) is indistinguishable from a repo that never
-		// opted in, and hew then targets the git remote's GitHub issues. Said
-		// once, when the tracker is created, and on stderr so --json callers see it.
-		a.warnf("%s is untracked and is the only marker that this repo is local; if it is deleted (for example by `git clean -fdx` at the main checkout), hew falls back to the git remote's GitHub issues, if there is one", tracker)
-	}
-	return a.emitResult(initResult{Backend: local.BackendLocal, Path: tracker, CreatedLabels: []string{}}, func() {
-		a.printf("local tracker ready in %s\n", tracker)
+	return a.emitResult(initResult{
+		Backend:       string(res.Backend),
+		Path:          res.Path,
+		CreatedLabels: res.CreatedLabels,
+	}, func() {
+		a.printf("local tracker ready in %s\n", res.Path)
 		a.printClaudeSnippet(conventions.ClaudeSnippetLocal)
 	})
 }

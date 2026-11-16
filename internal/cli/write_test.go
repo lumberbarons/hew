@@ -2190,6 +2190,37 @@ func TestInitJSON(t *testing.T) {
 	}
 }
 
+// init delegates the label bootstrap to tracker.Init, which types an unusable
+// credential; the command still has to exit 4 so agent loops can tell it apart
+// from a failed write.
+func TestInitMapsALibraryAuthFailureToExitAuth(t *testing.T) {
+	f := newFake()
+	f.failOn["ListLabels"] = &gh.AuthError{Err: errors.New("bad token")}
+	app, out, _ := newApp(f)
+	err := app.Init(ctx)
+	if got := ExitCode(err); got != ExitAuth {
+		t.Errorf("exit = %d (%v), want %d", got, err, ExitAuth)
+	}
+	if out.Len() != 0 {
+		t.Errorf("output = %q; want nothing on a refused init", out.String())
+	}
+}
+
+// A label that cannot be created names that label and the backend cause, and
+// nothing claims success: the next run resumes where this one stopped.
+func TestInitNamesTheLabelWhoseCreationFailed(t *testing.T) {
+	f := newFake()
+	f.failOn["CreateLabel"] = errors.New("boom")
+	app, out, _ := newApp(f)
+	err := app.Init(ctx)
+	if err == nil || !strings.Contains(err.Error(), conventions.Labels[0].Name) || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("err = %v, want the label and the cause", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("output = %q; want no snippet after a failed bootstrap", out.String())
+	}
+}
+
 // create composes issue bodies, and pr later copies those sections into the
 // PR verbatim — so the check belongs at the point the text is first written,
 // where the remedy (set --body-file) still applies cheaply.
