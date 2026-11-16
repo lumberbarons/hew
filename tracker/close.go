@@ -83,10 +83,10 @@ func (t *Tracker) Close(ctx context.Context, number int, opts CloseOptions) (Clo
 		}
 	}
 	if err := t.store.Comment(ctx, number, reason); err != nil {
-		return CloseResult{}, err
+		return CloseResult{}, asWriteError(err)
 	}
 	if err := t.store.CloseIssue(ctx, number, stateReason); err != nil {
-		return CloseResult{}, &PartialCloseError{Issue: number, Err: err}
+		return CloseResult{}, &PartialCloseError{Issue: number, Err: asWriteError(err)}
 	}
 	return CloseResult{StateReason: string(stateReason)}, nil
 }

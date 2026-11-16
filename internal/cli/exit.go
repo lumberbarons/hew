@@ -13,6 +13,12 @@ import (
 // ExitError's own code, ExitAuth for an auth failure (so "run gh auth login"
 // is distinguishable), else ExitGeneric. nil maps to 0. The mapping lives
 // here, not in main, so it is covered by tests.
+//
+// Auth failures are matched through the cause chain, so a partial-operation
+// error — a dependency edge that failed after earlier ones landed, a close
+// whose state change failed after the comment posted — still exits 4. The
+// library translates the store's failure once, into tracker.AuthError; the
+// adapter adds no per-operation cases.
 func ExitCode(err error) int {
 	if err == nil {
 		return 0

@@ -399,6 +399,11 @@ type Options struct {
 	// Context bounds the initial lock a tracker without an id takes while it
 	// backfills one. Nil means context.Background().
 	Context context.Context
+	// LockTimeout bounds how long a write waits for the lock. Zero means the
+	// default: long enough that reaching it means the holder is stuck, not
+	// busy. A caller that must fail fast, or a test that has to reach the
+	// timeout, sets it.
+	LockTimeout time.Duration
 }
 
 // Open opens the tracker in dir as viewer, reporting lock waits on stderr. It
@@ -433,7 +438,7 @@ func OpenWithOptions(dir string, opts Options) (*Store, error) {
 	if notice == nil {
 		notice = io.Discard
 	}
-	s := &Store{dir: dir, viewer: viewer, id: cfg.ID, notice: notice, now: func() time.Time { return time.Now().UTC() }}
+	s := &Store{dir: dir, viewer: viewer, id: cfg.ID, lockTimeout: opts.LockTimeout, notice: notice, now: func() time.Time { return time.Now().UTC() }}
 	if s.id == "" {
 		ctx := opts.Context
 		if ctx == nil {
@@ -575,9 +580,9 @@ func (s *Store) lock(ctx context.Context) (unlock func(), err error) {
 			_ = f.Close()
 			if ctx.Err() == nil {
 				if m, ok := readMigrationMarker(s.dir); ok {
-					return nil, fmt.Errorf("timed out after %s waiting for the lock %s: %s; retry once it finishes", timeout, path, m.describe())
+					return nil, &LockTimeoutError{Path: path, Timeout: timeout, Detail: fmt.Sprintf("%s; retry once it finishes", m.describe())}
 				}
-				return nil, fmt.Errorf("timed out after %s waiting for the lock %s: another hew process is holding it (a `hew migrate local` holds it for the whole migration; if none is running, `lsof %s` names the holder)", timeout, path, path)
+				return nil, &LockTimeoutError{Path: path, Timeout: timeout, Detail: fmt.Sprintf("another hew process is holding it (a `hew migrate local` holds it for the whole migration; if none is running, `lsof %s` names the holder)", path)}
 			}
 			return nil, fmt.Errorf("waiting for the lock %s: %w", path, err)
 		}

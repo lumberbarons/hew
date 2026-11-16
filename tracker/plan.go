@@ -1,11 +1,21 @@
 package tracker
 
 import (
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/model"
+)
+
+// The write path's field limits: GitHub's title limit and its 50-character
+// label limit, both counted in characters rather than bytes.
+const (
+	maxTitleRunes = 256
+	maxAreaRunes  = 50
 )
 
 // PlanTypeEpic is the plan-only type marking a parent issue: no type label,
@@ -163,6 +173,115 @@ func ValidatePlan(entries []PlanEntry) error {
 		return &InvalidInputError{Field: "plan", Reason: err.Error()}
 	}
 	return nil
+}
+
+// ValidateTitle enforces the write path's title rules — non-blank, a single
+// line, at most 256 characters counted in runes, including any cosmetic Epic
+// prefix. Every writer shares it, so a library caller cannot store a title the
+// CLI would refuse. A rejection is an *InvalidInputError whose Field is
+// "title".
+func ValidateTitle(title string) error {
+	if strings.TrimSpace(title) == "" {
+		return &InvalidInputError{Field: "title", Reason: "must not be empty"}
+	}
+	if strings.ContainsAny(title, "\r\n\v\f\u0085\u2028\u2029") {
+		return &InvalidInputError{Field: "title", Reason: "must be a single line"}
+	}
+	if utf8.RuneCountInString(title) > maxTitleRunes {
+		return &InvalidInputError{Field: "title", Reason: fmt.Sprintf("must be at most %d characters (including the Epic: prefix for epics)", maxTitleRunes)}
+	}
+	return nil
+}
+
+// NormalizeAreas returns area names trimmed of surrounding whitespace and
+// de-duplicated, or an *InvalidInputError naming the first rule broken. A name
+// blank after trimming is refused — GitHub rejects a label with no visible
+// name, and a local store would keep one that renders as `( )` and breaks a
+// later `migrate local`. A name is also refused when it is longer than 50
+// characters, contains a comma, or collides with a priority, type, in-progress
+// or epic label: the text renderer joins areas with commas, and convention
+// labels would change priority, type or claim.
+//
+// The CLI's area flags split on commas before calling this, so the comma rule
+// guards the callers that hand over a name verbatim — `apply` plans and direct
+// library use — while `--area x,y` stays two areas.
+func NormalizeAreas(areas []string) ([]string, error) {
+	trimmed := make([]string, 0, len(areas))
+	for _, area := range areas {
+		area = strings.TrimSpace(area)
+		if area == "" {
+			return nil, &InvalidInputError{Field: "areas", Reason: "must not be blank"}
+		}
+		// Trimming can make two spellings one name; keep the first.
+		if !slices.Contains(trimmed, area) {
+			trimmed = append(trimmed, area)
+		}
+	}
+	for _, area := range trimmed {
+		if utf8.RuneCountInString(area) > maxAreaRunes {
+			return nil, &InvalidInputError{Field: "areas", Reason: fmt.Sprintf("must be at most %d characters", maxAreaRunes)}
+		}
+		if strings.Contains(area, ",") {
+			return nil, &InvalidInputError{Field: "areas", Reason: fmt.Sprintf("%q must not contain a comma; commas separate areas", area)}
+		}
+		if err := ValidateAreaLabel(area); err != nil {
+			return nil, err
+		}
+	}
+	return trimmed, nil
+}
+
+// ValidateAreaLabel refuses an area that names a convention label, which would
+// otherwise change priority or type, or manufacture a claim. It checks the
+// name only, without NormalizeAreas's trim, length or comma rules, so a
+// removal can still name an oversized area an older tracker stored.
+func ValidateAreaLabel(area string) error {
+	if _, ok := model.LabelPriority(area); ok {
+		return &InvalidInputError{Field: "areas", Reason: fmt.Sprintf("%q is a priority label; use --priority", area)}
+	}
+	if _, ok := model.LabelType(area); ok {
+		return &InvalidInputError{Field: "areas", Reason: fmt.Sprintf("%q is a type label; use --type", area)}
+	}
+	if model.IsInProgressLabel(area) {
+		return &InvalidInputError{Field: "areas", Reason: fmt.Sprintf("%q is a reserved convention label; use hew start to claim an issue", area)}
+	}
+	if model.IsEpicLabel(area) {
+		return &InvalidInputError{Field: "areas", Reason: fmt.Sprintf("%q is a reserved convention label; use hew epic create to make an epic", area)}
+	}
+	return nil
+}
+
+// validatePendingPlanFields applies the write path's title and area rules to
+// the entries a checkpoint has not created yet. Already-created entries are
+// skipped: their source was checked when they were created, and re-gating it
+// would strand a checkpoint whose source digest cannot change to repair it.
+// The returned entries carry the normalized areas the create pass uses.
+func validatePendingPlanFields(entries []PlanEntry, checkpoint Checkpoint) ([]PlanEntry, error) {
+	for i, e := range entries {
+		if _, created := checkpoint.Created(e.Key()); created {
+			continue
+		}
+		if err := ValidateTitle(PlanTitle(e)); err != nil {
+			return nil, planFieldError(e, i, err)
+		}
+		areas, err := NormalizeAreas(e.Areas)
+		if err != nil {
+			return nil, planFieldError(e, i, err)
+		}
+		entries[i].Areas = areas
+	}
+	return entries, nil
+}
+
+// planFieldError names the entry before the rule, so a caller fixing a plan
+// reads the line rather than a bare field name.
+func planFieldError(e PlanEntry, index int, err error) error {
+	reason := err.Error()
+	var invalid *InvalidInputError
+	if errors.As(err, &invalid) {
+		reason = invalid.Field + " " + invalid.Reason
+	}
+	return &InvalidInputError{Field: "plan", Reason: entryError(e, index, "%s", reason).Error()}
 }
 
 func validatePlanEntry(e PlanEntry, index int) error {
