@@ -805,7 +805,7 @@ much as it changes code.
 |---|---|---|
 | `tracker` | Issue workflows: detection and opening, reads and queries, primer data, creation, editing and reopening, claims, closure, dependency writes, apply plans and checkpoints, initialization. | `internal/model`, `internal/gh`, `internal/local`, `internal/conventions`; never `internal/cli`, `internal/render`, `cmd/hew`, `pr` or `migrate` |
 | `pr` | Pull-request workflows: issue inference, body composition, creation and amendment. | `tracker`, `internal/git`, `internal/gh`, `internal/conventions`; never `internal/cli`, `internal/render` or `cmd/hew` |
-| `migrate` | The source-neutral migration engine and the beads and local-to-GitHub workflows, including checkpointed resume and the local tracker's seal. | `tracker`, `internal/beads`, `internal/local`, `internal/conventions`; never `internal/cli`, `internal/render` or `cmd/hew` |
+| `migrate` | The source-neutral migration engine and the beads and local-to-GitHub workflows, including source mapping, checkpointed resume and the local tracker's seal. | `tracker`, `internal/beads`, `internal/local`, `internal/gh`, `internal/model`, `internal/conventions`; never `internal/cli`, `internal/render` or `cmd/hew` |
 
 The table is the destination every extraction issue shares. Until a package
 lands, its workflows still live in `internal/cli`; the row for each command in
@@ -830,8 +830,9 @@ command does.
 `tracker.Wrap`, `tracker.WrapAs` and `tracker.WrapWriter` are the module-internal
 seam `internal/cli` uses to delegate over a store it already opened. Their store
 parameter is an internal interface, so an external module cannot call them;
-`migrate.Wrap` is the same seam for the migration engine, taking the `Target` and
-`Checkpoint` the command already opened; `pr.Wrap` is the same seam for the
+`migrate.Wrap` is the same seam for the migration workflows, taking the `Target`
+the command already opened and a `Config` naming the checkpoint path and repo
+identity it resolved; `pr.Wrap` is the same seam for the
 pull-request workflow, taking the store, the `PullRequests` half and the branch
 state the command already has. `tracker.Open`, `tracker.Detect`,
 `tracker.Init`, `pr.Open` and `migrate.Open` are the only constructors in the
@@ -876,13 +877,17 @@ warnings in [Warnings and findings](#warnings-and-findings).
 | `migrate local` | `migrate.Open(ctx, migrate.Config)` then `(*migrate.Migrator).Local(ctx, migrate.LocalRequest) (migrate.Result, error)` | worktree discovery, default checkpoint path, dry-run summary |
 
 Two supporting capabilities have no command of their own but are part of the
-contract because a workflow above needs them: `(*tracker.Tracker).Comment`
-(migration posts the source's comments and close reasons) and
-`CreateRequest.Assignees` (it preserves source claims). The migration engine
-writes through a narrow `migrate.Target` interface — create, edit, comment,
+contract because a workflow above needs them: `migrate.Target`'s `Comment` and
+`Close` (a migration posts the source's comments and reproduces its close
+reason) and `CreateRequest.Assignees` (tracker creation preserves source claims).
+The migration workflows
+write through a narrow `migrate.Target` interface — create, edit, comment,
 close, dependency edges, read — which the CLI adapts over the store it already
-opened (a tracker-backed target lands with `migrate.Open`) and a test can fake,
-so the engine names no internal store. `apply`'s JSONL file format
+opened and a test can fake, so the engine names no internal store; an optional
+`migrate.Labeler` half bootstraps the labels a create references when the
+target's backend has labels to create. `migrate.Open` supplies the same target
+over a GitHub or local store it resolved itself, with `Config.Transport` for an
+isolated test. `apply`'s JSONL file format
 stays an adapter input deliberately: a library caller builds
 `[]tracker.PlanEntry` and is not tied to a file schema. `pr`'s and `migrate`'s
 GitHub operations go through the same transport seam as `tracker`'s, so a
@@ -905,7 +910,7 @@ imports `tracker`, `pr` or `migrate` and never an `internal` path.
 |---|---|---|
 | `tracker` | `Config`, `SnapshotOptions`, `ListFilter`, `SearchRequest`, `TriageRequest`, `Body`, `Sections`, `CreateRequest`, `CreateEpicRequest`, `EditRequest`, `ReopenOptions`, `StartOptions`, `ReleaseOptions`, `CloseOptions`, `BlockOptions`, `InitConfig`, `PlanEntry`, `PlanRef`, `Checkpoint`, `ApplyOptions` | `Target`, `Issue`, `Ref`, `Comment`, `TextFinding`, `Snapshot`, `IssueDetail`, `SearchResult`, `TriageResult`, `PrimerResult`, `ComposedBody`, `BodyCheck`, `CreateResult`, `EditResult`, `ReopenResult`, `StartResult`, `CloseResult`, `BlockResult`, `UnblockResult`, `InitResult`, `ApplyResult`, `PlannedEntry`, `AppliedEntry`, `CheckpointState`, `CheckpointEntry`, `MemoryCheckpoint`, `FileCheckpoint`, `RateLimit`, `Edge`, `Backend`, `State`, `EdgeKind`, `ReopenStage` |
 | `pr` | `Config`, `CreateRequest`, `AmendRequest`, `Sections`, `Body`, `BodyEdit` | `Client`, `CreateResult`, `AmendResult`, `ComposedBody`, `BodyCheck` |
-| `migrate` | `Config`, `BeadsRequest`, `LocalRequest`, `RunRequest`, `Item`, `Options`, `Target` | `Migrator`, `Result`, `PlannedItem` |
+| `migrate` | `Config`, `BeadsRequest`, `LocalRequest`, `RunRequest`, `Item`, `Options`, `Target`, `Labeler` | `Migrator`, `Result`, `PlanStep`, `PlannedItem`, `Label` |
 
 `IssueDetail` carries the issue, an epic's children, the next workable child
 (`Next`), source-attributed `TextFinding` values and snapshot warnings, so
@@ -963,7 +968,7 @@ dimension it cares about.
 | `tracker` | `TextFinding` | Source-attributed advisory character findings, flagged independently: zero-width, bidi controls, Unicode tags, confusable characters |
 | `tracker` | `Finding` + `FindingKind` | `FindingUnmarkedCode` (prose that looks like code and should be in a backtick span) |
 | `pr` | `Warning` + `WarningKind` | `WarnBranchPrefix`, `WarnUnclaimed`, `WarnUnrelatedSet`, `WarnNoSectionDefaults`, `WarnPrimaryTitle`, `WarnMissingTesting`, `WarnMissingRisk` |
-| `migrate` | `Warning` + `WarningKind` | `WarnEdgeDropped`, `WarnWriteFailed`, `WarnBodyEdited`, `WarnAlreadyClosed` |
+| `migrate` | `Warning` + `WarningKind` | `WarnEdgeDropped`, `WarnWriteFailed`, `WarnBodyEdited`, `WarnAlreadyClosed`, `WarnLabelRenamed`, `WarnUnknownStatus` |
 
 Truncation a caller can act on is a count, not prose: `SearchResult` and
 `TriageResult` carry `Total` and `Fetched`, and `Snapshot.Warnings()` names a
@@ -1005,7 +1010,7 @@ rather than inventing a second auth or not-found error:
 |---|---|
 | `tracker` | `PartialCreateError`, `PartialEditError`, `PartialReopenError` — the created issue or the applied field names ride in the error |
 | `pr` | `NoPullRequestsError`, `NoUpstreamError`, `IssueInferenceError`, `ExistingPullRequestError`, `NoOpenPullRequestError`, `AmbiguousPullRequestError` |
-| `migrate` | `CheckpointError`, `SourceChangedError`, `SealError`, `NotLocalError`, `DuplicateKeyError`, `ItemError` |
+| `migrate` | `CheckpointError`, `SourceChangedError`, `SealError`, `IncompleteError`, `NotLocalError`, `DuplicateKeyError`, `ItemError` |
 
 Cancellation keeps its identity through every wrapper: `errors.Is(err,
 context.Canceled)` and `errors.Is(err, context.DeadlineExceeded)` hold even when

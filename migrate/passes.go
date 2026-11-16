@@ -360,16 +360,46 @@ func (m *Migrator) mapping() map[string]int {
 	return out
 }
 
-// planned is the dry run's plan: the items the checkpoint does not already
-// account for, in source order, and the mapping it does.
-func (m *Migrator) planned(items []Item) ([]PlannedItem, map[string]int) {
-	already := m.mapping()
-	would := make([]PlannedItem, 0, len(items))
+// plan is the dry run's plan: every item in source order, marked with the
+// checkpoint's issue when it already has one, plus the planned creates and the
+// mapping on their own.
+func (m *Migrator) plan(items []Item) (steps []PlanStep, would []PlannedItem, already map[string]int) {
+	already = m.mapping()
+	steps = make([]PlanStep, 0, len(items))
+	would = make([]PlannedItem, 0, len(items))
 	for _, it := range items {
-		if _, ok := already[it.Key]; ok {
+		if n, ok := already[it.Key]; ok {
+			steps = append(steps, PlanStep{Key: it.Key, Migrated: n})
 			continue
 		}
+		step := plannedStep(it)
+		steps = append(steps, step)
 		would = append(would, PlannedItem{Key: it.Key, Title: it.Title})
 	}
-	return would, already
+	return steps, would, already
+}
+
+// plannedStep describes the issue one item would create, in the terms a plan
+// renders: the effective priority and type its labels carry, its edges by key,
+// and whether it is claimed or closed.
+func plannedStep(it Item) PlanStep {
+	view := model.Issue{Labels: it.Labels}
+	step := PlanStep{
+		Key: it.Key, Title: it.Title, Parent: it.Parent,
+		BlockedBy:  append([]string(nil), it.BlockedBy...),
+		InProgress: view.InProgress(), ThenClose: it.Closed,
+	}
+	// An untriaged item renders P?, the same placeholder the list commands use;
+	// the plan should not claim it has no priority at all.
+	priority, _ := view.Priority()
+	step.Priority = priority.String()
+	if typ, _ := view.Type(); typ != "" {
+		step.Type = typ
+	}
+	if it.Epic {
+		// Epic-ness is a marker rather than a type label: a plan names it so
+		// the reader can tell an epic from an untyped issue.
+		step.Type = "epic"
+	}
+	return step
 }

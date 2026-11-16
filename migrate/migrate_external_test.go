@@ -159,7 +159,7 @@ func publicItems() []migrate.Item {
 // An external consumer can build items and ask for a plan without a write.
 func TestExternalConsumerDryRun(t *testing.T) {
 	target := newMemoryTarget()
-	engine := migrate.Wrap(target, tracker.NewMemoryCheckpoint())
+	engine := migrate.Wrap(target, migrate.Config{Checkpoint: tracker.NewMemoryCheckpoint()})
 	res, err := engine.Run(context.Background(), migrate.RunRequest{
 		Items:   publicItems(),
 		Options: migrate.Options{DryRun: true},
@@ -179,7 +179,7 @@ func TestExternalConsumerDryRun(t *testing.T) {
 // a checkpoint it owns.
 func TestExternalConsumerRunsTheWorkflow(t *testing.T) {
 	target := newMemoryTarget()
-	engine := migrate.Wrap(target, tracker.NewMemoryCheckpoint())
+	engine := migrate.Wrap(target, migrate.Config{Checkpoint: tracker.NewMemoryCheckpoint()})
 	res, err := engine.Run(context.Background(), migrate.RunRequest{Items: publicItems()})
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +210,7 @@ func TestExternalConsumerRunsTheWorkflow(t *testing.T) {
 func TestExternalConsumerResumesAfterAFailedCreate(t *testing.T) {
 	target := newMemoryTarget()
 	checkpoint := tracker.NewMemoryCheckpoint()
-	engine := migrate.Wrap(target, checkpoint)
+	engine := migrate.Wrap(target, migrate.Config{Checkpoint: checkpoint})
 
 	// Fail the second create: the first item is created and checkpointed.
 	target.failCall("Create", 2, errors.New("injected create failure"))
@@ -266,7 +266,7 @@ func TestExternalConsumerResumesAfterEachLaterStage(t *testing.T) {
 	for stage, expected := range cases {
 		t.Run(stage, func(t *testing.T) {
 			target := newMemoryTarget()
-			engine := migrate.Wrap(target, tracker.NewMemoryCheckpoint())
+			engine := migrate.Wrap(target, migrate.Config{Checkpoint: tracker.NewMemoryCheckpoint()})
 			target.failOnce(stage, errors.New("injected "+stage+" failure"))
 
 			res, err := engine.Run(context.Background(), migrate.RunRequest{Items: publicItems()})
@@ -316,7 +316,7 @@ func TestExternalConsumerRefusesAForeignMapping(t *testing.T) {
 	if err := checkpoint.RecordCreated("child", 42); err != nil {
 		t.Fatal(err)
 	}
-	engine := migrate.Wrap(target, checkpoint)
+	engine := migrate.Wrap(target, migrate.Config{Checkpoint: checkpoint})
 	_, err := engine.Run(context.Background(), migrate.RunRequest{Items: publicItems()})
 	if err == nil || !strings.Contains(err.Error(), "does not carry the hew provenance marker") {
 		t.Fatalf("err = %v, want a provenance refusal", err)
@@ -335,7 +335,7 @@ func TestExternalConsumerRefusesAForeignMapping(t *testing.T) {
 // checkpoint satisfies it without any internal type.
 func TestExternalConsumerCheckpointIsPublic(t *testing.T) {
 	var checkpoint migrate.Checkpoint = tracker.NewMemoryCheckpoint()
-	engine := migrate.Wrap(newMemoryTarget(), checkpoint)
+	engine := migrate.Wrap(newMemoryTarget(), migrate.Config{Checkpoint: checkpoint})
 	if _, err := engine.Run(context.Background(), migrate.RunRequest{
 		Items:   []migrate.Item{{Key: "one", Title: "One"}},
 		Options: migrate.Options{DryRun: true},

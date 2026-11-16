@@ -21,6 +21,12 @@ const (
 	// WarnAlreadyClosed reports work an item asked for on an issue that is
 	// already closed.
 	WarnAlreadyClosed WarningKind = "already-closed"
+	// WarnLabelRenamed reports a source label whose name had to change to be
+	// usable: a comma would read as two areas, so it becomes a hyphen.
+	WarnLabelRenamed WarningKind = "label-renamed"
+	// WarnUnknownStatus reports a source record whose status the mapping does
+	// not know, which the run migrates as open.
+	WarnUnknownStatus WarningKind = "unknown-status"
 )
 
 // Warning is one advisory notice. The fields a kind uses are documented on that

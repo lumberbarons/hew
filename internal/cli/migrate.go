@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -9,12 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lumberbarons/hew/internal/beads"
-	"github.com/lumberbarons/hew/internal/conventions"
-	"github.com/lumberbarons/hew/internal/gh"
-	"github.com/lumberbarons/hew/internal/model"
 	"github.com/lumberbarons/hew/migrate"
-	"github.com/lumberbarons/hew/tracker"
 )
 
 // MigrateOpts configure the beads migration.
@@ -36,19 +30,10 @@ type MigrateOpts struct {
 	Throttle time.Duration
 }
 
-// beadTypeLabels maps bead issue types to convention type labels; epics
-// map to no type label (epic-ness is having sub-issues or the epic label,
-// which beadItems adds).
-var beadTypeLabels = map[string]string{
-	"bug":     "bug",
-	"feature": "enhancement",
-	"task":    "task",
-	"chore":   "task",
-	"epic":    "",
-}
-
-// MigrateBeads imports a beads snapshot as GitHub issues: create in
-// history order, wire parents and blockers, then close what was closed.
+// MigrateBeads imports a beads snapshot: create in history order, wire
+// parents and blockers, then close what was closed. The mapping, its
+// checkpoint and the write ordering belong to the public migrate package; the
+// snapshot path and its default checkpoint are this command's inputs.
 func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 	if opts.File == "" {
 		return usageErr("usage: hew migrate beads <issues.jsonl> (or --file FILE)")
@@ -60,112 +45,48 @@ func (a *App) MigrateBeads(ctx context.Context, opts MigrateOpts) error {
 	if err != nil {
 		return genericErr("cannot read beads snapshot: %v", err)
 	}
-	all, err := beads.Parse(bytes.NewReader(data))
-	if err != nil {
-		return genericErr("parsing %s: %v", opts.File, err)
-	}
 
-	var selected []beads.Bead
-	skippedClosed := 0
-	for _, b := range all {
-		switch b.Status {
-		case "open", "in_progress":
-			selected = append(selected, b)
-		case "closed":
-			if opts.IncludeClosed {
-				selected = append(selected, b)
-			} else {
-				skippedClosed++
-			}
-		default:
-			a.warnf("%s has unknown status %q; migrating as open", b.ID, b.Status)
-			selected = append(selected, b)
-		}
-	}
-	if len(selected) == 0 {
-		result := map[string]any{
-			"created": 0, "wired": 0, "closed": 0,
-			"skippedClosed": skippedClosed, "warnings": []string{},
-			"mapping": map[string]int{},
-		}
-		if opts.DryRun {
-			result = map[string]any{
-				"dryRun": true, "wouldMigrate": []migrationPlanEntry{},
-				"alreadyMigrated": map[string]int{}, "skippedClosed": skippedClosed,
-			}
-		}
-		return a.emitResult(result, func() {
-			a.printf("nothing to migrate (%d closed beads skipped; use --include-closed)\n", skippedClosed)
-		})
-	}
-
-	for _, b := range selected {
-		a.warnCommaLabels(b.Labels)
-	}
-
-	digest := fileDigest(data)
-	checkpoint, err := tracker.OpenFileCheckpoint(opts.StatePath, a.stateRepo(), digest, "snapshot")
-	if err != nil {
-		return err
-	}
-	// Validated against every bead in the snapshot, not just the selected
-	// ones: --include-closed changes the selection but not the file, so a
-	// mapping written by a run with the flag must not read as an unknown ID
-	// on a run without it.
-	validIDs := make(map[string]bool, len(all))
-	for _, b := range all {
-		validIDs[b.ID] = true
-	}
-
-	engine := migrate.Wrap(migrationTarget{a.Client}, checkpoint)
-	req := migrate.RunRequest{
-		Items: beadItems(selected),
-		Options: migrate.Options{
-			Kind:       conventions.ProvenanceMigrate,
-			ItemNoun:   "bead",
-			SourceNoun: "snapshot",
-			KeyNoun:    "bead ID",
-			Throttle:   opts.Throttle,
-			KnownKeys:  validIDs,
-			Progress:   a.progressf,
-			// Labels are bootstrapped only after the engine's checkpoint and
-			// provenance checks pass, so a refused state file costs no write
-			// (#81). A dry run writes nothing, so the hook is not called.
-			BeforeCreate: func(ctx context.Context) error {
-				return a.ensureLabels(ctx, beadAreaLabels(selected))
-			},
-		},
-	}
-
-	if opts.DryRun {
-		req.Options.DryRun = true
-		res, err := engine.Run(ctx, req)
-		if err != nil {
-			return err
-		}
-		return a.migrationPlan(selected, res.Mapping, skippedClosed)
-	}
-
-	res, err := engine.Run(ctx, req)
+	m := migrate.Wrap(a.migrationTarget(), migrate.Config{
+		Repo:           a.Repo.String(),
+		RepoKey:        a.stateRepo(),
+		CheckpointPath: opts.StatePath,
+		Throttle:       opts.Throttle,
+		DryRun:         opts.DryRun,
+		Progress:       a.progressf,
+	})
+	res, err := m.Beads(ctx, migrate.BeadsRequest{
+		Snapshot: data, Source: opts.File, IncludeClosed: opts.IncludeClosed,
+	})
 	a.printWarnings(res.Warnings)
 	if err != nil {
 		return err
 	}
-
+	if opts.DryRun {
+		return a.migrationPlan(res)
+	}
+	if res.Selected == 0 {
+		return a.emitResult(map[string]any{
+			"created": 0, "wired": 0, "closed": 0,
+			"skippedClosed": res.Skipped, "warnings": warningTexts(res.Warnings),
+			"mapping": map[string]int{},
+		}, func() {
+			a.printf("nothing to migrate (%d closed beads skipped; use --include-closed)\n", res.Skipped)
+		})
+	}
 	return a.emitResult(map[string]any{
 		"created": res.Created, "wired": res.Wired, "closed": res.Closed,
-		"skippedClosed": skippedClosed, "warnings": warningTexts(res.Warnings),
+		"skippedClosed": res.Skipped, "warnings": warningTexts(res.Warnings),
 		"mapping": res.Mapping,
 	}, func() {
-		a.printf("migrated %d beads: %d created, %d dependencies wired, %d closed", len(selected), res.Created, res.Wired, res.Closed)
-		if skippedClosed > 0 {
-			a.printf(" (%d closed beads skipped; use --include-closed)", skippedClosed)
+		a.printf("migrated %d beads: %d created, %d dependencies wired, %d closed", res.Selected, res.Created, res.Wired, res.Closed)
+		if res.Skipped > 0 {
+			a.printf(" (%d closed beads skipped; use --include-closed)", res.Skipped)
 		}
 		a.printf("\nmapping saved to %s\n", opts.StatePath)
 	})
 }
 
-// migrationPlanEntry is one bead a dry run would create, in the shape both
+// migrationPlanEntry is one issue a dry run would create, in the shape both
 // the text line and the --json result are built from.
 type migrationPlanEntry struct {
 	ID         string   `json:"id"`
@@ -178,56 +99,71 @@ type migrationPlanEntry struct {
 	ThenClose  bool     `json:"thenClose"`
 }
 
-// migrationPlan reports what a real run would do.
-func (a *App) migrationPlan(selected []beads.Bead, state map[string]int, skippedClosed int) error {
-	// One step per selected bead, in snapshot order: either already migrated
-	// or a planned create. Text walks the steps; JSON splits them.
-	type step struct {
-		id       string
-		migrated int
-		planned  bool
-		item     migrationPlanEntry
+// planEntry describes one planned create in the CLI's rendering shape.
+func planEntry(step migrate.PlanStep) migrationPlanEntry {
+	entry := migrationPlanEntry{
+		ID: step.Key, Priority: step.Priority, Title: step.Title,
+		BlockedBy:  append([]string{}, step.BlockedBy...),
+		InProgress: step.InProgress, ThenClose: step.ThenClose,
 	}
-	steps := make([]step, 0, len(selected))
-	wouldMigrate := []migrationPlanEntry{}
-	already := map[string]int{}
-	for _, b := range selected {
-		if n, ok := state[b.ID]; ok {
-			already[b.ID] = n
-			steps = append(steps, step{id: b.ID, migrated: n})
+	if step.Type != "" {
+		t := step.Type
+		entry.Type = &t
+	}
+	if step.Parent != "" {
+		p := step.Parent
+		entry.Parent = &p
+	}
+	return entry
+}
+
+// planStep is one compact line of a rendered plan: either a step the
+// checkpoint already accounts for or a planned create.
+type planStep struct {
+	key      string
+	migrated int
+	entry    migrationPlanEntry
+}
+
+// planSteps splits a dry run's plan into its ordered steps and the mapping the
+// checkpoint already accounts for.
+func planSteps(plan []migrate.PlanStep) (wouldMigrate []migrationPlanEntry, already map[string]int, steps []planStep) {
+	wouldMigrate = []migrationPlanEntry{}
+	already = map[string]int{}
+	for _, step := range plan {
+		if step.Migrated != 0 {
+			already[step.Key] = step.Migrated
+			steps = append(steps, planStep{key: step.Key, migrated: step.Migrated})
 			continue
 		}
-		item := migrationPlanEntry{
-			ID: b.ID, Priority: model.Priority(clampPriority(b.Priority)).String(),
-			Title: b.Title, BlockedBy: append([]string{}, b.BlockedBy()...),
-			InProgress: b.Status == "in_progress", ThenClose: b.Closed(),
-		}
-		if t := beadTypeLabels[b.IssueType]; t != "" {
-			item.Type = &t
-		} else if b.IssueType == "epic" {
-			epic := "epic"
-			item.Type = &epic
-		}
-		if p := b.Parent(); p != "" {
-			item.Parent = &p
-		}
-		wouldMigrate = append(wouldMigrate, item)
-		steps = append(steps, step{id: b.ID, planned: true, item: item})
+		entry := planEntry(step)
+		wouldMigrate = append(wouldMigrate, entry)
+		steps = append(steps, planStep{key: step.Key, entry: entry})
 	}
+	return wouldMigrate, already, steps
+}
+
+// migrationPlan reports what a real beads run would do.
+func (a *App) migrationPlan(res migrate.Result) error {
+	wouldMigrate, already, steps := planSteps(res.Plan)
 	return a.emitResult(map[string]any{
 		"dryRun": true, "wouldMigrate": wouldMigrate, "alreadyMigrated": already,
-		"skippedClosed": skippedClosed,
+		"skippedClosed": res.Skipped,
 	}, func() {
+		if len(steps) == 0 {
+			a.printf("nothing to migrate (%d closed beads skipped; use --include-closed)\n", res.Skipped)
+			return
+		}
 		for _, st := range steps {
-			if !st.planned {
-				a.printf("already migrated: %s → #%d\n", st.id, st.migrated)
+			if st.migrated != 0 {
+				a.printf("already migrated: %s → #%d\n", st.key, st.migrated)
 				continue
 			}
-			a.printf("%s\n", planLine(st.item))
+			a.printf("%s\n", planLine(st.entry))
 		}
-		a.printf("dry run: %d beads would be migrated", len(selected))
-		if skippedClosed > 0 {
-			a.printf(" (%d closed skipped; use --include-closed)", skippedClosed)
+		a.printf("dry run: %d beads would be migrated", len(res.Plan))
+		if res.Skipped > 0 {
+			a.printf(" (%d closed skipped; use --include-closed)", res.Skipped)
 		}
 		a.printf("\n")
 	})
@@ -257,127 +193,4 @@ func planLine(item migrationPlanEntry) string {
 		line += "  [" + strings.Join(marks, "; ") + "]"
 	}
 	return line
-}
-
-// beadAreaLabels collects every distinct area label the beads carry, for
-// the ensureLabels bootstrap.
-func beadAreaLabels(selected []beads.Bead) []gh.Label {
-	var out []gh.Label
-	seen := map[string]bool{}
-	for _, b := range selected {
-		for _, area := range areaLabels(b.Labels) {
-			if !seen[area] {
-				seen[area] = true
-				out = append(out, gh.Label{Name: area, Color: "ededed", Description: "migrated from beads"})
-			}
-		}
-	}
-	return out
-}
-
-// beadItems maps beads onto the engine's item shape: the convention labels
-// derived from priority, type and status, the epic title prefix, the viewer as
-// assignee for in-progress beads, and the close reason as a comment on closed
-// ones. The provenance marker is the engine's to add.
-func beadItems(selected []beads.Bead) []migrate.Item {
-	items := make([]migrate.Item, 0, len(selected))
-	for _, b := range selected {
-		labels := []string{model.Priority(clampPriority(b.Priority)).String()}
-		if t := beadTypeLabels[b.IssueType]; t != "" {
-			labels = append(labels, t)
-		}
-		if b.IssueType == "epic" {
-			labels = append(labels, model.EpicLabel)
-		}
-		var assignees []string
-		if b.Status == "in_progress" {
-			labels = append(labels, model.InProgressLabel)
-			assignees = []string{migrate.AssigneeViewer}
-		}
-		labels = append(labels, areaLabels(b.Labels)...)
-
-		title := b.Title
-		if b.IssueType == "epic" && !strings.HasPrefix(title, conventions.EpicTitlePrefix) {
-			title = conventions.EpicTitlePrefix + title
-		}
-
-		item := migrate.Item{
-			Key: b.ID, Title: title, Body: beadBody(b), Labels: labels,
-			Assignees: assignees, Parent: b.Parent(), BlockedBy: b.BlockedBy(),
-		}
-		if b.Closed() {
-			item.Closed = true
-			if b.CloseReason != "" {
-				item.Comments = []string{b.CloseReason}
-			}
-		}
-		items = append(items, item)
-	}
-	return items
-}
-
-// beadBody assembles the issue body from the bead's prose fields, with a
-// provenance footer carrying what GitHub can't store natively.
-func beadBody(b beads.Bead) string {
-	var parts []string
-	if s := strings.TrimSpace(b.Description); s != "" {
-		parts = append(parts, s)
-	}
-	if s := strings.TrimSpace(b.Design); s != "" {
-		parts = append(parts, "### Design\n\n"+s)
-	}
-	if s := strings.TrimSpace(b.AcceptanceCriteria); s != "" {
-		parts = append(parts, "### Done when\n\n"+s)
-	}
-	if s := strings.TrimSpace(b.Notes); s != "" {
-		parts = append(parts, "### Notes\n\n"+s)
-	}
-	footer := fmt.Sprintf("Migrated from beads `%s` (created %s", b.ID, b.CreatedAt.UTC().Format("2006-01-02"))
-	if b.ClosedAt != nil {
-		footer += ", closed " + b.ClosedAt.UTC().Format("2006-01-02")
-	}
-	footer += ")"
-	parts = append(parts, "---\n"+footer)
-	return strings.Join(parts, "\n\n")
-}
-
-// areaLabels filters bead labels that would collide with the convention
-// labels (priority, type, in-progress) — those are derived, not copied. A comma
-// in a name becomes a hyphen (see migratedLabel).
-func areaLabels(labels []string) []string {
-	var out []string
-	for _, l := range labels {
-		if model.IsConventionLabel(l) {
-			continue
-		}
-		out = append(out, migratedLabel(l))
-	}
-	return out
-}
-
-// migratedLabel is the name a source label takes on GitHub. The write path
-// refuses a comma in an area because areas are split and rendered on commas,
-// so an imported "x,y" would read as the two areas "x" and "y"; it becomes
-// "x-y" instead of being dropped.
-func migratedLabel(name string) string { return strings.ReplaceAll(name, ",", "-") }
-
-// warnCommaLabels names each source label that migratedLabel renames, once.
-func (a *App) warnCommaLabels(labels []string) {
-	seen := map[string]bool{}
-	for _, l := range labels {
-		if renamed := migratedLabel(l); renamed != l && !seen[l] {
-			seen[l] = true
-			a.warnf("label %q contains a comma; migrating as %q", l, renamed)
-		}
-	}
-}
-
-func clampPriority(p int) int {
-	if p < 0 {
-		return 0
-	}
-	if p > 4 {
-		return 4
-	}
-	return p
 }

@@ -1,48 +1,18 @@
 package cli
 
 // Shared machinery for the batch writers (migrate, apply): the checkpoint
-// schema and file I/O tracker owns, label bootstrapping so batch creates never
-// reference a missing label, and the adapter that lets the CLI's store drive
-// the public migration engine.
+// schema and file I/O tracker owns, the state-file identity, and the adapter
+// that lets the CLI's store drive the public migration workflows. The workflows
+// bootstrap their own labels through the adapter's optional migrate.Labeler
+// half.
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
-	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/migrate"
 	"github.com/lumberbarons/hew/tracker"
 )
-
-// ensureLabels creates any missing convention labels plus the given extras.
-func (a *App) ensureLabels(ctx context.Context, extras []gh.Label) error {
-	existing, err := a.Client.ListLabels(ctx)
-	if err != nil {
-		return err
-	}
-	have := map[string]bool{}
-	for _, l := range existing {
-		have[strings.ToLower(l.Name)] = true
-	}
-	var want []gh.Label
-	for _, l := range conventions.Labels {
-		want = append(want, gh.Label{Name: l.Name, Color: l.Color, Description: l.Description})
-	}
-	want = append(want, extras...)
-	for _, l := range want {
-		// GitHub label names are case-insensitive, so Area:CLI is area:cli.
-		if have[strings.ToLower(l.Name)] {
-			continue
-		}
-		if err := a.Client.CreateLabel(ctx, l); err != nil {
-			return fmt.Errorf("creating label %q: %w", l.Name, err)
-		}
-		have[strings.ToLower(l.Name)] = true
-	}
-	return nil
-}
 
 // batchStateVersion and batchState are the CLI's spelling of the checkpoint
 // schema tracker owns. ApplyPlan lives in tracker and takes a tracker.Checkpoint;
@@ -126,6 +96,24 @@ func (t migrationTarget) AddAssignee(ctx context.Context, number int, login stri
 
 func (t migrationTarget) Viewer(ctx context.Context) (string, error) {
 	return t.client.Viewer(ctx)
+}
+
+// ListLabels and CreateLabel are the optional migrate.Labeler half: the store
+// can bootstrap the labels a migration's creates reference.
+func (t migrationTarget) ListLabels(ctx context.Context) ([]migrate.Label, error) {
+	labels, err := t.client.ListLabels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]migrate.Label, len(labels))
+	for i, l := range labels {
+		out[i] = migrate.Label{Name: l.Name, Color: l.Color, Description: l.Description}
+	}
+	return out, nil
+}
+
+func (t migrationTarget) CreateLabel(ctx context.Context, label migrate.Label) error {
+	return t.client.CreateLabel(ctx, gh.Label{Name: label.Name, Color: label.Color, Description: label.Description})
 }
 
 // closeReason maps the engine's backend-neutral reason onto the store's.
