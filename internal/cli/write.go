@@ -123,20 +123,11 @@ func (a *App) Create(ctx context.Context, opts CreateOpts) error {
 
 // validateBodySource enforces the body paths' exclusivity: section flags
 // compose the template, --body-file supplies long-form text, --edit opens
-// the editor — one at a time. Within the section flags, --problem/--goal
-// and --fix/--approach are wording pairs: pick the one that fits; word
-// choice is never checked against --type.
+// the editor — one at a time. The section rules themselves live in tracker;
+// this renders their rejections in flag terms.
 func validateBodySource(s conventions.Sections, bodyFile string, edit bool) error {
-	if s.Problem != "" && s.Goal != "" {
-		return usageErr("--problem and --goal are mutually exclusive; pick one wording")
-	}
-	if s.Fix != "" && s.Approach != "" {
-		return usageErr("--fix and --approach are mutually exclusive; pick one wording")
-	}
-	for _, item := range s.DoneWhen {
-		if strings.TrimSpace(item) == "" {
-			return usageErr("--done-when items cannot be empty")
-		}
+	if err := validateSections(s); err != nil {
+		return err
 	}
 	if bodyFile != "" && edit {
 		return usageErr("--body-file and --edit are mutually exclusive")
@@ -145,6 +136,29 @@ func validateBodySource(s conventions.Sections, bodyFile string, edit bool) erro
 		return usageErr("section flags (--where/--problem/--goal/--fix/--approach/--done-when) and --body-file/--edit are mutually exclusive")
 	}
 	return nil
+}
+
+// validateSections runs the library's section rules and spells the rejection
+// with the flags that carried the input: the rule is shared, the flag spelling
+// belongs to the command surface.
+func validateSections(s conventions.Sections) error {
+	err := tracker.ValidateSections(tracker.Sections(s))
+	if err == nil {
+		return nil
+	}
+	var invalid *tracker.InvalidInputError
+	if !errors.As(err, &invalid) {
+		return err
+	}
+	switch invalid.Field {
+	case "problem":
+		return usageErr("--problem and --goal are mutually exclusive; pick one wording")
+	case "fix":
+		return usageErr("--fix and --approach are mutually exclusive; pick one wording")
+	case "done-when":
+		return usageErr("--done-when items cannot be empty")
+	}
+	return usageErr("%s", invalid.Reason)
 }
 
 // bodySource is the body input shared by create and epic create.
@@ -157,61 +171,83 @@ type bodySource struct {
 }
 
 func (a *App) composeBody(src bodySource) (string, error) {
-	body, err := a.renderBody(src)
+	composed, err := a.renderBody(src)
 	if err != nil {
 		return "", err
 	}
-	a.warnUnmarkedCode(body, "hew set <n> --body-file")
-	return body, nil
+	a.warnFindings(composed.Findings, "hew set <n> --body-file")
+	return composed.Body, nil
 }
 
 // renderBody is composeBody without the markup warning, so the local draft
 // preflight shares the exact composition create publishes and supplies its
-// own remedy.
-func (a *App) renderBody(src bodySource) (string, error) {
-	body := ""
+// own remedy. Reading the chosen file or launching the editor is the
+// adapter's; composing and checking the bytes is the library's.
+func (a *App) renderBody(src bodySource) (tracker.ComposedBody, error) {
+	body := tracker.Body{
+		Sections:       tracker.Sections(src.sections),
+		DiscoveredFrom: src.discoveredFrom,
+	}
 	switch {
-	case !src.sections.IsZero():
-		body = src.sections.Compose()
-	case src.bodyFile != "":
+	case src.sections.IsZero() && src.bodyFile != "":
 		b, err := os.ReadFile(src.bodyFile)
 		if err != nil {
-			return "", genericErr("cannot read --body-file: %v", err)
+			return tracker.ComposedBody{}, genericErr("cannot read --body-file: %v", err)
 		}
-		body = string(b)
-	case src.edit:
+		body.Text = string(b)
+	case src.sections.IsZero() && src.edit:
 		if a.Edit == nil {
-			return "", genericErr("--edit is not available here")
+			return tracker.ComposedBody{}, genericErr("--edit is not available here")
 		}
 		edited, err := a.Edit(conventions.TemplateSkeleton(src.issueType))
 		if err != nil {
-			return "", genericErr("editor failed: %v", err)
+			return tracker.ComposedBody{}, genericErr("editor failed: %v", err)
 		}
-		body = conventions.StripEmptySections(edited)
+		body.Text = conventions.StripEmptySections(edited)
 	}
-	if src.discoveredFrom > 0 {
-		link := conventions.DiscoveredFrom(src.discoveredFrom)
-		if body == "" {
-			body = link
-		} else {
-			body = strings.TrimRight(body, "\n") + "\n\n" + link
-		}
+	composed, err := tracker.ComposeBody(body)
+	if err != nil {
+		return tracker.ComposedBody{}, usageErr("%s", bodyErrorReason(err))
 	}
-	return body, nil
+	return composed, nil
 }
 
-// warnUnmarkedCode reports code-shaped text the author left as prose. The
-// convention is stated in help text, but help text is read by someone who
-// goes looking for it and the agent composing a body generally does not —
-// so the tool says it at the moment the body is written, and names the
-// remedy rather than only the rule.
-func (a *App) warnUnmarkedCode(body, remedy string) {
-	tokens := conventions.UnmarkedCodeText(body)
-	if len(tokens) == 0 {
-		return
+// bodyErrorReason renders a composition refusal, which is always the
+// library's typed invalid input: a conflict validateBodySource would have
+// caught is the backstop, not a separate failure mode.
+func bodyErrorReason(err error) string {
+	var invalid *tracker.InvalidInputError
+	if errors.As(err, &invalid) {
+		return invalid.Reason
 	}
-	a.warnf("not in code spans: %s — wrap them (and any command around them) in backticks: %s",
-		conventions.FormatUnmarkedCodeText(tokens), remedy)
+	return err.Error()
+}
+
+// warnFindings reports advisory body findings in the command's words. The
+// library keeps the fact (an unmarked code token); the sentence and remedy are
+// the CLI's. The convention is stated in help text, but help text is read by
+// someone who goes looking and the agent composing a body generally does not,
+// so the tool says it at the moment the body is written.
+func (a *App) warnFindings(findings []tracker.Finding, remedy string) {
+	for _, finding := range findings {
+		if finding.Kind != tracker.FindingUnmarkedCode {
+			continue
+		}
+		a.warnf("not in code spans: %s — wrap them (and any command around them) in backticks: %s",
+			conventions.FormatUnmarkedCodeText(finding.Tokens), remedy)
+	}
+}
+
+// unmarkedCode is the --json view of the findings: the code-shaped tokens in
+// order, and an empty array rather than null when there are none.
+func unmarkedCode(findings []tracker.Finding) []string {
+	tokens := []string{}
+	for _, finding := range findings {
+		if finding.Kind == tracker.FindingUnmarkedCode {
+			tokens = append(tokens, finding.Tokens...)
+		}
+	}
+	return tokens
 }
 
 // formatStateReason renders GitHub's close-reason enum (COMPLETED,

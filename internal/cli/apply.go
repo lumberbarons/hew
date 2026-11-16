@@ -195,9 +195,14 @@ func applyTitle(e plan.Entry) string { return tracker.PlanTitle(e) }
 
 // warnPlanCodeText reports code-shaped text left as prose, per entry, so a
 // plan naming twenty files says which entry to fix rather than which token.
+// The check is the library's; the entry prefix is the plan file's.
 func (a *App) warnPlanCodeText(entries []plan.Entry) {
 	for _, e := range entries {
-		tokens := conventions.UnmarkedCodeText(tracker.PlanBody(e))
+		check, err := tracker.CheckBody(tracker.PlanBody(e))
+		if err != nil {
+			continue
+		}
+		tokens := unmarkedCode(check.Findings)
 		if len(tokens) == 0 {
 			continue
 		}

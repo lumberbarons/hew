@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/model"
 	"github.com/lumberbarons/hew/internal/render"
+	"github.com/lumberbarons/hew/tracker"
 )
 
 // PROpts are the pr command's inputs. Every section is optional: the point
@@ -441,7 +443,12 @@ func prTrailers(linked []model.Issue) conventions.PRTrailers {
 }
 
 func (a *App) finishPRSections(sections conventions.PRSections, linked []model.Issue) (string, error) {
-	return a.finishPRBody(sections.Compose(conventions.PRTrailers{}), linked, "PR body")
+	return a.composePRBodyWith(tracker.Body{
+		PRSections: tracker.PRSections{
+			What: sections.What, Why: sections.Why, Testing: sections.Testing, Risk: sections.Risk,
+		},
+		Trailers: trackerPRTrailers(prTrailers(linked)),
+	}, "PR body")
 }
 
 // warnPRSections reports the body contract at composition time. Help is read
@@ -471,41 +478,37 @@ func (a *App) prBodyFile(path string, linked []model.Issue) (string, error) {
 // Both paths enforce that the body closes exactly the declared set, no more
 // and no less, and append only missing trailers, so a section flag cannot
 // bypass the body-file guard either. A body with no closing reference at all
-// is given the whole set.
+// is given the whole set. The rule lives in tracker's composition, shared with
+// library callers; the source named in the refusal is the command input that
+// supplied the text.
 func (a *App) finishPRBody(raw string, linked []model.Issue, source string) (string, error) {
-	trailers := prTrailers(linked)
-	body := strings.TrimRight(raw, "\n")
-	if refs := conventions.FixesReferences(body); len(refs) > 0 {
-		if !sameClosingSet(refs, trailers.Fixes) {
-			return "", closingSetErr(source, refs, trailers.Fixes)
-		}
-		trailers.Fixes = nil
-	}
-	trailers.Epics = slices.DeleteFunc(trailers.Epics, func(epic int) bool {
-		return strings.Contains(body, conventions.PartOfLine(epic))
-	})
-	if missing := trailers.Render(); missing != "" {
-		if body != "" {
-			body += "\n\n"
-		}
-		body += missing
-	}
-	a.warnUnmarkedCode(body, "hew pr --amend")
-	return body, nil
+	return a.composePRBodyWith(tracker.Body{
+		Text:     raw,
+		Trailers: trackerPRTrailers(prTrailers(linked)),
+	}, source)
 }
 
-// sameClosingSet compares as sets but refuses a repeated reference: the
-// body that ships should read as exactly the declared issues.
-func sameClosingSet(refs, want []int) bool {
-	return len(refs) == len(want) && slices.Equal(slices.Sorted(slices.Values(refs)), slices.Sorted(slices.Values(want)))
+// composePRBodyWith composes a PR body and reports its advisory findings. A
+// typed refusal becomes the command's usage error, with the input source named
+// when the closing set is what was wrong.
+func (a *App) composePRBodyWith(body tracker.Body, source string) (string, error) {
+	composed, err := tracker.ComposeBody(body)
+	if err != nil {
+		var invalid *tracker.InvalidInputError
+		if !errors.As(err, &invalid) {
+			return "", err
+		}
+		if invalid.Field == "trailers" {
+			return "", usageErr("%s %s", source, invalid.Reason)
+		}
+		return "", usageErr("%s", invalid.Reason)
+	}
+	a.warnFindings(composed.Findings, "hew pr --amend")
+	return composed.Body, nil
 }
 
-func closingSetErr(source string, refs, want []int) error {
-	if len(want) == 1 && len(refs) > 1 {
-		if distinct := slices.Compact(slices.Sorted(slices.Values(refs))); len(distinct) == 1 {
-			return usageErr("%s closes #%d more than once; write the closing reference once", source, distinct[0])
-		}
-		return usageErr("%s closes %d issues; a PR closes exactly one (declare a set with repeated --for)", source, len(refs))
-	}
-	return usageErr("%s closes %s but this PR is for %s", source, formatRefs(refs), formatRefs(want))
+// trackerPRTrailers is the composition input's view of the trailer block the
+// command resolved from the linked issues.
+func trackerPRTrailers(t conventions.PRTrailers) tracker.PRTrailers {
+	return tracker.PRTrailers{Fixes: t.Fixes, Epics: t.Epics}
 }
