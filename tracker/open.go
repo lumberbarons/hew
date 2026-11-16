@@ -40,10 +40,11 @@ type Config struct {
 	// Notice receives lock-wait and migration notices. Nil discards them; the
 	// tracker never writes to stderr.
 	Notice io.Writer
-	// Transport overrides the HTTP transport the GitHub client sends through.
-	// Nil uses go-gh's default — the process's network and gh's stored
-	// credentials. A caller's tests pass an in-memory transport to run without
-	// either; a local tracker ignores it.
+	// Transport carries every GitHub API request, overriding the HTTP transport
+	// the GitHub client sends through. Nil uses go-gh's default — the process's
+	// network and gh's stored credentials; an in-process consumer's tests supply
+	// an httptest server's transport to answer GitHub without either. A local
+	// tracker ignores it.
 	Transport http.RoundTripper
 }
 
@@ -54,6 +55,7 @@ type Tracker struct {
 	backend Backend
 	store   gh.IssueStore
 	actor   string
+	repo    gh.Repo
 }
 
 // Open opens the tracker for cfg.Worktree. The backend is detected once, from
@@ -146,7 +148,7 @@ func openGitHub(ctx context.Context, cfg Config, target Target) (*Tracker, error
 	if err != nil {
 		return nil, asAuthError(err)
 	}
-	return &Tracker{backend: BackendGitHub, store: store, actor: login}, nil
+	return &Tracker{backend: BackendGitHub, store: store, actor: login, repo: repo}, nil
 }
 
 // newGitHub builds the GitHub client. Tests replace it to avoid credentials
@@ -236,6 +238,16 @@ func asAuthError(err error) error {
 
 // Backend reports the backend Open selected.
 func (t *Tracker) Backend() Backend { return t.backend }
+
+// Repo reports the GitHub repository this tracker works against, as
+// owner/name. It is empty on a local tracker, and on a Tracker wrapped around
+// a store whose repository the caller did not name.
+func (t *Tracker) Repo() string {
+	if t.repo.Owner == "" || t.repo.Name == "" {
+		return ""
+	}
+	return t.repo.String()
+}
 
 // Identity reports the claimant identity claims are made as: the actor given
 // to Open or As on a local tracker, the authenticated login on GitHub.

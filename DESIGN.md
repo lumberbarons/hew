@@ -826,6 +826,8 @@ command does.
 `tracker.Wrap`, `tracker.WrapAs` and `tracker.WrapWriter` are the module-internal
 seam `internal/cli` uses to delegate over a store it already opened. Their store
 parameter is an internal interface, so an external module cannot call them;
+`pr.Wrap` is the same seam for the pull-request workflow, taking the store, the
+`PullRequests` half and the branch state the command already has.
 `tracker.Open`, `tracker.Detect`, `tracker.Init`, `pr.Open` and `migrate.Open`
 are the only constructors in the external contract. The exported-surface check
 records the seams like every other exported symbol, but they are not consumer
@@ -954,7 +956,7 @@ dimension it cares about.
 | `tracker` | `Warning` + `WarningKind` | `WarnMultiPriority`, `WarnMultiType`, `WarnInProgressEpic` (primer contradictions), `WarnDependencyCycle`, `WarnBlockersCapped`, `WarnSubIssuesCapped` |
 | `tracker` | `TextFinding` | Source-attributed advisory character findings, flagged independently: zero-width, bidi controls, Unicode tags, confusable characters |
 | `tracker` | `Finding` + `FindingKind` | `FindingUnmarkedCode` (prose that looks like code and should be in a backtick span) |
-| `pr` | `Warning` + `WarningKind` | `WarnBranchPrefix`, `WarnUnclaimed`, `WarnUnrelatedSet`, `WarnPrimaryTitle`, `WarnMissingTesting`, `WarnMissingRisk` |
+| `pr` | `Warning` + `WarningKind` | `WarnBranchPrefix`, `WarnUnclaimed`, `WarnUnrelatedSet`, `WarnNoSectionDefaults`, `WarnPrimaryTitle`, `WarnMissingTesting`, `WarnMissingRisk` |
 | `migrate` | `Warning` + `WarningKind` | `WarnEdgeDropped`, `WarnWriteFailed`, `WarnBodyEdited`, `WarnAlreadyClosed` |
 
 Truncation a caller can act on is a count, not prose: `SearchResult` and
@@ -1096,11 +1098,11 @@ checkpoint and a run, so callers run one migration at a time per migrator.
   own; the CLI's `--repo` selects a repository, never a credential. A missing or
   expired credential is `AuthError`, which the CLI maps to exit 4. The local
   backend needs no `gh`, credentials or network. `Config.Transport`
-  (`http.RoundTripper`, not yet on `tracker.Config`) is the test seam: a consumer's tests serve GitHub
-  responses from an `httptest` transport with no network and no `gh` process,
-  and the CLI leaves it nil. github.com is the only host in the contract; an
-  enterprise host would be a new field and a new guarantee, not a hidden
-  fallback.
+  (`http.RoundTripper`, on `tracker.Config` and `pr.Config`) is the test seam:
+  a consumer's tests serve GitHub responses from an `httptest` transport with no
+  network and no `gh` process, and the CLI leaves it nil. github.com is the only
+  host in the contract; an enterprise host would be a new field and a new
+  guarantee, not a hidden fallback.
 
 ### The CLI adapter boundary
 

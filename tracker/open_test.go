@@ -577,6 +577,42 @@ func TestOpenGitHubUsesTheExplicitRepoAndLogin(t *testing.T) {
 	}
 }
 
+// A tracker names the GitHub repository it resolved. A workflow that has to
+// build a second handle — the public PR client — reads the target here rather
+// than resolving the same remote by a second rule.
+func TestOpenGitHubReportsTheResolvedRepo(t *testing.T) {
+	replaceGitHub(t, func(gh.Repo, http.RoundTripper) (gh.IssueStore, error) {
+		return &fakeStore{login: "octocat"}, nil
+	})
+	tr, err := Open(context.Background(), Config{Worktree: t.TempDir(), Repo: "owner/name"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := tr.Repo(); got != "owner/name" {
+		t.Errorf("Repo() = %q, want owner/name", got)
+	}
+}
+
+// The configured transport reaches the client builder unchanged: it is the
+// seam an in-process consumer's tests answer GitHub through.
+func TestOpenGitHubPassesTheTransportToTheClient(t *testing.T) {
+	sentinel := &http.Transport{}
+	var got http.RoundTripper
+	replaceGitHub(t, func(_ gh.Repo, transport http.RoundTripper) (gh.IssueStore, error) {
+		got = transport
+		return &fakeStore{login: "octocat"}, nil
+	})
+	_, err := Open(context.Background(), Config{
+		Worktree: t.TempDir(), Repo: "owner/name", Transport: sentinel,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != sentinel {
+		t.Errorf("transport = %v, want the configured one", got)
+	}
+}
+
 func TestOpenGitHubDetectsTheRepoFromTheOriginRemote(t *testing.T) {
 	main, _ := repoWithWorktrees(t)
 	gitRun(t, main, "remote", "add", "origin", "git@github.com:owner/name.git")

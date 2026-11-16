@@ -177,6 +177,39 @@ func TestCurrentReportsUnreadableRepo(t *testing.T) {
 	}
 }
 
+// CurrentFor answers from the checkout it was given, never from the process's
+// working directory: the public PR workflow takes its worktree as an argument
+// and must not read whichever directory the caller happens to be in.
+func TestCurrentForReadsTheNamedCheckout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	git := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Skipf("git %v failed: %v: %s", args, err, out)
+		}
+	}
+	named := t.TempDir()
+	git(named, "init", "--initial-branch=feat/named")
+	git(named, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "--allow-empty", "-m", "seed")
+
+	elsewhere := t.TempDir()
+	git(elsewhere, "init", "--initial-branch=feat/elsewhere")
+	git(elsewhere, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "--allow-empty", "-m", "seed")
+	t.Chdir(elsewhere)
+
+	got, err := CurrentFor(named)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Branch != "feat/named" {
+		t.Errorf("Branch = %q, want the named checkout's feat/named", got.Branch)
+	}
+}
+
 // TestCurrentAgainstRealGit drives the exported Current — the real exec
 // wiring — against a throwaway repository, so a change to the argument
 // strings that the fake runner would happily accept still fails here.
