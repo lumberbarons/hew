@@ -22,6 +22,8 @@ cd evals && go test ./...                  # the evals module has its own go.mod
 cd evals && golangci-lint run && golangci-lint fmt --diff  # ...and its own lint/format gates
 cd consumer && go test -race ./...         # the external-consumer module's contract tests
 cd consumer && golangci-lint run && golangci-lint fmt --diff  # ...and its own lint/format gates
+cd daemon && go test -race ./...           # the hew-daemon module (REST API + web UI over the public library)
+cd daemon && golangci-lint run && golangci-lint fmt --diff  # ...and its own lint/format gates
 shellcheck install.sh                      # install.sh is linted in CI too
 ```
 
@@ -57,6 +59,7 @@ The layering exists so everything with behavior is testable without hitting GitH
 | `examples/` | Copy-pasteable GitHub Actions recipes (`auto-triage.yml`), documented in README | Changing the auto-triage workflow or its documented guarantees |
 | `evals/` | Separate module (keeps the tokenizer out of the CLI's dependency graph): the token-efficiency harness and its committed fixtures — see [evals/README.md](evals/README.md). A renderer change invalidates the fixtures' hew side; re-capture and re-publish the numbers in DESIGN.md | Changing renderer output, or the published token figures |
 | `consumer/` | Separate module with a local replace to the checkout: the external-consumer gate that imports only `tracker`, `pr` and `migrate` and runs the contract's workflows against a real local tracker and an isolated GitHub transport. It is why an operation needing an internal type fails CI instead of passing its own tests — see [consumer/README.md](consumer/README.md) | Changing a public API, a workflow, or the consumer scenarios |
+| `daemon/` | Separate module with a local replace to the checkout, like `consumer/`: `hew-daemon`, a loopback-only REST API plus an embedded no-build web UI built only on `tracker` and `pr`. It maps typed library errors to HTTP kinds (`errors.go`), re-maps the untagged result types to JSON (`dto.go`), and refuses forgeable requests (`guard` in `server.go`). It has no auth by design, so it must never listen beyond loopback. Outside the coverage gate and goreleaser; CI has its own `daemon` job. Its `go` directive must match the root's. See [daemon/README.md](daemon/README.md) | Changing the daemon's API or UI, or when a library change breaks it |
 
 The public packages are one API in three parts: `tracker`, `pr` and `migrate`,
 including the beads and local-to-GitHub workflows. DESIGN.md's

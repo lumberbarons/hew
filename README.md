@@ -580,6 +580,11 @@ against a real local tracker and an isolated GitHub transport; an operation
 that needs an internal type fails to build there instead of passing its own
 unit tests.
 
+[`daemon/`](daemon/) is a second, heavier consumer: `hew-daemon` serves a local
+tracker over a REST API and a small web UI, built from the same three packages.
+It has no authentication and listens on loopback only, so it is for one person
+on one machine. See [`daemon/README.md`](daemon/README.md).
+
 **Stability: experimental.** The public packages are experimental until 1.0: the
 API may change in any v0.x minor release. A breaking change ships as a
 `feat!:`/`fix!:` commit, so it lands under Breaking changes in the release notes

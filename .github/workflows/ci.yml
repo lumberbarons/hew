@@ -205,6 +205,33 @@ jobs:
       - run: go test -race ./...
         working-directory: consumer
 
+  # daemon/ is a long-running consumer of the same public packages: a REST API
+  # and web UI over a tracker. Like consumer/ it is a separate module that
+  # cannot name internal/*, and like evals/ it is outside the root job's
+  # ./..., the coverage gate and goreleaser, so it needs its own gates.
+  daemon:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # The module replaces hew with the checkout, so its go.mod and go.sum
+      # must agree with the root's requirements.
+      - name: module is tidy
+        run: go mod tidy -diff
+        working-directory: daemon
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          working-directory: daemon
+      # Same reason as the lint job: the action never checks formatting, and
+      # the root job's formatting step does not reach a nested module.
+      - name: formatting
+        run: golangci-lint fmt --diff
+        working-directory: daemon
+      - run: go test -race ./...
+        working-directory: daemon
+
   # evals/ is its own module, so the root job's ./... never reaches it.
   evals:
     runs-on: ubuntu-latest

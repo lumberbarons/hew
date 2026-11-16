@@ -1,12 +1,13 @@
 # hew-daemon
 
-A scratch proof that the public `tracker`, `pr` and `migrate` packages are enough to
-build a long-running consumer: an HTTP server with a REST API and a small browser UI
-for the everyday hew workflow.
+A local server for the everyday hew workflow: a REST API and a small browser UI over
+a tracker, built only on the public `tracker` and `pr` packages. It is the long-running
+counterpart to `consumer/`, and what it needed from the library is recorded below.
 
 It is a separate module (`replace github.com/lumberbarons/hew => ../`, like
-`consumer/`), so it can name only the public packages. It is not part of CI, the
-coverage gate or releases.
+`consumer/`), so it can name only the public packages. CI runs it as its own `daemon`
+job (`make daemon` locally); it is outside the root module's coverage gate and
+goreleaser. Its `go` directive must match the root's.
 
 ```sh
 cd daemon && go run ./cmd/hew-daemon --dir /path/to/a/hew/checkout
