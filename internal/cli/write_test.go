@@ -2985,3 +2985,76 @@ func TestUnblockSeveralNamesWhatLandedWhenAWriteFails(t *testing.T) {
 		t.Errorf("err = %v, want the bare failure", err)
 	}
 }
+
+// editNeverOpens is the fixture for the pre-flight tests: an editor that fails
+// the test if it is ever launched, over a tracker with an open issue (#1), a
+// closed one (#2) and an epic child that already has a parent (#3).
+func editNeverOpens(t *testing.T) (*App, *fakeClient) {
+	t.Helper()
+	parented := issue(3, "Child", "P2", "task")
+	parented.Parent = &model.Ref{Number: 50, State: "OPEN"}
+	closed := issue(2, "Done", "P2", "task")
+	closed.State = "CLOSED"
+	f := newFake(issue(1, "Open", "P2", "task"), closed, parented)
+	app, _, _ := newApp(f)
+	app.Edit = func(string) (string, error) {
+		t.Error("editor opened before the request was validated")
+		return "", nil
+	}
+	return app, f
+}
+
+// TestCreateEditValidatesBeforeEditor pins the ordering: whatever Create would
+// refuse is refused before $EDITOR opens, because the refusal otherwise
+// discards the body the author just typed.
+func TestCreateEditValidatesBeforeEditor(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts CreateOpts
+		want string
+	}{
+		{"missing parent", CreateOpts{Title: "T", Type: "bug", Parent: 999}, "--parent"},
+		{"missing blocker", CreateOpts{Title: "T", Type: "bug", BlockedBy: []int{999}}, "--blocked-by"},
+		{"closed blocker", CreateOpts{Title: "T", Type: "bug", BlockedBy: []int{2}}, "--blocked-by: #2 is closed"},
+		{"missing discovered-from", CreateOpts{Title: "T", Type: "bug", DiscoveredFrom: 999}, "--discovered-from"},
+		{"invalid priority", CreateOpts{Title: "T", Type: "bug", Priority: "P9"}, "--priority"},
+		{"invalid type", CreateOpts{Title: "T", Type: "story"}, "--type"},
+		{"empty title", CreateOpts{Title: " ", Type: "bug"}, "--title is required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, f := editNeverOpens(t)
+			tc.opts.Edit = true
+			err := app.Create(ctx, tc.opts)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want it to contain %q", err, tc.want)
+			}
+			if f.byNumber(101) != nil {
+				t.Error("an issue was created")
+			}
+		})
+	}
+}
+
+func TestEpicCreateEditValidatesBeforeEditor(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts EpicCreateOpts
+		want string
+	}{
+		{"missing child", EpicCreateOpts{Title: "Big", Children: []int{999}}, "--children"},
+		{"already parented child", EpicCreateOpts{Title: "Big", Children: []int{1, 3}}, "already has a parent"},
+		{"empty title", EpicCreateOpts{Title: " "}, "--title"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, f := editNeverOpens(t)
+			tc.opts.Edit = true
+			err := app.EpicCreate(ctx, tc.opts)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+			if f.byNumber(101) != nil {
+				t.Error("an epic was created")
+			}
+		})
+	}
+}

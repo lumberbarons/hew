@@ -860,7 +860,7 @@ warnings in [Warnings and findings](#warnings-and-findings).
 | `list` | `(*tracker.Tracker).Snapshot(ctx, tracker.SnapshotOptions{States: …})` then `(*tracker.Snapshot).List(tracker.ListFilter) []tracker.Issue` | `--state`/`--epic` default mapping, `--closed` deprecation, `--bodies` rendering |
 | `show <n>` | `(*tracker.Tracker).Detail(ctx, n) (tracker.IssueDetail, error)` | text annotations and `--json` rendering |
 | `search <terms>` | `(*tracker.Tracker).Search(ctx, tracker.SearchRequest) (tracker.SearchResult, error)` | no-triaged-match and truncation wording |
-| `create` | `(*tracker.Tracker).Create(ctx, tracker.CreateRequest) (tracker.CreateResult, error)` | title/body/area flags, `--body-file`, `--edit` |
+| `create` | `(*tracker.Tracker).Create(ctx, tracker.CreateRequest) (tracker.CreateResult, error)`; `(*tracker.Tracker).CheckCreate(ctx, tracker.CreateRequest) error` is the same validation and reference reads with no write, so `--edit` refuses a bad flag or reference before the editor opens | title/body/area flags, `--body-file`, `--edit` |
 | `draft` | `tracker.ComposeBody(tracker.Body) (tracker.ComposedBody, error)`, `tracker.CheckBody(string) (tracker.BodyCheck, error)` | `--out`/`--check` file I/O and rendering |
 | `start <n>` | `(*tracker.Tracker).Start(ctx, n, tracker.StartOptions) (tracker.StartResult, error)` | `--show` rendering, exit 3/5/6 |
 | `release <n>` | `(*tracker.Tracker).Release(ctx, n, tracker.ReleaseOptions) error` | rendering and exit mapping |
@@ -871,7 +871,7 @@ warnings in [Warnings and findings](#warnings-and-findings).
 | `reopen <n>` | `(*tracker.Tracker).Reopen(ctx, n, tracker.ReopenOptions) (tracker.ReopenResult, error)` | wording and exit mapping |
 | `block <n> --on <m>` | `(*tracker.Tracker).Block(ctx, n, blockers, tracker.BlockOptions) (tracker.BlockResult, error)` | wording and exit mapping |
 | `unblock <n> --from <m>` | `(*tracker.Tracker).Unblock(ctx, n, blockers, tracker.BlockOptions) (tracker.UnblockResult, error)` | wording and exit mapping |
-| `epic create` | `(*tracker.Tracker).CreateEpic(ctx, tracker.CreateEpicRequest) (tracker.CreateResult, error)` | body input and rendering |
+| `epic create` | `(*tracker.Tracker).CreateEpic(ctx, tracker.CreateEpicRequest) (tracker.CreateResult, error)`; `(*tracker.Tracker).CheckCreateEpic(ctx, tracker.CreateEpicRequest) error` is its no-write pre-flight, called before `--edit` opens the editor | body input and rendering |
 | `epic status [<n>]` (alias `epic list`) | `(*tracker.Snapshot).Epics() []tracker.Issue` or `(*tracker.Tracker).Detail(ctx, n)` | rollup layout, `next:` line and warning wording |
 | `apply <plan.jsonl>` | `(*tracker.Tracker).ApplyPlan(ctx, []tracker.PlanEntry, tracker.ApplyOptions) (tracker.ApplyResult, error)` | JSONL codec (`internal/plan`), default checkpoint path, dry-run rendering |
 | `config` | `tracker.Detect(dir) (tracker.Target, error)` | `--repo` selection, text and JSON rendering |

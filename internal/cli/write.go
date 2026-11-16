@@ -39,6 +39,24 @@ func (a *App) Create(ctx context.Context, opts CreateOpts) error {
 	if err := validateBodySource(opts.Sections, opts.BodyFile, opts.Edit); err != nil {
 		return err
 	}
+	tr := tracker.WrapAs(a.Client, a.backend(), "")
+	req := tracker.CreateRequest{
+		Title:          opts.Title,
+		Type:           opts.Type,
+		Priority:       opts.Priority,
+		Areas:          opts.Areas,
+		Parent:         opts.Parent,
+		BlockedBy:      opts.BlockedBy,
+		DiscoveredFrom: opts.DiscoveredFrom,
+	}
+	if opts.Edit {
+		// A typo in a flag or a reference must not cost the author the body they
+		// are about to type, so everything Create would refuse is refused before
+		// the editor opens.
+		if err := tr.CheckCreate(ctx, req); err != nil {
+			return createError(opts, err)
+		}
+	}
 	body, err := a.bodyInput(bodySource{
 		issueType: opts.Type, sections: opts.Sections,
 		bodyFile: opts.BodyFile, edit: opts.Edit,
@@ -46,16 +64,8 @@ func (a *App) Create(ctx context.Context, opts CreateOpts) error {
 	if err != nil {
 		return err
 	}
-	result, err := tracker.WrapAs(a.Client, a.backend(), "").Create(ctx, tracker.CreateRequest{
-		Title:          opts.Title,
-		Type:           opts.Type,
-		Priority:       opts.Priority,
-		Areas:          opts.Areas,
-		Body:           body,
-		Parent:         opts.Parent,
-		BlockedBy:      opts.BlockedBy,
-		DiscoveredFrom: opts.DiscoveredFrom,
-	})
+	req.Body = body
+	result, err := tr.Create(ctx, req)
 	if err != nil {
 		return createError(opts, err)
 	}
@@ -773,17 +783,23 @@ func (a *App) EpicCreate(ctx context.Context, opts EpicCreateOpts) error {
 	if err := validateBodySource(opts.Sections, opts.BodyFile, opts.Edit); err != nil {
 		return err
 	}
+	tr := tracker.WrapAs(a.Client, a.backend(), "")
+	req := tracker.CreateEpicRequest{Title: opts.Title, Children: opts.Children}
+	if opts.Edit {
+		// As in Create: refuse a missing or already-parented child before the
+		// editor opens, not after the body has been typed.
+		if err := tr.CheckCreateEpic(ctx, req); err != nil {
+			return epicCreateError(opts, err)
+		}
+	}
 	body, err := a.bodyInput(bodySource{
 		sections: opts.Sections, bodyFile: opts.BodyFile, edit: opts.Edit,
 	})
 	if err != nil {
 		return err
 	}
-	result, err := tracker.WrapAs(a.Client, a.backend(), "").CreateEpic(ctx, tracker.CreateEpicRequest{
-		Title:    opts.Title,
-		Children: opts.Children,
-		Body:     body,
-	})
+	req.Body = body
+	result, err := tr.CreateEpic(ctx, req)
 	if err != nil {
 		return epicCreateError(opts, err)
 	}
