@@ -57,7 +57,7 @@ func TestExternalConsumerValidatesAPlanBeforeWriting(t *testing.T) {
 	}
 }
 
-func TestExternalConsumerResumesAPlanFromAMemoryCheckpoint(t *testing.T) {
+func TestExternalConsumerRerunOfACompletedPlanIsANoOp(t *testing.T) {
 	tr := externalTracker(t)
 	ctx := context.Background()
 
