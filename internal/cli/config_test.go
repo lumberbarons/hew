@@ -4,9 +4,6 @@ import (
 	"encoding/json"
 	"slices"
 	"testing"
-
-	"github.com/lumberbarons/hew/internal/gh"
-	"github.com/lumberbarons/hew/internal/local"
 )
 
 // Both backends carry the same four keys, so a driver parses one schema
@@ -19,12 +16,12 @@ func TestConfigJSONHasOneFlatShapeOnBothBackends(t *testing.T) {
 	}{
 		{
 			"github",
-			ConfigTarget{Repo: gh.Repo{Owner: "o", Name: "r"}},
+			ConfigTarget{Backend: "github", Repo: "o/r"},
 			backendConfig{Backend: "github", Repo: "o/r"},
 		},
 		{
 			"local",
-			ConfigTarget{Tracker: "/repo/.hew", Local: local.Config{Backend: local.BackendLocal, ID: "tracker-id"}},
+			ConfigTarget{Backend: "local", Path: "/repo/.hew", ID: "tracker-id"},
 			backendConfig{Backend: "local", Path: "/repo/.hew", ID: "tracker-id"},
 		},
 	} {
@@ -67,12 +64,12 @@ func TestConfigTextPrintsOnlyTheFieldsTheBackendHas(t *testing.T) {
 	}{
 		{
 			"github",
-			ConfigTarget{Repo: gh.Repo{Owner: "o", Name: "r"}},
+			ConfigTarget{Backend: "github", Repo: "o/r"},
 			"backend: github\nrepo: o/r\n",
 		},
 		{
 			"local",
-			ConfigTarget{Tracker: "/repo/.hew", Local: local.Config{Backend: local.BackendLocal, ID: "tracker-id"}},
+			ConfigTarget{Backend: "local", Path: "/repo/.hew", ID: "tracker-id"},
 			"backend: local\npath: /repo/.hew\nid: tracker-id\n",
 		},
 	} {

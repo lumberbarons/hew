@@ -1,17 +1,16 @@
 package cli
 
-import (
-	"github.com/lumberbarons/hew/internal/gh"
-	"github.com/lumberbarons/hew/internal/local"
-)
+import "github.com/lumberbarons/hew/internal/local"
 
-// ConfigTarget is a resolved backend selection: the GitHub repository, or the
-// local tracker directory and the config that selected it. An empty Tracker
-// means GitHub.
+// ConfigTarget is a resolved backend selection in the shape the public
+// tracker.Target reports: the backend, the GitHub repository, and the local
+// tracker's directory and stable id. The caller resolves it; this package
+// only chooses which fields to render.
 type ConfigTarget struct {
-	Repo    gh.Repo
-	Tracker string
-	Local   local.Config
+	Backend string
+	Repo    string
+	Path    string
+	ID      string
 }
 
 // backendConfig is what a read-only `config` query reports: which backend the
@@ -30,9 +29,9 @@ type backendConfig struct {
 // target and opens no store or client: this method only chooses the fields
 // that backend has and renders them.
 func (a *App) Config(target ConfigTarget) error {
-	cfg := backendConfig{Backend: local.BackendGitHub, Repo: target.Repo.String()}
-	if target.Tracker != "" {
-		cfg = backendConfig{Backend: local.BackendLocal, Path: target.Tracker, ID: target.Local.ID}
+	cfg := backendConfig(target)
+	if cfg.Backend == "" {
+		cfg.Backend = local.BackendGitHub
 	}
 	return a.emitResult(cfg, func() {
 		a.printf("backend: %s\n", cfg.Backend)

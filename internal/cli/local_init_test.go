@@ -98,7 +98,7 @@ func TestInitOnTheLocalBackendIsInitLocal(t *testing.T) {
 	}
 
 	direct, directOut, _ := newApp(newFake())
-	if err := direct.InitLocal(""); err != nil {
+	if err := direct.InitLocal(ctx, ""); err != nil {
 		t.Fatal(err)
 	}
 	if bareOut.String() != directOut.String() {
@@ -118,7 +118,7 @@ func TestInitJSONHasOneShapeOnBothBackends(t *testing.T) {
 	main, _ := gitRepoWithWorktree(t)
 	localApp, localOut, _ := newApp(newFake())
 	localApp.JSON = true
-	if err := localApp.InitLocal(main); err != nil {
+	if err := localApp.InitLocal(ctx, main); err != nil {
 		t.Fatal(err)
 	}
 
@@ -147,7 +147,7 @@ func TestInitLocalCreatesTheTrackerAtTheMainCheckout(t *testing.T) {
 	main, wt := gitRepoWithWorktree(t)
 	app, out, _ := newApp(newFake())
 
-	if err := app.InitLocal(wt); err != nil {
+	if err := app.InitLocal(ctx, wt); err != nil {
 		t.Fatal(err)
 	}
 	tracker := filepath.Join(main, local.DirName)
@@ -172,7 +172,7 @@ func TestInitLocalWarnsOnceThatADeletedTrackerFallsBackToGitHub(t *testing.T) {
 	main, _ := gitRepoWithWorktree(t)
 	app, out, errOut := newApp(newFake())
 	app.JSON = true
-	if err := app.InitLocal(main); err != nil {
+	if err := app.InitLocal(ctx, main); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"git clean -fdx", "GitHub"} {
@@ -185,7 +185,7 @@ func TestInitLocalWarnsOnceThatADeletedTrackerFallsBackToGitHub(t *testing.T) {
 	}
 
 	again, _, againErr := newApp(newFake())
-	if err := again.InitLocal(main); err != nil {
+	if err := again.InitLocal(ctx, main); err != nil {
 		t.Fatal(err)
 	}
 	if againErr.Len() != 0 {
@@ -200,7 +200,7 @@ func TestInitLocalWarnsWhenItRecreatesAMissingIssuesFile(t *testing.T) {
 	main, _ := gitRepoWithWorktree(t)
 	tracker := filepath.Join(main, local.DirName)
 	app, _, _ := newApp(newFake())
-	if err := app.InitLocal(main); err != nil {
+	if err := app.InitLocal(ctx, main); err != nil {
 		t.Fatal(err)
 	}
 	issues := filepath.Join(tracker, "issues.jsonl")
@@ -213,7 +213,7 @@ func TestInitLocalWarnsWhenItRecreatesAMissingIssuesFile(t *testing.T) {
 	}
 
 	again, out, errOut := newApp(newFake())
-	if err := again.InitLocal(main); err != nil {
+	if err := again.InitLocal(ctx, main); err != nil {
 		t.Fatal(err)
 	}
 	newCfg, err := local.ReadConfig(tracker)
@@ -233,7 +233,7 @@ func TestInitLocalWarnsWhenItRecreatesAMissingIssuesFile(t *testing.T) {
 	}
 
 	quiet, _, quietErr := newApp(newFake())
-	if err := quiet.InitLocal(main); err != nil {
+	if err := quiet.InitLocal(ctx, main); err != nil {
 		t.Fatal(err)
 	}
 	if quietErr.Len() != 0 {
@@ -247,7 +247,7 @@ func TestInitLocalRefusesACorruptConfigWithARecoveryHint(t *testing.T) {
 	main, _ := gitRepoWithWorktree(t)
 	tracker := filepath.Join(main, local.DirName)
 	app, _, _ := newApp(newFake())
-	if err := app.InitLocal(main); err != nil {
+	if err := app.InitLocal(ctx, main); err != nil {
 		t.Fatal(err)
 	}
 	cfgPath := filepath.Join(tracker, "config.json")
@@ -256,7 +256,7 @@ func TestInitLocalRefusesACorruptConfigWithARecoveryHint(t *testing.T) {
 	}
 
 	again, _, _ := newApp(newFake())
-	err := again.InitLocal(main)
+	err := again.InitLocal(ctx, main)
 	if err == nil || !strings.Contains(err.Error(), cfgPath) || strings.Contains(err.Error(), "unexpected end of JSON") {
 		t.Errorf("err = %v, want the path and no decoder text", err)
 	}
@@ -268,7 +268,7 @@ func TestInitLocalRecoversATrackerThatLostItsConfig(t *testing.T) {
 	main, _ := gitRepoWithWorktree(t)
 	tracker := filepath.Join(main, local.DirName)
 	app, _, _ := newApp(newFake())
-	if err := app.InitLocal(main); err != nil {
+	if err := app.InitLocal(ctx, main); err != nil {
 		t.Fatal(err)
 	}
 	store, err := local.Open(tracker, "me")
@@ -287,7 +287,7 @@ func TestInitLocalRecoversATrackerThatLostItsConfig(t *testing.T) {
 		t.Fatal("Locate accepted a tracker without a config")
 	}
 	recover, _, _ := newApp(newFake())
-	if err := recover.InitLocal(main); err != nil {
+	if err := recover.InitLocal(ctx, main); err != nil {
 		t.Fatalf("init --local on a tracker without a config: %v", err)
 	}
 	if _, ok, err := local.Locate(main); err != nil || !ok {
@@ -305,7 +305,7 @@ func TestInitLocalRecoversATrackerThatLostItsConfig(t *testing.T) {
 func TestInitLocalIsIdempotentAndKeepsIssues(t *testing.T) {
 	main, _ := gitRepoWithWorktree(t)
 	app, _, _ := newApp(newFake())
-	if err := app.InitLocal(main); err != nil {
+	if err := app.InitLocal(ctx, main); err != nil {
 		t.Fatal(err)
 	}
 	store, err := local.Open(filepath.Join(main, local.DirName), "me")
@@ -316,7 +316,7 @@ func TestInitLocalIsIdempotentAndKeepsIssues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.InitLocal(main); err != nil {
+	if err := app.InitLocal(ctx, main); err != nil {
 		t.Fatalf("second init: %v", err)
 	}
 	if _, err := store.GetIssue(ctx, created.Number); err != nil {
@@ -328,7 +328,7 @@ func TestInitLocalJSON(t *testing.T) {
 	main, _ := gitRepoWithWorktree(t)
 	app, out, _ := newApp(newFake())
 	app.JSON = true
-	if err := app.InitLocal(main); err != nil {
+	if err := app.InitLocal(ctx, main); err != nil {
 		t.Fatal(err)
 	}
 	var got struct {
@@ -365,7 +365,7 @@ func TestInitLocalRefusesAMigratedRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	app, out, _ := newApp(newFake())
-	err := app.InitLocal(main)
+	err := app.InitLocal(ctx, main)
 	exitCode(t, err, ExitGeneric)
 	if _, statErr := os.Stat(ignore); !os.IsNotExist(statErr) {
 		t.Errorf("refused init still wrote into the archived tracker: %v", statErr)
@@ -385,7 +385,7 @@ func TestInitLocalOutsideAGitCheckoutFails(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 	app, _, _ := newApp(newFake())
-	err := app.InitLocal(dir)
+	err := app.InitLocal(ctx, dir)
 	exitCode(t, err, ExitGeneric)
 	if !strings.Contains(err.Error(), "main checkout") {
 		t.Errorf("err = %v, want the checkout failure", err)
@@ -402,7 +402,7 @@ func TestInitLocalOutsideAGitCheckoutSurfacesGitsMessage(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 	app, _, _ := newApp(newFake())
-	err := app.InitLocal(dir)
+	err := app.InitLocal(ctx, dir)
 	exitCode(t, err, ExitGeneric)
 	msg := err.Error()
 	if !strings.Contains(msg, "not a git repository") {

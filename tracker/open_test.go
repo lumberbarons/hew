@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,6 +116,53 @@ func TestDetectFallsBackToGitHubWithoutALocalTracker(t *testing.T) {
 	}
 	if got.Backend != BackendGitHub || got.MainCheckout != "" {
 		t.Errorf("Detect outside = %+v, want GitHub with no checkout", got)
+	}
+}
+
+func TestDetectReportsRepositoryAndStableLocalID(t *testing.T) {
+	// A local tracker's report includes the id its checkpoints bind to, so a
+	// consumer can tell one checkout's tracker from another's.
+	main, _ := repoWithWorktrees(t)
+	dir := initLocalTracker(t, main)
+	cfg, err := local.ReadConfig(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Detect(main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Backend != BackendLocal || got.Dir != dir || got.MainCheckout != main {
+		t.Errorf("Detect = %+v, want local %s in %s", got, dir, main)
+	}
+	if got.ID != cfg.ID || cfg.ID == "" {
+		t.Errorf("ID = %q, want the config's stable id %q", got.ID, cfg.ID)
+	}
+	if got.Repo != "" {
+		t.Errorf("Repo = %q, want empty for a local tracker", got.Repo)
+	}
+
+	// A GitHub checkout reports the origin remote's owner/name.
+	githubMain, _ := repoWithWorktrees(t)
+	gitRun(t, githubMain, "remote", "add", "origin", "git@github.com:acme/hew.git")
+	got, err = Detect(githubMain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Backend != BackendGitHub || got.Repo != "acme/hew" || got.MainCheckout != githubMain || got.Dir != "" || got.ID != "" {
+		t.Errorf("Detect = %+v, want GitHub acme/hew in %s", got, githubMain)
+	}
+
+	// A remote Detect cannot read as a github.com repository leaves Repo empty
+	// instead of failing backend detection; Open is what must refuse it.
+	other, _ := repoWithWorktrees(t)
+	gitRun(t, other, "remote", "add", "origin", "https://gitlab.com/acme/hew.git")
+	got, err = Detect(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Backend != BackendGitHub || got.Repo != "" {
+		t.Errorf("Detect = %+v, want GitHub with no repository for a non-GitHub remote", got)
 	}
 }
 
@@ -431,7 +479,7 @@ func TestOpenForcesGitHubOverALocalTracker(t *testing.T) {
 	initLocalTracker(t, main)
 	gitRun(t, main, "remote", "add", "origin", "git@github.com:owner/name.git")
 	var got gh.Repo
-	replaceGitHub(t, func(repo gh.Repo) (gh.IssueStore, error) {
+	replaceGitHub(t, func(repo gh.Repo, _ http.RoundTripper) (gh.IssueStore, error) {
 		got = repo
 		return &fakeStore{login: "octocat"}, nil
 	})
@@ -452,7 +500,7 @@ func TestOpenForcedGitHubSkipsDetection(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	replaceGitHub(t, func(gh.Repo) (gh.IssueStore, error) { return &fakeStore{login: "octocat"}, nil })
+	replaceGitHub(t, func(gh.Repo, http.RoundTripper) (gh.IssueStore, error) { return &fakeStore{login: "octocat"}, nil })
 	tr, err := Open(context.Background(), Config{Worktree: main, Backend: BackendGitHub, Repo: "owner/name"})
 	if err != nil {
 		t.Fatal(err)
@@ -500,7 +548,7 @@ type fakeStore struct {
 
 func (f *fakeStore) Viewer(context.Context) (string, error) { return f.login, f.err }
 
-func replaceGitHub(t *testing.T, build func(gh.Repo) (gh.IssueStore, error)) {
+func replaceGitHub(t *testing.T, build func(gh.Repo, http.RoundTripper) (gh.IssueStore, error)) {
 	t.Helper()
 	old := newGitHub
 	t.Cleanup(func() { newGitHub = old })
@@ -509,7 +557,7 @@ func replaceGitHub(t *testing.T, build func(gh.Repo) (gh.IssueStore, error)) {
 
 func TestOpenGitHubUsesTheExplicitRepoAndLogin(t *testing.T) {
 	var got gh.Repo
-	replaceGitHub(t, func(repo gh.Repo) (gh.IssueStore, error) {
+	replaceGitHub(t, func(repo gh.Repo, _ http.RoundTripper) (gh.IssueStore, error) {
 		got = repo
 		return &fakeStore{login: "octocat"}, nil
 	})
@@ -529,11 +577,47 @@ func TestOpenGitHubUsesTheExplicitRepoAndLogin(t *testing.T) {
 	}
 }
 
+// A tracker names the GitHub repository it resolved. A workflow that has to
+// build a second handle — the public PR client — reads the target here rather
+// than resolving the same remote by a second rule.
+func TestOpenGitHubReportsTheResolvedRepo(t *testing.T) {
+	replaceGitHub(t, func(gh.Repo, http.RoundTripper) (gh.IssueStore, error) {
+		return &fakeStore{login: "octocat"}, nil
+	})
+	tr, err := Open(context.Background(), Config{Worktree: t.TempDir(), Repo: "owner/name"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := tr.Repo(); got != "owner/name" {
+		t.Errorf("Repo() = %q, want owner/name", got)
+	}
+}
+
+// The configured transport reaches the client builder unchanged: it is the
+// seam an in-process consumer's tests answer GitHub through.
+func TestOpenGitHubPassesTheTransportToTheClient(t *testing.T) {
+	sentinel := &http.Transport{}
+	var got http.RoundTripper
+	replaceGitHub(t, func(_ gh.Repo, transport http.RoundTripper) (gh.IssueStore, error) {
+		got = transport
+		return &fakeStore{login: "octocat"}, nil
+	})
+	_, err := Open(context.Background(), Config{
+		Worktree: t.TempDir(), Repo: "owner/name", Transport: sentinel,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != sentinel {
+		t.Errorf("transport = %v, want the configured one", got)
+	}
+}
+
 func TestOpenGitHubDetectsTheRepoFromTheOriginRemote(t *testing.T) {
 	main, _ := repoWithWorktrees(t)
 	gitRun(t, main, "remote", "add", "origin", "git@github.com:owner/name.git")
 	var got gh.Repo
-	replaceGitHub(t, func(repo gh.Repo) (gh.IssueStore, error) {
+	replaceGitHub(t, func(repo gh.Repo, _ http.RoundTripper) (gh.IssueStore, error) {
 		got = repo
 		return &fakeStore{login: "octocat"}, nil
 	})
@@ -573,7 +657,7 @@ func TestOpenGitHubRejectsARepositoryWithNoOrigin(t *testing.T) {
 
 func TestOpenGitHubMapsAuthFailures(t *testing.T) {
 	cause := errors.New("credentials expired")
-	replaceGitHub(t, func(gh.Repo) (gh.IssueStore, error) {
+	replaceGitHub(t, func(gh.Repo, http.RoundTripper) (gh.IssueStore, error) {
 		return nil, &gh.AuthError{Err: cause}
 	})
 	_, err := Open(context.Background(), Config{Worktree: t.TempDir(), Repo: "owner/name"})
@@ -590,7 +674,7 @@ func TestOpenGitHubMapsAuthFailures(t *testing.T) {
 // mapped the same way as client construction.
 func TestOpenGitHubMapsViewerAuthFailures(t *testing.T) {
 	cause := errors.New("token expired")
-	replaceGitHub(t, func(gh.Repo) (gh.IssueStore, error) {
+	replaceGitHub(t, func(gh.Repo, http.RoundTripper) (gh.IssueStore, error) {
 		return &fakeStore{err: &gh.AuthError{Err: cause}}, nil
 	})
 	_, err := Open(context.Background(), Config{Worktree: t.TempDir(), Repo: "owner/name"})
@@ -605,7 +689,7 @@ func TestOpenGitHubMapsViewerAuthFailures(t *testing.T) {
 
 func TestOpenGitHubPassesThroughOtherErrors(t *testing.T) {
 	boom := errors.New("client construction failed")
-	replaceGitHub(t, func(gh.Repo) (gh.IssueStore, error) { return nil, boom })
+	replaceGitHub(t, func(gh.Repo, http.RoundTripper) (gh.IssueStore, error) { return nil, boom })
 	_, err := Open(context.Background(), Config{Worktree: t.TempDir(), Repo: "owner/name"})
 	if err != boom {
 		t.Errorf("err = %v, want the client failure unchanged", err)
@@ -614,7 +698,7 @@ func TestOpenGitHubPassesThroughOtherErrors(t *testing.T) {
 
 func TestOpenGitHubPassesThroughViewerErrors(t *testing.T) {
 	boom := errors.New("viewer failed")
-	replaceGitHub(t, func(gh.Repo) (gh.IssueStore, error) {
+	replaceGitHub(t, func(gh.Repo, http.RoundTripper) (gh.IssueStore, error) {
 		return &fakeStore{err: boom}, nil
 	})
 	_, err := Open(context.Background(), Config{Worktree: t.TempDir(), Repo: "owner/name"})

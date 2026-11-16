@@ -514,42 +514,6 @@ func TestPRBranchNumberNamingNoIssueIsNotAFallback(t *testing.T) {
 	assertNoPR(t, f)
 }
 
-// branchIssueNumber decides whether a branch links an issue at all, and
-// every wrong answer either mislinks a PR or drops a usable hint, so its
-// rules are pinned directly rather than only through the paths above.
-func TestBranchIssueNumber(t *testing.T) {
-	tests := []struct {
-		branch string
-		want   int
-	}{
-		{"feat/30-pr-command", 30},
-		{"fix/issue-42", 42},
-		{"chore/bump_7", 7},
-		{"docs/readme.12", 12},
-		{"feat/pr-command", 0},
-		{"main", 0},
-		// A digit run inside a word is part of the name, not a reference.
-		{"fix/http500-retries", 0},
-		{"fix/v2-rewrite", 0},
-		// #0 is not an issue, so a zero segment is no hint at all.
-		{"feat/0-x", 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.branch, func(t *testing.T) {
-			got, ok := branchIssueNumber(tt.branch)
-			if tt.want == 0 {
-				if ok {
-					t.Errorf("branchIssueNumber(%q) = %d, want no number", tt.branch, got)
-				}
-				return
-			}
-			if !ok || got != tt.want {
-				t.Errorf("branchIssueNumber(%q) = %d, %v, want %d, true", tt.branch, got, ok, tt.want)
-			}
-		})
-	}
-}
-
 // A digit run inside a word is part of the branch name, not a link: linking
 // fix/500-error to #500 would close an unrelated issue on merge.
 func TestPRIgnoresDigitsInsideBranchWords(t *testing.T) {

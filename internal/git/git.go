@@ -46,8 +46,15 @@ func run(name string, args ...string) (string, error) {
 // Current reads the state of the checkout in the working directory.
 func Current() (State, error) { return current(run) }
 
-func current(r runner) (State, error) {
-	branch, err := r("git", "rev-parse", "--abbrev-ref", "HEAD")
+// CurrentFor reads the state of the checkout at dir, never the process's
+// working directory: the public `pr` workflow answers every checkout question
+// from the worktree its caller named.
+func CurrentFor(dir string) (State, error) { return currentFor(run, dir) }
+
+func current(r runner) (State, error) { return currentFor(r, "") }
+
+func currentFor(r runner, dir string) (State, error) {
+	branch, err := r("git", gitArgs(dir, "rev-parse", "--abbrev-ref", "HEAD")...)
 	if err != nil {
 		return State{}, fmt.Errorf("cannot read the current git branch: %w", err)
 	}
@@ -57,11 +64,19 @@ func current(r runner) (State, error) {
 	// A failure here means "no upstream", which is a state, not an error:
 	// git exits non-zero for an unset upstream exactly as it does for a
 	// broken repo, and the repo can't be broken — the branch just resolved.
-	upstream, err := r("git", "rev-parse", "--abbrev-ref", "@{upstream}")
+	upstream, err := r("git", gitArgs(dir, "rev-parse", "--abbrev-ref", "@{upstream}")...)
 	if err != nil || upstream == "" {
 		return State{Branch: branch}, nil
 	}
-	return State{Branch: branch, Upstream: remoteBranch(r, branch, upstream), Pushed: true}, nil
+	return State{Branch: branch, Upstream: remoteBranch(r, dir, branch, upstream), Pushed: true}, nil
+}
+
+// gitArgs prefixes a git invocation with the directory to run it in.
+func gitArgs(dir string, args ...string) []string {
+	if dir == "" {
+		return args
+	}
+	return append([]string{"-C", dir}, args...)
 }
 
 // remoteBranch strips the remote from an upstream ref like origin/feat/x,
@@ -69,8 +84,8 @@ func current(r runner) (State, error) {
 // read rather than assumed to be the first path segment, because branch
 // names contain slashes too: cutting blindly at the first one turns a branch
 // tracking the local feat/x into a PR opened from x.
-func remoteBranch(r runner, branch, upstream string) string {
-	remote, err := r("git", "config", "--get", "branch."+branch+".remote")
+func remoteBranch(r runner, dir, branch, upstream string) string {
+	remote, err := r("git", gitArgs(dir, "config", "--get", "branch."+branch+".remote")...)
 	// "." is git's spelling of "the local repository" — an upstream that
 	// lives here rather than on a remote, and so no name GitHub knows.
 	if err != nil || remote == "" || remote == "." {
