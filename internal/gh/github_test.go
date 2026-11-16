@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,10 +34,14 @@ type recordedRequest struct {
 	Method string
 	Path   string
 	Body   string
+	Header http.Header
 }
 
 type fakeServer struct {
 	*httptest.Server
+	// mu guards requests: the handler appends from the server's goroutines,
+	// so a test that drives the client concurrently would race with itself.
+	mu       sync.Mutex
 	requests []recordedRequest
 	// graphql maps a substring of the query to a response body.
 	graphql map[string]string
@@ -62,7 +67,9 @@ func newFakeServer(t *testing.T) *fakeServer {
 	}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		f.requests = append(f.requests, recordedRequest{Method: r.Method, Path: r.URL.Path, Body: string(body)})
+		f.mu.Lock()
+		f.requests = append(f.requests, recordedRequest{Method: r.Method, Path: r.URL.Path, Body: string(body), Header: r.Header.Clone()})
+		f.mu.Unlock()
 		if r.URL.Path == "/graphql" {
 			var payload struct {
 				Query     string         `json:"query"`
@@ -104,6 +111,13 @@ func newFakeServer(t *testing.T) *fakeServer {
 	}))
 	t.Cleanup(f.Close)
 	return f
+}
+
+// recorded returns a snapshot of the requests seen so far.
+func (f *fakeServer) recorded() []recordedRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]recordedRequest(nil), f.requests...)
 }
 
 func (f *fakeServer) client(t *testing.T) *GitHub {
@@ -791,5 +805,592 @@ func TestPullRequestContextHeadRepository(t *testing.T) {
 				t.Errorf("context = %+v, PR = %+v; want one PR with head repository %q", got, got.Existing, tc.want)
 			}
 		})
+	}
+}
+
+// A long-lived process shares one client across goroutines: a list command, a
+// claim and a dependency write can overlap. The race detector is the assertion
+// for the shared caches and client pointers; the values check that sharing did
+// not corrupt them.
+func TestClientSafeForConcurrentUse(t *testing.T) {
+	f := newFakeServer(t)
+	f.graphqlFunc["issue(number:"] = func(vars map[string]any) string {
+		return fmt.Sprintf(`{"data":{"repository":{"issue":{"id":"NODE%v"}}}}`, vars["number"])
+	}
+	f.graphql["viewer"] = `{"data":{"viewer":{"login":"lumberbarons"}}}`
+	f.graphql["issues(states:"] = fmt.Sprintf(
+		`{"data":{"repository":{"issues":{"pageInfo":{"hasNextPage":false},"nodes":[%s]}}}}`, issueJSON(1, ""))
+	f.graphql["closeIssue"] = `{"data":{"closeIssue":{"clientMutationId":null}}}`
+	f.graphql["addBlockedBy"] = `{"data":{"addBlockedBy":{"clientMutationId":null}}}`
+	c := f.client(t)
+
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	errs := make(chan error, 32)
+	for i := 0; i < 8; i++ {
+		wg.Add(4)
+		go func(n int) {
+			defer wg.Done()
+			if _, err := c.ListIssues(ctx, []IssueState{StateOpen}); err != nil {
+				errs <- err
+			}
+		}(i)
+		go func(n int) {
+			defer wg.Done()
+			if _, err := c.Viewer(ctx); err != nil {
+				errs <- err
+			}
+		}(i)
+		go func(n int) {
+			defer wg.Done()
+			if err := c.CloseIssue(ctx, n+1, CloseCompleted); err != nil {
+				errs <- err
+			}
+		}(i)
+		go func(n int) {
+			defer wg.Done()
+			if err := c.AddBlockedBy(ctx, n+1, n+2); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("concurrent call failed: %v", err)
+	}
+
+	// The viewer is cached, so eight concurrent callers share one lookup
+	// rather than racing to overwrite the cache.
+	viewerCalls := 0
+	for _, r := range f.recorded() {
+		if strings.Contains(r.Body, "viewer") {
+			viewerCalls++
+		}
+	}
+	if viewerCalls != 1 {
+		t.Errorf("viewer lookups = %d, want 1", viewerCalls)
+	}
+}
+
+// A credential refresh replaces both API clients while other goroutines are
+// mid-request. Each request must hold the client it started with; the race
+// detector is the assertion for the pointer swap.
+func TestCredentialRefreshIsSafeAlongsideRequests(t *testing.T) {
+	f := newFakeServer(t)
+	f.graphql["issues(states:"] = fmt.Sprintf(
+		`{"data":{"repository":{"issues":{"pageInfo":{"hasNextPage":false},"nodes":[%s]}}}}`, issueJSON(1, ""))
+	f.rest["POST /repos/o/r/issues/5/comments"] = restResponse{201, `{}`}
+	c := f.client(t)
+
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	errs := make(chan error, 32)
+	for i := 0; i < 8; i++ {
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			if err := c.refreshCredentials(); err != nil {
+				errs <- err
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if _, err := c.ListIssues(ctx, []IssueState{StateOpen}); err != nil {
+				errs <- err
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if err := c.Comment(ctx, 5, "a note"); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("call alongside a refresh failed: %v", err)
+	}
+}
+
+// go-gh resolves the token once, at construction. A client that outlives its
+// token has to rebuild from freshly resolved credentials rather than reuse the
+// dead one, or every later command fails until the process restarts.
+func TestAuthFailureRefreshesTokenAndRetries(t *testing.T) {
+	f := newFakeServer(t)
+	var mu sync.Mutex
+	attempts := 0
+	var retryAuth string
+	f.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempts++
+		n := attempts
+		if n > 1 {
+			retryAuth = r.Header.Get("Authorization")
+		}
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if n == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprint(w, `{"message":"Bad credentials"}`)
+			return
+		}
+		fmt.Fprint(w, `{"data":{"viewer":{"login":"lumberbarons"}}}`)
+	})
+	c := f.client(t)
+	refreshes := 0
+	c.tokenSource = func() (string, error) {
+		refreshes++
+		return "fresh-token", nil
+	}
+
+	login, err := c.Viewer(context.Background())
+	if err != nil || login != "lumberbarons" {
+		t.Fatalf("Viewer() = %q, %v; want a recovered login", login, err)
+	}
+	if refreshes != 1 {
+		t.Errorf("token source consulted %d times, want 1", refreshes)
+	}
+	if attempts != 2 {
+		t.Errorf("attempts = %d, want 2", attempts)
+	}
+	if retryAuth != "token fresh-token" {
+		t.Errorf("retry Authorization = %q, want the refreshed token", retryAuth)
+	}
+}
+
+// Recovery is one attempt, not a loop: a token that is still refused is a
+// credential problem for the caller to fix, and it must arrive as the typed
+// AuthError the CLI maps to exit 4.
+func TestAuthFailureWithoutRecoveryReturnsAuthError(t *testing.T) {
+	f := newFakeServer(t)
+	var mu sync.Mutex
+	attempts := 0
+	f.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempts++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"message":"Bad credentials"}`)
+	})
+	c := f.client(t)
+	c.tokenSource = func() (string, error) { return "still-bad", nil }
+
+	_, err := c.Viewer(context.Background())
+	var authErr *AuthError
+	if !errors.As(err, &authErr) {
+		t.Fatalf("err = %v, want a typed AuthError", err)
+	}
+	if attempts != 2 {
+		t.Errorf("attempts = %d, want 2 (one refresh, then surface)", attempts)
+	}
+	// Not wedged: the client still answers, with the same typed failure.
+	if _, err := c.Viewer(context.Background()); !errors.As(err, &authErr) {
+		t.Errorf("second call err = %v, want a typed AuthError", err)
+	}
+}
+
+// GitHub answers a secondary rate limit with 429 or 403 plus Retry-After. The
+// wait it names is the one to take: guessing shorter burns the next attempt on
+// the same refusal.
+func TestRateLimitedRequestHonoursRetryAfter(t *testing.T) {
+	f := newFakeServer(t)
+	var mu sync.Mutex
+	attempts := 0
+	f.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempts++
+		n := attempts
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if n == 1 {
+			w.Header().Set("Retry-After", "7")
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"message":"You have exceeded a secondary rate limit"}`)
+			return
+		}
+		fmt.Fprint(w, `{"data":{"viewer":{"login":"lumberbarons"}}}`)
+	})
+	c := f.client(t)
+	var waits []time.Duration
+	c.sleep = func(ctx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return nil
+	}
+
+	if _, err := c.Viewer(context.Background()); err != nil {
+		t.Fatalf("Viewer() = %v, want the retry to succeed", err)
+	}
+	if attempts != 2 {
+		t.Errorf("attempts = %d, want 2", attempts)
+	}
+	if want := []time.Duration{7 * time.Second}; !reflect.DeepEqual(waits, want) {
+		t.Errorf("waits = %v, want %v", waits, want)
+	}
+}
+
+// Without a Retry-After hint the wait is exponential from the client's base,
+// and the attempt count is bounded: a permanent refusal must not spin.
+func TestRateLimitedRequestBacksOffExponentially(t *testing.T) {
+	f := newFakeServer(t)
+	var mu sync.Mutex
+	attempts := 0
+	f.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempts++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, `{"message":"You have exceeded a secondary rate limit"}`)
+	})
+	c := f.client(t)
+	c.retryBase = 10 * time.Millisecond
+	var waits []time.Duration
+	c.sleep = func(ctx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return nil
+	}
+
+	if _, err := c.Viewer(context.Background()); err == nil {
+		t.Fatal("Viewer() succeeded against a permanent rate limit")
+	}
+	if attempts != 4 {
+		t.Errorf("attempts = %d, want 4 (one try plus three retries)", attempts)
+	}
+	want := []time.Duration{10 * time.Millisecond, 20 * time.Millisecond, 40 * time.Millisecond}
+	if !reflect.DeepEqual(waits, want) {
+		t.Errorf("waits = %v, want %v", waits, want)
+	}
+}
+
+// A Retry-After longer than the client will wait cannot be ridden out:
+// sleeping a capped slice of it and re-sending is refused again. The refusal
+// surfaces at once instead of blocking the caller for every attempt.
+func TestRateLimitedRequestBeyondMaxWaitIsNotRetried(t *testing.T) {
+	f := newFakeServer(t)
+	var mu sync.Mutex
+	attempts := 0
+	f.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempts++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "3600")
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, `{"message":"You have exceeded a secondary rate limit"}`)
+	})
+	c := f.client(t)
+	var waits []time.Duration
+	c.sleep = func(ctx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return nil
+	}
+
+	if _, err := c.Viewer(context.Background()); err == nil {
+		t.Fatal("Viewer() succeeded against a rate limit that outlasts the retry window")
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1 (no retry into a refusal that cannot clear)", attempts)
+	}
+	if len(waits) != 0 {
+		t.Errorf("waits = %v, want none", waits)
+	}
+}
+
+// A REST call is re-sent with its payload intact: the request body is a
+// stream the first attempt consumes, so each attempt needs its own reader.
+func TestRateLimitedRESTRequestResendsBody(t *testing.T) {
+	f := newFakeServer(t)
+	var mu sync.Mutex
+	var bodies []string
+	f.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(b))
+		n := len(bodies)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if n == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"message":"You have exceeded a secondary rate limit"}`)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{}`)
+	})
+	c := f.client(t)
+	c.sleep = func(ctx context.Context, d time.Duration) error { return nil }
+
+	if err := c.Comment(context.Background(), 5, "a note"); err != nil {
+		t.Fatalf("Comment() = %v, want the retry to succeed", err)
+	}
+	want := `{"body":"a note"}`
+	if len(bodies) != 2 || bodies[0] != want || bodies[1] != want {
+		t.Errorf("request bodies = %q, want the payload %s sent twice", bodies, want)
+	}
+}
+
+// A 403 that carries no rate-limit signal is a permission failure. Retrying it
+// would only delay the error a reviewer needs to see.
+func TestForbiddenWithoutRateLimitSignalIsNotRetried(t *testing.T) {
+	f := newFakeServer(t)
+	var mu sync.Mutex
+	attempts := 0
+	f.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempts++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"message":"Resource not accessible by integration"}`)
+	})
+	c := f.client(t)
+	c.sleep = func(ctx context.Context, d time.Duration) error {
+		t.Errorf("slept %v before retrying a permission failure", d)
+		return nil
+	}
+
+	_, err := c.Viewer(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "not accessible") {
+		t.Fatalf("err = %v, want the server's permission message", err)
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1", attempts)
+	}
+}
+
+// The list query carries the budget, so a long-lived caller can slow down
+// before it is refused instead of discovering the limit by hitting it.
+func TestListIssuesCapturesRateLimit(t *testing.T) {
+	f := newFakeServer(t)
+	f.graphql["issues(states:"] = fmt.Sprintf(
+		`{"data":{"rateLimit":{"cost":2,"remaining":4983,"resetAt":"2026-11-15T12:00:00Z"},
+			"repository":{"issues":{"pageInfo":{"hasNextPage":false},"nodes":[%s]}}}}`, issueJSON(1, ""))
+	c := f.client(t)
+	if _, ok := c.RateLimit(); ok {
+		t.Fatal("RateLimit() reported a budget before any list query ran")
+	}
+
+	if _, err := c.ListIssues(context.Background(), []IssueState{StateOpen}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := c.RateLimit()
+	if !ok {
+		t.Fatal("RateLimit() reported nothing after a list query")
+	}
+	want := RateLimit{Cost: 2, Remaining: 4983, ResetAt: time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)}
+	if got.Cost != want.Cost || got.Remaining != want.Remaining || !got.ResetAt.Equal(want.ResetAt) {
+		t.Errorf("RateLimit() = %+v, want %+v", got, want)
+	}
+	if !strings.Contains(f.recorded()[0].Body, "rateLimit { cost remaining resetAt }") {
+		t.Errorf("list query does not select the rate limit: %s", f.recorded()[0].Body)
+	}
+}
+
+// The viewer cannot change without a different token, and every command asks
+// for it, so it is resolved once.
+func TestViewerIsCached(t *testing.T) {
+	f := newFakeServer(t)
+	f.graphql["viewer"] = `{"data":{"viewer":{"login":"lumberbarons"}}}`
+	c := f.client(t)
+	for i := 0; i < 3; i++ {
+		login, err := c.Viewer(context.Background())
+		if err != nil || login != "lumberbarons" {
+			t.Fatalf("Viewer() = %q, %v", login, err)
+		}
+	}
+	if n := len(f.recorded()); n != 1 {
+		t.Errorf("viewer requests = %d, want 1", n)
+	}
+}
+
+// A refresh that cannot produce a token must surface the original auth
+// failure, not the refresh's own error: the caller's fix is still
+// `gh auth login`, and the typed error is what maps to exit 4.
+func TestAuthRefreshFailureSurfacesTheOriginalError(t *testing.T) {
+	f := newFakeServer(t)
+	var mu sync.Mutex
+	attempts := 0
+	f.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempts++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"message":"Bad credentials"}`)
+	})
+	c := f.client(t)
+	c.tokenSource = func() (string, error) { return "", errors.New("no token in keyring") }
+
+	_, err := c.Viewer(context.Background())
+	var authErr *AuthError
+	if !errors.As(err, &authErr) {
+		t.Fatalf("err = %v, want a typed AuthError", err)
+	}
+	if !strings.Contains(err.Error(), "Bad credentials") {
+		t.Errorf("err = %v, want the server's auth failure", err)
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1 (a failed refresh is not a retry)", attempts)
+	}
+}
+
+// A caller whose context ends stops the retry loop instead of waiting out the
+// backoff: a cancelled command must not keep a process alive.
+func TestRateLimitRetryStopsWhenContextEnds(t *testing.T) {
+	f := newFakeServer(t)
+	var mu sync.Mutex
+	attempts := 0
+	f.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempts++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, `{"message":"You have exceeded a secondary rate limit"}`)
+	})
+	c := f.client(t)
+	c.sleep = func(ctx context.Context, d time.Duration) error { return context.Canceled }
+
+	_, err := c.Viewer(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "secondary rate limit") {
+		t.Fatalf("err = %v, want the rate-limit failure", err)
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1", attempts)
+	}
+}
+
+// Retry-After arrives as delta-seconds or as an HTTP date, and either form may
+// ask for longer than the client is willing to wait.
+func TestParseRetryAfter(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+		want  time.Duration
+		ok    bool
+	}{
+		{"seconds", "7", 7 * time.Second, true},
+		{"zero", "0", 0, true},
+		{"negative", "-5", 0, true},
+		{"capped", "3600", maxRetryWait, true},
+		{"http date", time.Now().Add(30 * time.Second).UTC().Format(http.TimeFormat), 30 * time.Second, true},
+		{"past date", "Wed, 21 Oct 2015 07:28:00 GMT", 0, true},
+		{"empty", "", 0, false},
+		{"garbage", "soon", 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseRetryAfter(tc.value)
+			if ok != tc.ok {
+				t.Fatalf("parseRetryAfter(%q) ok = %v, want %v", tc.value, ok, tc.ok)
+			}
+			if !ok {
+				return
+			}
+			// A date-derived wait is measured against the wall clock, so
+			// allow a second of slack rather than freezing time.
+			if diff := got - tc.want; diff > time.Second || diff < -time.Second {
+				t.Errorf("parseRetryAfter(%q) = %v, want %v", tc.value, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSleepContextStopsOnCancellation(t *testing.T) {
+	if err := sleepContext(context.Background(), 0); err != nil {
+		t.Errorf("sleepContext(0) = %v, want nil", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := sleepContext(ctx, time.Hour); !errors.Is(err, context.Canceled) {
+		t.Errorf("sleepContext(cancelled) = %v, want context.Canceled", err)
+	}
+}
+
+// GitHub sometimes refuses a secondary rate limit with 403 rather than 429,
+// and marks it with Retry-After or an exhausted remaining budget. That is a
+// refusal to retry, not the permission failure a bare 403 is.
+func TestForbiddenRateLimitIsRetried(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		header  map[string]string
+		message string
+	}{
+		// The header cases carry a message with no rate-limit wording, so the
+		// header is the only signal that can make the 403 retryable.
+		{"retry-after", map[string]string{"Retry-After": "2"}, "Forbidden"},
+		{"exhausted budget", map[string]string{"X-RateLimit-Remaining": "0"}, "Forbidden"},
+		{"message", nil, "You have exceeded a secondary rate limit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeServer(t)
+			var mu sync.Mutex
+			attempts := 0
+			f.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				attempts++
+				n := attempts
+				mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				if n == 1 {
+					for k, v := range tc.header {
+						w.Header().Set(k, v)
+					}
+					w.WriteHeader(http.StatusForbidden)
+					fmt.Fprintf(w, `{"message":%q}`, tc.message)
+					return
+				}
+				fmt.Fprint(w, `{"data":{"viewer":{"login":"lumberbarons"}}}`)
+			})
+			c := f.client(t)
+			c.sleep = func(ctx context.Context, d time.Duration) error { return nil }
+
+			login, err := c.Viewer(context.Background())
+			if err != nil || login != "lumberbarons" {
+				t.Fatalf("Viewer() = %q, %v; want the retry to succeed", login, err)
+			}
+			if attempts != 2 {
+				t.Errorf("attempts = %d, want 2", attempts)
+			}
+		})
+	}
+}
+
+// A refresh can land on different credentials, so a login cached before one is
+// not trusted after it: attributing claims to the previous account would be a
+// silent, permanent error in a long-lived process.
+func TestViewerCacheIsDroppedAfterCredentialRefresh(t *testing.T) {
+	f := newFakeServer(t)
+	var mu sync.Mutex
+	viewerCalls := 0
+	f.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		viewerCalls++
+		n := viewerCalls
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if n == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprint(w, `{"message":"Bad credentials"}`)
+			return
+		}
+		fmt.Fprint(w, `{"data":{"viewer":{"login":"new-account"}}}`)
+	})
+	c := f.client(t)
+	c.tokenSource = func() (string, error) { return "fresh-token", nil }
+
+	for i := 0; i < 3; i++ {
+		login, err := c.Viewer(context.Background())
+		if err != nil || login != "new-account" {
+			t.Fatalf("Viewer() = %q, %v", login, err)
+		}
+	}
+	// The first call costs a refusal plus the recovered lookup; the refresh
+	// invalidates that cached login, so the second re-resolves it; the third
+	// is served from the cache.
+	if viewerCalls != 3 {
+		t.Errorf("viewer requests = %d, want 3", viewerCalls)
 	}
 }
