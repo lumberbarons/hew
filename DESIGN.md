@@ -1020,10 +1020,13 @@ checkpoint and a run, so callers run one migration at a time per migrator.
   and a 403/429 secondary limit is retried with `Retry-After` backoff up to the
   caller's deadline; the observed budget is available as `tracker.RateLimit`.
   GitHub offers no transaction across calls: a claim is check-then-act, `Start`
-  re-reads afterwards and returns the effective claimant, and two workers racing
-  the same issue can both observe success; with a shared login the tracker cannot
-  even tell them apart. `StartResult` and `ClaimedError` carry the claimant so a
-  caller can notice a race; the library does not pretend to prevent one.
+  re-reads the issue afterwards, and two workers racing the same issue can both
+  observe success; with a shared login the tracker cannot even tell them apart.
+  `StartResult.Claimant` is always the acting identity, never a lookup of who
+  won; the re-read `StartResult.Issue` carries the resulting assignees, which a
+  caller compares with `Claimant` to notice a racing claim, and `ClaimedError`
+  carries the existing claimant when a claim is refused up front. The library
+  does not pretend to prevent the race.
 - **Multi-write operations.** Create (issue, then edges), edit (a sequence of
   scalar and label writes), close and reopen (comment then state, plus release),
   block/unblock (validated, then edge by edge), apply and migrations (every
@@ -1059,7 +1062,8 @@ checkpoint and a run, so callers run one migration at a time per migrator.
   workers apart: every worker sharing the login gets the same answer, and two
   sessions racing a claim are indistinguishable to the tracker. A consumer such
   as birl keeps its own record of which worker holds which issue and treats
-  `StartResult.Claimant` as the tracker's answer, not as that record.
+  `StartResult.Claimant` as the identity the claim was made as, not as that
+  record or as proof this worker won.
 - **The backend is pinned at startup.** `Detect(dir)` reports the backend and
   where it lives — `Backend`, `Repo`, `Dir`, `MainCheckout`, and the local
   tracker's stable `ID` — from the filesystem and git, reading no store. `Open`
