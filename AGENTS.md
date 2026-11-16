@@ -25,7 +25,7 @@ cd consumer && golangci-lint run && golangci-lint fmt --diff  # ...and its own l
 shellcheck install.sh                      # install.sh is linted in CI too
 ```
 
-Coverage is a blocking CI gate: 90% statement coverage over the `internal/` packages (`cmd/` is excluded as pure wiring — see `.testcoverage.yml`). New logic needs tests or CI fails.
+Coverage is a blocking CI gate: 90% statement coverage over every package but `cmd/` (excluded as pure wiring — see `.testcoverage.yml`). The profile merges the root module's tests with `consumer/`'s scenarios run under `-coverpkg`, so statements only the consumer exercises count. New logic needs tests or CI fails.
 
 `govulncheck` reports stdlib advisories against the toolchain it runs under, and every CI job resolves its toolchain from the `go` directive in `go.mod`. That directive carries an explicit patch version, so setup-go installs it exactly — which is what makes the scan meaningful, and also means a new stdlib advisory turns the job red until the directive is bumped to the patch release that fixes it. Bumping it is the fix; it also raises the minimum toolchain for building from source. The scan covers the root module only — `evals/` is never shipped, so its dependencies carry no user-facing risk.
 
