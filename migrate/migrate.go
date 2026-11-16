@@ -1,19 +1,25 @@
-// Package migrate provides hew's source-neutral, checkpointed migration
-// engine in-process: map a source's records to Items, then create the issues,
-// wire their relationships, rewrite references and post comments and close
-// what the source closed. Every write is checkpointed, so an interrupted run
-// resumes where it stopped.
+// Package migrate provides hew's migration workflows and the source-neutral,
+// checkpointed engine underneath them in-process. Open resolves the target
+// backend, repository and transport; Migrator.Beads parses a beads snapshot and
+// maps it onto the conventions; Migrator.Local freezes a local tracker, copies
+// every issue and seals the tracker to GitHub only after every step finished.
+// Callers that opened their own target use Wrap with a Config naming their
+// checkpoint and repo identity, and may drive the engine directly with Run.
 //
-// The engine neither reads a source file nor renders output. A caller owns the
-// source parsing and the dry-run plan's presentation, supplies a Target to
-// write through and a Checkpoint to record progress, and decides what a Result
-// means. Its API is experimental until hew 1.0.
+// Every write is checkpointed, so an interrupted run resumes where it stopped.
+// Nothing here prints, exits, or names an internal store in a public
+// signature; a Result carries the counts, the dry-run plan, the backend a
+// workflow changed and typed warnings, and a caller decides what it all means.
+// Its API is experimental until hew 1.0.
 package migrate
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"time"
 
 	"github.com/lumberbarons/hew/internal/conventions"
@@ -68,6 +74,10 @@ type Item struct {
 	// Parent and BlockedBy are the Keys of other items.
 	Parent    string
 	BlockedBy []string
+	// Epic marks a source record that is a container. It changes nothing about
+	// the writes — an epic's labels and children carry that — but a dry run
+	// names it "epic" rather than leaving an untyped issue in the plan.
+	Epic bool
 }
 
 // CreateRequest is the issue the engine asks a Target to create. The body
@@ -172,20 +182,84 @@ type RunRequest struct {
 	Options Options
 }
 
-// Migrator runs the migration passes over one Target and Checkpoint. It owns
-// the checkpoint and a run, so callers run one migration at a time per
-// Migrator.
+// Migrator runs one migration workflow over one Target: the engine's passes
+// with the checkpoint, identity and source options the caller or Open
+// resolved. It owns the checkpoint and a run, so callers run one migration at
+// a time per Migrator.
 type Migrator struct {
 	target     Target
 	checkpoint Checkpoint
+	cfg        Config
+	// backend, repoName, repoKey and worktree are what Open resolved: the
+	// target's backend, the GitHub repository a Local migration seals to, the
+	// identity a checkpoint binds to, and the checkout the run works from.
+	// Wrap leaves them empty, because its caller supplied the target itself.
+	backend  tracker.Backend
+	repoName string
+	repoKey  string
+	worktree string
 }
 
-// Wrap makes a Migrator from an already-open target and checkpoint: the seam
-// hew's own CLI uses, where it has opened the store and state file itself.
-// External callers use the same seam until migrate.Open layers the beads and
-// local workflows on top.
-func Wrap(target Target, checkpoint Checkpoint) *Migrator {
-	return &Migrator{target: target, checkpoint: checkpoint}
+// Wrap makes a Migrator from an already-open target and the workflow options
+// its caller resolved: the seam hew's own CLI uses, where it has opened the
+// store and knows the identity its checkpoint binds to. External callers use
+// Open, which resolves the backend, repository and transport too.
+//
+// A nil target is allowed only for a dry run: the plan then comes from the
+// source alone, and a workflow asked to verify an existing checkpoint refuses
+// rather than reading a state file it cannot vouch for.
+func Wrap(target Target, cfg Config) *Migrator {
+	key := cfg.RepoKey
+	if key == "" {
+		key = cfg.Repo
+	}
+	return &Migrator{target: target, checkpoint: cfg.Checkpoint, cfg: cfg, repoName: cfg.Repo, repoKey: key}
+}
+
+// requireTarget refuses a workflow with nowhere to write. A dry run may plan
+// without one, reading the source alone.
+func (m *Migrator) requireTarget() error {
+	if m.target != nil || m.cfg.DryRun {
+		return nil
+	}
+	return &tracker.InvalidInputError{Field: "target", Reason: "must be set; only a dry run may plan without one"}
+}
+
+// checkpointFor settles the resume state one workflow records through: the
+// checkpoint a wrapping caller supplied, or a file opened at CheckpointPath
+// and bound to the source's digest. A targetless dry run has nothing to verify
+// a file against, so an existing one is refused and a fresh in-memory
+// checkpoint plans the source whole.
+func (m *Migrator) checkpointFor(digest, sourceNoun string) (Checkpoint, error) {
+	if m.checkpoint != nil {
+		return m.checkpoint, nil
+	}
+	if m.target == nil {
+		if err := m.refuseUnverifiableCheckpoint(); err != nil {
+			return nil, err
+		}
+		return tracker.NewMemoryCheckpoint(), nil
+	}
+	if m.cfg.CheckpointPath == "" {
+		return nil, &tracker.InvalidInputError{Field: "checkpoint", Reason: "must name the resume-state file the run records progress in"}
+	}
+	return tracker.OpenFileCheckpoint(m.cfg.CheckpointPath, m.repoKey, digest, sourceNoun)
+}
+
+// refuseUnverifiableCheckpoint reports the one case a targetless dry run
+// cannot answer: a checkpoint on disk can only be checked against the issues it
+// maps, and there is no issue store to read.
+func (m *Migrator) refuseUnverifiableCheckpoint() error {
+	path := m.cfg.CheckpointPath
+	if path == "" {
+		return nil
+	}
+	if _, err := os.Stat(path); err == nil {
+		return &CheckpointError{Path: path, Reason: "a checkpoint from an earlier run can only be checked against GitHub, and no target repository is set"}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("cannot tell whether %s holds a checkpoint: %w", path, err)
+	}
+	return nil
 }
 
 // Run creates every item not already in the checkpoint, wires parents and
@@ -198,7 +272,22 @@ func Wrap(target Target, checkpoint Checkpoint) *Migrator {
 // wrote, bound to its key and digest. A refused run therefore leaves nothing
 // behind. Context cancellation interrupts throttling and backend calls and
 // returns the partial Result with the context error.
-func (m *Migrator) Run(ctx context.Context, req RunRequest) (res Result, err error) {
+func (m *Migrator) Run(ctx context.Context, req RunRequest) (Result, error) {
+	return m.run(ctx, req, m.checkpoint)
+}
+
+// run is Run with the checkpoint named explicitly: a workflow opens one per
+// source, because the digest binds to bytes that are only known then. The copy
+// keeps the migrator's own checkpoint untouched, so a wrapped migrator can run
+// either seam without one run's state file leaking into another.
+func (m *Migrator) run(ctx context.Context, req RunRequest, checkpoint Checkpoint) (res Result, err error) {
+	runner := *m
+	runner.checkpoint = checkpoint
+	return runner.runPasses(ctx, req)
+}
+
+// runPasses is the engine proper.
+func (m *Migrator) runPasses(ctx context.Context, req RunRequest) (res Result, err error) {
 	opts := req.Options.normalized()
 	if err := m.validate(req.Items, opts); err != nil {
 		return Result{}, err
@@ -214,7 +303,7 @@ func (m *Migrator) Run(ctx context.Context, req RunRequest) (res Result, err err
 	res = Result{DryRun: opts.DryRun}
 	defer func() { res.Mapping = m.mapping() }()
 	if opts.DryRun {
-		res.WouldCreate, res.AlreadyCreated = m.planned(req.Items)
+		res.Plan, res.WouldCreate, res.AlreadyCreated = m.plan(req.Items)
 		return res, nil
 	}
 
@@ -261,7 +350,7 @@ func (o Options) normalized() Options {
 // validate refuses a Migrator without a target or checkpoint, and items whose
 // keys cannot identify them in the checkpoint. No backend is touched.
 func (m *Migrator) validate(items []Item, opts Options) error {
-	if m.target == nil {
+	if m.target == nil && !opts.DryRun {
 		return &tracker.InvalidInputError{Field: "target", Reason: "must be set"}
 	}
 	if m.checkpoint == nil {

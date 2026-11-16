@@ -43,7 +43,7 @@ func newEngine(t *testing.T, items ...Item) *engineFixture {
 				KeyNoun:    "item key",
 			},
 		},
-		eng: Wrap(f, checkpoint),
+		eng: Wrap(f, Config{Checkpoint: checkpoint}),
 	}
 }
 
@@ -54,7 +54,7 @@ func (e *engineFixture) resume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.eng = Wrap(e.target, checkpoint)
+	e.eng = Wrap(e.target, Config{Checkpoint: checkpoint})
 }
 
 func (e *engineFixture) run(t *testing.T) Result {
@@ -430,7 +430,7 @@ func TestEngineDryRunReportsWhatTheCheckpointAlreadyHolds(t *testing.T) {
 	if err := checkpoint.RecordCreated("a", issue.Number); err != nil {
 		t.Fatal(err)
 	}
-	e.eng = Wrap(e.target, checkpoint)
+	e.eng = Wrap(e.target, Config{Checkpoint: checkpoint})
 	e.req.Options.DryRun = true
 
 	res, err := e.eng.Run(context.Background(), e.req)
@@ -455,7 +455,7 @@ func TestEngineRefusesUpToDateMappingWithoutProvenance(t *testing.T) {
 	if err := checkpoint.RecordCreated("a", 42); err != nil {
 		t.Fatal(err)
 	}
-	e.eng = Wrap(e.target, checkpoint)
+	e.eng = Wrap(e.target, Config{Checkpoint: checkpoint})
 
 	_, err = e.eng.Run(context.Background(), e.req)
 	if err == nil || !strings.Contains(err.Error(), "does not carry the hew provenance marker") {
@@ -477,7 +477,7 @@ func TestEngineRefusesAKeyOutsideTheRunsSelection(t *testing.T) {
 	if err := checkpoint.RecordCreated("ghost", 99); err != nil {
 		t.Fatal(err)
 	}
-	e.eng = Wrap(e.target, checkpoint)
+	e.eng = Wrap(e.target, Config{Checkpoint: checkpoint})
 	e.req.Options.KnownKeys = map[string]bool{"a": true}
 
 	_, err = e.eng.Run(context.Background(), e.req)
@@ -516,7 +516,7 @@ func TestEngineBeforeCreateRunsAfterVerificationAndBeforeCreate(t *testing.T) {
 		if err := checkpoint.RecordCreated("a", 42); err != nil {
 			t.Fatal(err)
 		}
-		e.eng = Wrap(e.target, checkpoint)
+		e.eng = Wrap(e.target, Config{Checkpoint: checkpoint})
 
 		called := false
 		e.req.Options.BeforeCreate = func(context.Context) error { called = true; return nil }
@@ -606,7 +606,7 @@ func TestEngineProgressReceivesTheWrites(t *testing.T) {
 }
 
 func TestEngineRefusesAMigratorWithoutATargetOrCheckpoint(t *testing.T) {
-	res, err := Wrap(nil, nil).Run(context.Background(), RunRequest{Items: []Item{{Key: "a"}}})
+	res, err := Wrap(nil, Config{}).Run(context.Background(), RunRequest{Items: []Item{{Key: "a"}}})
 	var invalid *tracker.InvalidInputError
 	if !errors.As(err, &invalid) || invalid.Field != "target" {
 		t.Fatalf("err = %T %v, want an invalid target", err, err)

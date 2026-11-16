@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/lumberbarons/hew/internal/conventions"
-	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/model"
 )
 
@@ -657,28 +656,5 @@ func TestMigrateBeadsDefaultStatePath(t *testing.T) {
 	want := filepath.Join(filepath.Dir(opts.File), "github-migration.json")
 	if _, err := os.Stat(want); err != nil {
 		t.Errorf("no state file at the default path %s: %v", want, err)
-	}
-}
-
-func TestEnsureLabelsTreatsNamesAsCaseInsensitive(t *testing.T) {
-	f := newFake()
-	f.labels = []gh.Label{{Name: "area:cli"}}
-	app, _, _ := newApp(f)
-	if err := app.ensureLabels(ctx, []gh.Label{{Name: "Area:CLI"}, {Name: "New"}, {Name: "new"}}); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range f.calls {
-		if strings.HasPrefix(c, "CreateLabel") && (strings.Contains(c, "Area:CLI") || strings.Contains(c, `"new"`)) {
-			t.Errorf("created a label GitHub already has under another case: %s", c)
-		}
-	}
-}
-
-// Bead labels that differ from a convention label only in case are derived, not
-// copied, exactly like the exact-case ones.
-func TestAreaLabelsSkipConventionLabelsInAnyCase(t *testing.T) {
-	got := areaLabels([]string{"Bug", "p1", "IN-Progress", "web-ui"})
-	if !slices.Equal(got, []string{"web-ui"}) {
-		t.Errorf("areaLabels = %v, want only web-ui", got)
 	}
 }
