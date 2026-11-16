@@ -35,6 +35,7 @@ func TestTypedErrorsPreserveDetailsWhenWrapped(t *testing.T) {
 		{&OpenChildrenError{Issue: 42, Open: 3}, "issue #42 is an epic with 3 open sub-issues"},
 		{&PartialCloseError{Issue: 42, Err: errors.New("api unavailable")}, "posted the reason comment on #42 but closing it failed: api unavailable"},
 		{&MigratedError{Path: "/repo/.hew", Repo: "owner/repo"}, "local tracker /repo/.hew was migrated to GitHub repository owner/repo"},
+		{&MigratedError{Path: "/repo/.hew"}, "local tracker /repo/.hew was migrated to GitHub and is an archive now"},
 		{&LockTimeoutError{Path: "/repo/.hew/lock", Timeout: 30 * time.Second}, "timed out after 30s waiting for tracker lock /repo/.hew/lock"},
 		{&InvalidInputError{Field: "priority", Reason: "must be P0..P4"}, "invalid priority: must be P0..P4"},
 	} {
@@ -89,5 +90,32 @@ func TestAuthErrorUnwrapsCause(t *testing.T) {
 	err := fmt.Errorf("opening tracker: %w", &AuthError{Err: cause})
 	if !errors.Is(err, cause) {
 		t.Fatal("authentication error lost its cause")
+	}
+}
+
+// TestTranslatedErrorsKeepTheirCause is the mirrored half: an error the
+// boundary built from a store refusal carries that refusal, so a caller can
+// still match the cause and prints the message that names the tracker rather
+// than a generic retelling.
+func TestTranslatedErrorsKeepTheirCause(t *testing.T) {
+	cause := errors.New("/repo/.hew tracks issues in \"github\", not locally")
+	for _, err := range []error{
+		&MigratedError{Path: "/repo/.hew", Repo: "owner/repo", Err: cause},
+		&LockTimeoutError{Path: "/repo/.hew/lock", Timeout: time.Second, Err: cause},
+	} {
+		if !errors.Is(err, cause) {
+			t.Errorf("%T lost its cause", err)
+		}
+		if got := err.Error(); got != cause.Error() {
+			t.Errorf("%T.Error() = %q, want the store's own message", err, got)
+		}
+	}
+	// A claim whose refinement lookup failed is still about the claim, but the
+	// auth failure behind it has to be matchable: an orchestrator re-authenticates
+	// rather than treating every worker as a rival.
+	claim := &ClaimedError{Issue: 7, Assignees: []string{"alice"}, Err: &AuthError{Err: errors.New("401")}}
+	var auth *AuthError
+	if !errors.As(claim, &auth) {
+		t.Error("ClaimedError did not expose the auth failure behind it")
 	}
 }

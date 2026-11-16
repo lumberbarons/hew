@@ -35,7 +35,7 @@ type StartResult struct {
 func (t *Tracker) Start(ctx context.Context, number int, opts StartOptions) (StartResult, error) {
 	issue, err := t.store.GetIssue(ctx, number)
 	if err != nil {
-		return StartResult{}, err
+		return StartResult{}, asReadError(err)
 	}
 	if !issue.IsOpen() {
 		return StartResult{}, &ClosedError{Issue: number, Reason: issue.StateReason}
@@ -62,7 +62,7 @@ func (t *Tracker) Start(ctx context.Context, number int, opts StartOptions) (Sta
 
 	actor, err := t.identity(ctx)
 	if err != nil {
-		return StartResult{}, err
+		return StartResult{}, asWriteError(err)
 	}
 	// The local store can make the claim conditional: one locked write checks
 	// and claims, so simultaneous starts have exactly one winner. Claim before
@@ -74,39 +74,39 @@ func (t *Tracker) Start(ctx context.Context, number int, opts StartOptions) (Sta
 			if errors.Is(err, gh.ErrClaimConflict) {
 				current, readErr := t.store.GetIssue(ctx, number)
 				if readErr != nil {
-					return StartResult{}, readErr
+					return StartResult{}, asReadError(readErr)
 				}
 				return StartResult{}, claimError(ctx, t.store, current, actor)
 			}
-			return StartResult{}, err
+			return StartResult{}, asWriteError(err)
 		}
 		if err := swapPriority(ctx, t.store, issue, priority); err != nil {
 			// Claiming is triage: a claim without the priority would leave the
 			// issue half-started, and a retry would then be told it is already
 			// the caller's instead of finishing the job.
-			return StartResult{}, errors.Join(err, undoClaim(ctx, t.store, issue, actor, opts.Force))
+			return StartResult{}, errors.Join(asWriteError(err), undoClaim(ctx, t.store, issue, actor, opts.Force))
 		}
 	} else {
 		if err := swapPriority(ctx, t.store, issue, priority); err != nil {
-			return StartResult{}, err
+			return StartResult{}, asWriteError(err)
 		}
 		if opts.Force && len(issue.Assignees) > 0 {
 			if err := t.store.RemoveAssignees(ctx, number, issue.Assignees); err != nil {
-				return StartResult{}, err
+				return StartResult{}, asWriteError(err)
 			}
 		}
 		if !issue.InProgress() {
 			if err := t.store.AddLabels(ctx, number, []string{model.InProgressLabel}); err != nil {
-				return StartResult{}, err
+				return StartResult{}, asWriteError(err)
 			}
 		}
 		if err := t.store.AddAssignee(ctx, number, actor); err != nil {
-			return StartResult{}, err
+			return StartResult{}, asWriteError(err)
 		}
 	}
 	after, err := t.store.GetIssue(ctx, number)
 	if err != nil {
-		return StartResult{}, err
+		return StartResult{}, asReadError(err)
 	}
 	return StartResult{Issue: issueFromModel(after, true), Claimant: actor}, nil
 }
@@ -133,7 +133,7 @@ func claimError(ctx context.Context, store gh.IssueStore, issue model.Issue, act
 	if actor == "" {
 		var err error
 		if actor, err = store.Viewer(ctx); err != nil {
-			refusal.Err = err
+			refusal.Err = asAuthError(err)
 			return refusal
 		}
 	}
@@ -165,18 +165,18 @@ func swapPriority(ctx context.Context, store gh.IssueStore, issue model.Issue, p
 func undoClaim(ctx context.Context, store gh.IssueStore, issue model.Issue, actor string, force bool) error {
 	var errs []error
 	if !slices.Contains(issue.Assignees, actor) {
-		errs = append(errs, store.RemoveAssignees(ctx, issue.Number, []string{actor}))
+		errs = append(errs, asWriteError(store.RemoveAssignees(ctx, issue.Number, []string{actor})))
 	}
 	if force {
 		// The forced claim displaced the earlier claimants; put them back.
 		for _, who := range issue.Assignees {
 			if who != actor {
-				errs = append(errs, store.AddAssignee(ctx, issue.Number, who))
+				errs = append(errs, asWriteError(store.AddAssignee(ctx, issue.Number, who)))
 			}
 		}
 	}
 	if !issue.InProgress() {
-		errs = append(errs, store.RemoveLabel(ctx, issue.Number, model.InProgressLabel))
+		errs = append(errs, asWriteError(store.RemoveLabel(ctx, issue.Number, model.InProgressLabel)))
 	}
 	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("could not release the claim on #%d: %w", issue.Number, err)

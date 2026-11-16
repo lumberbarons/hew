@@ -34,17 +34,17 @@ func (t *Tracker) Release(ctx context.Context, number int, opts ReleaseOptions) 
 	var actor string
 	if !opts.Force {
 		if actor, err = t.identity(ctx); err != nil {
-			return err
+			return asWriteError(err)
 		}
 		if len(issue.Assignees) != 1 || issue.Assignees[0] != actor {
 			return &NotOwnerError{Issue: number, Assignees: slices.Clone(issue.Assignees), Actor: actor}
 		}
 	}
 	if releaser, ok := t.store.(gh.ClaimReleaser); ok {
-		return releaser.ReleaseIssueClaim(ctx, number, actor, opts.Force)
+		return asReleaseError(releaser.ReleaseIssueClaim(ctx, number, actor, opts.Force))
 	}
 	if err := clearClaim(ctx, t.store, issue); err != nil {
-		return &PartialReleaseError{Issue: number, Err: err}
+		return &PartialReleaseError{Issue: number, Err: asWriteError(err)}
 	}
 	return nil
 }

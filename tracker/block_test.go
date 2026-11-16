@@ -54,7 +54,7 @@ func (s *depStore) GetIssue(_ context.Context, number int) (model.Issue, error) 
 			return i, nil
 		}
 	}
-	return model.Issue{}, fmt.Errorf("issue #%d not found", number)
+	return model.Issue{}, &gh.NotFoundError{Issue: number}
 }
 
 func (s *depStore) AddBlockedBy(_ context.Context, number, blocker int) error {

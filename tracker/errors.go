@@ -3,10 +3,12 @@ package tracker
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/local"
 )
 
 // ClaimedError reports an existing claim. Assignees may be empty for a
@@ -34,6 +36,10 @@ func (e *ClaimedError) Error() string {
 	}
 	return fmt.Sprintf("issue #%d is already claimed", e.Issue)
 }
+
+// Unwrap exposes Err, so an authentication failure behind an unanswerable
+// "whose claim is it" is still matchable as AuthError.
+func (e *ClaimedError) Unwrap() error { return e.Err }
 
 // BlockedError reports the open blockers preventing a claim.
 type BlockedError struct {
@@ -214,25 +220,47 @@ func (e *PartialCloseError) Error() string {
 
 func (e *PartialCloseError) Unwrap() error { return e.Err }
 
-// MigratedError reports that a local tracker has moved to a GitHub repo.
+// MigratedError reports that a local tracker has moved to a GitHub repo. Repo
+// is the repository the migration record names, empty when that record is
+// unreadable. Err carries the store's own refusal when the boundary translated
+// one, so the message names the tracker directory and the backend that owns it
+// now; Path and Repo stay available for a caller that reports the move itself.
 type MigratedError struct {
 	Path string
 	Repo string
+	Err  error
 }
 
 func (e *MigratedError) Error() string {
-	return fmt.Sprintf("local tracker %s was migrated to GitHub repository %s", e.Path, e.Repo)
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	if e.Repo != "" {
+		return fmt.Sprintf("local tracker %s was migrated to GitHub repository %s", e.Path, e.Repo)
+	}
+	return fmt.Sprintf("local tracker %s was migrated to GitHub and is an archive now", e.Path)
 }
 
-// LockTimeoutError reports an expired wait for a local tracker's lock.
+func (e *MigratedError) Unwrap() error { return e.Err }
+
+// LockTimeoutError reports an expired wait for a local tracker's lock. Err
+// carries the store's own timeout when the boundary translated one, so the
+// message keeps the detail that explains the wait — a running migration, or
+// another hew process — instead of a generic retelling.
 type LockTimeoutError struct {
 	Path    string
 	Timeout time.Duration
+	Err     error
 }
 
 func (e *LockTimeoutError) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
 	return fmt.Sprintf("timed out after %s waiting for tracker lock %s", e.Timeout, e.Path)
 }
+
+func (e *LockTimeoutError) Unwrap() error { return e.Err }
 
 // InvalidInputError reports an invalid argument or plan entry field.
 // Field names a library input, rather than a CLI flag.
@@ -258,6 +286,49 @@ func asReadError(err error) error {
 		return &NotFoundError{Issue: notFound.Issue, Err: notFound}
 	}
 	return asAuthError(err)
+}
+
+// asWriteError types a store failure at a mutation boundary: the read-side
+// translations, plus the two local refusals that are not backend failures at
+// all — a tracker that has been migrated away, and a lock wait that expired.
+// Everything else is returned unchanged, so a cancellation or a transient
+// backend failure keeps its identity for errors.Is and its cause for errors.As.
+func asWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var migrated *local.MigratedError
+	if errors.As(err, &migrated) {
+		return &MigratedError{Path: migrated.Dir, Repo: migrated.Repo, Err: migrated}
+	}
+	var timeout *local.LockTimeoutError
+	if errors.As(err, &timeout) {
+		return &LockTimeoutError{Path: timeout.Path, Timeout: timeout.Timeout, Err: timeout}
+	}
+	return asReadError(err)
+}
+
+// asReleaseError types the atomic release's refusals. The local store decides
+// ownership under its lock, after Release's preflight read, so its structured
+// refusals are the authority on a race: they become the same public types the
+// preflight returns, with the claimant the lock actually saw.
+func asReleaseError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var notClaimed *local.NotClaimedError
+	if errors.As(err, &notClaimed) {
+		return &NotClaimedError{Issue: notClaimed.Issue}
+	}
+	var notOwner *local.NotOwnerError
+	if errors.As(err, &notOwner) {
+		return &NotOwnerError{
+			Issue:     notOwner.Issue,
+			Assignees: slices.Clone(notOwner.Assignees),
+			Actor:     notOwner.Actor,
+		}
+	}
+	return asWriteError(err)
 }
 
 func formatNumbers(numbers []int, separator string) string {

@@ -117,7 +117,7 @@ func openLocal(ctx context.Context, cfg Config, target Target) (*Tracker, error)
 		Context: ctx,
 	})
 	if err != nil {
-		return nil, err
+		return nil, asWriteError(err)
 	}
 	return &Tracker{backend: BackendLocal, store: store, actor: actor}, nil
 }
