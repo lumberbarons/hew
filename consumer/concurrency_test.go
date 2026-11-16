@@ -100,7 +100,8 @@ func TestExternalConsumerRunsConcurrentLocalActors(t *testing.T) {
 
 // TestExternalConsumerSharesOneGitHubClient runs reads and writes from several
 // goroutines on one open tracker. The client's node-ID cache, viewer cache and
-// budget are synchronized, so the race detector is the assertion.
+// budget are synchronized, so the race detector is the assertion; the final
+// count checks that every concurrent write landed.
 func TestExternalConsumerSharesOneGitHubClient(t *testing.T) {
 	fake := newGitHubFake()
 	tr := openGitHubTracker(t, fake)
@@ -115,11 +116,11 @@ func TestExternalConsumerSharesOneGitHubClient(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	for i := range 8 {
+	for i := range 12 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			switch i % 4 {
+			switch i % 6 {
 			case 0:
 				if _, err := tr.Snapshot(ctx, tracker.SnapshotOptions{}); err != nil {
 					t.Errorf("Snapshot: %v", err)
@@ -136,8 +137,28 @@ func TestExternalConsumerSharesOneGitHubClient(t *testing.T) {
 				if _, err := tr.Primer(ctx); err != nil {
 					t.Errorf("Primer: %v", err)
 				}
+			case 4:
+				if _, err := tr.Create(ctx, tracker.CreateRequest{
+					Title: fmt.Sprintf("Concurrent %d", i), Type: "task", Priority: "P2",
+				}); err != nil {
+					t.Errorf("Create: %v", err)
+				}
+			case 5:
+				title := fmt.Sprintf("Edited %d", i)
+				if _, err := tr.Edit(ctx, tracker.EditRequest{Issue: 101 + i%6, Title: &title}); err != nil {
+					t.Errorf("Edit: %v", err)
+				}
 			}
 		}()
 	}
 	wg.Wait()
+
+	// The six seeded issues plus the two concurrent creates all landed.
+	snapshot, err := tr.Snapshot(ctx, tracker.SnapshotOptions{})
+	if err != nil {
+		t.Fatalf("final Snapshot: %v", err)
+	}
+	if got := len(snapshot.List(tracker.ListFilter{})); got != 8 {
+		t.Errorf("tracker holds %d issues after the concurrent run, want 8", got)
+	}
 }
