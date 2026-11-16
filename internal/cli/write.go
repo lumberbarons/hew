@@ -459,10 +459,28 @@ func setError(err error) error {
 	}
 	var partial *tracker.PartialEditError
 	if errors.As(err, &partial) {
+		applied := make([]string, len(partial.Applied))
+		for i, field := range partial.Applied {
+			applied[i] = editFieldFlag(field)
+		}
 		return fmt.Errorf("#%d partially updated (applied %s); %s failed: %w",
-			partial.Issue, strings.Join(partial.Applied, ", "), partial.Failed, partial.Err)
+			partial.Issue, strings.Join(applied, ", "), editFieldFlag(partial.Failed), partial.Err)
 	}
 	return err
+}
+
+// editFieldFlag spells a tracker.EditRequest field the way the command's flags
+// do, so a partial-update report names options a caller can actually retry.
+func editFieldFlag(field string) string {
+	switch field {
+	case "addAreas":
+		return "add-area"
+	case "removeAreas":
+		return "remove-area"
+	case "noParent":
+		return "no-parent"
+	}
+	return field
 }
 
 // validateTitle checks the stored title, including any cosmetic epic prefix.
