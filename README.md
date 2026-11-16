@@ -489,12 +489,23 @@ primer still reports how much is waiting.
 
 ## Use as a library
 
-A Go program can drive a tracker in-process instead of shelling out to the
-binary: `github.com/lumberbarons/hew/tracker`
+A Go program can drive hew in-process instead of shelling out to the binary:
+`github.com/lumberbarons/hew/tracker`
 ([docs](https://pkg.go.dev/github.com/lumberbarons/hew/tracker)) takes the
 worktree and the claim identity as arguments — never the process's working
-directory or environment — and returns typed results and typed errors, not exit
-codes.
+directory or environment — and returns typed results, warnings and errors, not
+exit codes. Pull requests and migrations are separate packages in the contract,
+`pr` and `migrate`, rather than hanging off a tracker handle they do not belong
+to.
+
+[DESIGN.md's Tracker library contract](DESIGN.md#tracker-library) maps every
+command to the public operation that performs its workflow, names the request,
+result, warning and error types an external module can refer to, and states the
+concurrency, identity, backend and authentication guarantees. That inventory is
+the target to program against: it covers reads and queries, primer data, creation,
+editing, reopening, claims, closure, dependencies, apply plans, pull requests
+and both migrations. Flags, `$EDITOR`, file input, terminal rendering and exit
+codes stay in the CLI, so a library caller passes values and renders nothing.
 
 ```go
 t, err := tracker.Open(ctx, tracker.Config{Worktree: worktree})
@@ -525,23 +536,36 @@ fmt.Println("claiming as", worker.Identity())
 `Config.Actor` (or `As`, which shares the open store) names the claimant on a
 local tracker; GitHub claims as the `gh` CLI's authenticated login and detects
 the repository from the origin remote unless `Config.Repo` pins one. Notices go
-to the optional `Config.Notice` writer — the library never prints. Today it
-covers backend detection (`Detect`, `Open`), snapshot and single-issue reads,
-the claim lifecycle (`Start`, `Release`, `Close`), `Block`/`Unblock` and
-`ApplyPlan`; the rest of the command surface is CLI-only. `ready`, `list`,
-`show`, `epic status`, `start`, `release`, `close`, `block`, `unblock` and
-`apply` are implemented on top of it, so a library caller and the commands share
-one behavior.
+to the optional `Config.Notice` writer — the library never prints. The backend
+is fixed at `Open`, so a long-lived process can pin it with `Config.Backend` and
+treat a later `Detect` that disagrees as an error instead of following it.
 
-**Stability: experimental.** The `tracker` API may change in any v0.x minor
-release. A breaking change ships as a `feat!:`/`fix!:` commit, so it lands under
-Breaking changes in the release notes rather than Features, and CI diffs the
-exported surface so every change is deliberate and visible in review; from 1.0
-it will be covered by the project's compatibility policy. The minimum toolchain
-is the `go` directive in [`go.mod`](go.mod), which carries an explicit patch
-release and is raised when a standard-library advisory lands; it is also what CI
-builds with. The GitHub backend needs the same `gh auth login`
-credentials as the CLI; the local backend needs neither `gh` nor a network.
+The local backend is safe to write from several worktrees at once: every
+mutation takes the tracker's lock, and its claim and release are atomic, so
+`start` has one winner. On GitHub every worker shares the authenticated login,
+so the tracker cannot tell two sessions apart — a consumer keeps its own record
+of which worker holds which issue. Every call takes a `context.Context`;
+cancellation is matchable with `errors.Is`, and an interrupted multi-write
+operation reports the part that landed.
+
+Today `tracker` ships backend detection, snapshot and single-issue reads, the
+claim lifecycle (`Start`, `Release`, `Close`), `Block`/`Unblock` and
+`ApplyPlan`, and `ready`, `list`, `show`, `epic status`, `start`, `release`,
+`close`, `block`, `unblock` and `apply` are implemented on it. The rest of the
+contract's inventory — creation and editing, search and triage, primer data,
+initialization, pull requests and migrations — is being extracted from the CLI
+under epic #270; until an operation ships, the CLI is still its only caller.
+
+**Stability: experimental.** The public packages are experimental until 1.0: the
+API may change in any v0.x minor release. A breaking change ships as a
+`feat!:`/`fix!:` commit, so it lands under Breaking changes in the release notes
+rather than Features, and CI diffs the exported surface of every public package
+so each change is deliberate and visible in review; from 1.0 it will be covered
+by the project's compatibility policy. The minimum toolchain is the `go`
+directive in [`go.mod`](go.mod), which carries an explicit patch release and is
+raised when a standard-library advisory lands; it is also what CI builds with.
+The GitHub backend needs the same `gh auth login` credentials as the CLI; the
+local backend needs neither `gh` nor a network.
 
 ## Design
 

@@ -36,8 +36,8 @@ The layering exists so everything with behavior is testable without hitting GitH
 | Directory | What | When to read |
 |---|---|---|
 | `cmd/hew/` | main + urfave/cli v3 flag wiring only — no behavior, excluded from coverage | Adding a command or flag |
-| `internal/cli/` | The commands, written against the `gh.IssueStore` interface, with `gh.PullRequests` for `pr` alone — see [internal/cli/AGENTS.md](internal/cli/AGENTS.md) | Changing command behavior or guarded flows |
-| `tracker/` | The public in-process API (`github.com/lumberbarons/hew/tracker`): `Open` picks a backend from an explicit worktree and actor, and `Reader`/`Writer` carry the reads (`Snapshot`, `Get`) and dependency writes (`Block`, `Unblock`) over an already-open store, so the CLI's commands delegate instead of reimplementing; typed results and typed errors, never exit codes; experimental until 1.0, with the exported surface diffed in CI | Changing the library API, or moving an operation out of the CLI |
+| `internal/cli/` | The CLI adapter, written against the `gh.IssueStore` interface, with `gh.PullRequests` for `pr` alone — see [internal/cli/AGENTS.md](internal/cli/AGENTS.md). Flags, input files, the editor, hooks, rendering and exit mapping live here; workflow decisions delegate to public packages per the operation inventory in DESIGN.md ("Tracker library") | Changing command behavior or guarded flows |
+| `tracker/` | The public in-process API (`github.com/lumberbarons/hew/tracker`) and the tracker half of the contract in DESIGN.md ("Tracker library"): `Open`/`Detect` pick a backend from an explicit worktree and actor; `Snapshot`/`Get` carry reads; `Start`/`Release`/`Close`/`Block`/`Unblock` carry writes; `ApplyPlan` carries its `Checkpoint` interface (`MemoryCheckpoint`; `FileCheckpoint` for the CLI's state file) and typed plan model. The CLI delegates over a store it already opened (`Wrap`/`WrapAs`/`WrapWriter`), so tracker must not import `internal/render` or `internal/cli`; typed results and errors, never exit codes; experimental until 1.0, with the exported surface diffed in CI | Changing the library API, the apply/checkpoint engine, or moving an operation out of the CLI |
 | `internal/gh/` | Thin API layer: the `IssueStore` and `PullRequests` interfaces (`Client` is their union) and the go-gh-backed implementation of both; auth reuses the `gh` CLI's stored credentials (no auth flow of our own), repo detection comes from the git remote | Changing queries, auth, or API calls |
 | `internal/model/` | Pure domain logic: readiness, label normalization, cycle detection — no I/O, plain unit tests | Changing readiness or label semantics |
 | `internal/render/` | Text and JSON renderers, golden-file tested (`testdata/*.golden`) | Changing output format |
@@ -45,7 +45,6 @@ The layering exists so everything with behavior is testable without hitting GitH
 | `internal/git/` | Local branch state for `pr` (current branch, the upstream branch name a PR is opened from, has-upstream) and the main checkout's path from any linked worktree (where the local tracker lives); shells out to git behind an injectable runner | Changing what `pr` knows about the checkout |
 | `internal/beads/` | Parses a beads (bd) `issues.jsonl` snapshot for `migrate` — pure parsing, no runtime dependency on bd | Changing the beads migration |
 | `internal/plan/` | The `apply` plan-file codec: JSONL parsing into tracker's typed plan entries. Local-`id` resolution, dangling-reference and cycle rejection live in `tracker.ValidatePlan`, so all validation still happens before anything is written | Changing the plan file format |
-| `tracker/` | The public in-process library (`github.com/lumberbarons/hew/tracker`): `Open`/`Detect`, `Snapshot`/`Get`, typed results and errors, and `ApplyPlan` with its `Checkpoint` interface (`MemoryCheckpoint`; `FileCheckpoint` for the CLI's state file) and typed plan model — hew's own CLI wraps the store it already opened and renders the results, so tracker must not import `internal/render` or `internal/cli` | Changing the library API or the apply/checkpoint engine |
 | `internal/local/` | The JSONL-backed `gh.IssueStore` for local-only repos (and the snapshot, freeze and seal `migrate local` uses to move it to GitHub): one `issues.jsonl` in a self-ignoring `.hew/` at the main checkout, every mutation under an exclusive lock and an atomic rename; the default viewer is per worktree and the store's atomic claim backs the guard; `Locate` is the backend switch `buildApp` reads (`--repo` always forces GitHub; see "Local backend" in DESIGN.md); `.hew/` is untracked, so `git clean -fdx` at the main checkout deletes the only copy of the tracker | Changing the local file format, locking, claim identity, backend selection, or local-only behavior |
 | `internal/conformance/` | The behavior every `gh.IssueStore` shares, run against `local` and against the `fakeClient` the command tests use — a test helper package, no production code depends on it | Changing what a backend must do, or a fake that drifts from the real client |
 | `internal/editor/` | Launches `$EDITOR` seeded with the body template, for `--edit` on `create` and `epic create` | Changing the `--edit` flow |
@@ -53,6 +52,14 @@ The layering exists so everything with behavior is testable without hitting GitH
 | `site/` | Self-contained landing page for lumberbarons.github.io/hew (no build step, no external assets), published to `gh-pages` by `publish-install` | Changing the landing page |
 | `examples/` | Copy-pasteable GitHub Actions recipes (`auto-triage.yml`), documented in README | Changing the auto-triage workflow or its documented guarantees |
 | `evals/` | Separate module (keeps the tokenizer out of the CLI's dependency graph): the token-efficiency harness and its committed fixtures — see [evals/README.md](evals/README.md). A renderer change invalidates the fixtures' hew side; re-capture and re-publish the numbers in DESIGN.md | Changing renderer output, or the published token figures |
+
+The public packages are one API in three parts: `tracker` today, with `pr` and
+`migrate` as their workflows are extracted from `internal/cli`. DESIGN.md's
+"Tracker library" is the operation inventory and the boundary: no public package
+imports `internal/cli` or `internal/render`, every public signature names public
+types, and an operation moves out of the adapter only with its tests and its
+contract row. The exported surface of every public package is diffed against the
+base commit in CI.
 
 | File | What | When to read |
 |---|---|---|
