@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -38,6 +39,10 @@ type Config struct {
 	// Notice receives lock-wait and migration notices. Nil discards them; the
 	// tracker never writes to stderr.
 	Notice io.Writer
+	// Transport carries every GitHub API request. Nil means the default HTTP
+	// client; an in-process consumer's tests supply an httptest server's
+	// transport to answer GitHub without the network or a `gh` process.
+	Transport http.RoundTripper
 }
 
 // Tracker is an open tracker: one backend, one worktree, and the identity
@@ -47,6 +52,7 @@ type Tracker struct {
 	backend Backend
 	store   gh.IssueStore
 	actor   string
+	repo    gh.Repo
 }
 
 // Open opens the tracker for cfg.Worktree. The backend is detected once, from
@@ -129,7 +135,7 @@ func openGitHub(ctx context.Context, cfg Config, target Target) (*Tracker, error
 	if err != nil {
 		return nil, err
 	}
-	store, err := newGitHub(repo)
+	store, err := newGitHub(repo, cfg.Transport)
 	if err != nil {
 		return nil, asAuthError(err)
 	}
@@ -137,12 +143,14 @@ func openGitHub(ctx context.Context, cfg Config, target Target) (*Tracker, error
 	if err != nil {
 		return nil, asAuthError(err)
 	}
-	return &Tracker{backend: BackendGitHub, store: store, actor: login}, nil
+	return &Tracker{backend: BackendGitHub, store: store, actor: login, repo: repo}, nil
 }
 
 // newGitHub builds the GitHub client. Tests replace it to avoid credentials
 // and the network.
-var newGitHub = func(repo gh.Repo) (gh.IssueStore, error) { return gh.New(repo) }
+var newGitHub = func(repo gh.Repo, transport http.RoundTripper) (gh.IssueStore, error) {
+	return gh.NewWithTransport(repo, transport)
+}
 
 // githubRepo resolves the GitHub repository from the explicit spec, or from
 // the origin remote of the worktree's main checkout.
@@ -216,6 +224,16 @@ func asAuthError(err error) error {
 
 // Backend reports the backend Open selected.
 func (t *Tracker) Backend() Backend { return t.backend }
+
+// Repo reports the GitHub repository this tracker works against, as
+// owner/name. It is empty on a local tracker, and on a Tracker wrapped around
+// a store whose repository the caller did not name.
+func (t *Tracker) Repo() string {
+	if t.repo.Owner == "" || t.repo.Name == "" {
+		return ""
+	}
+	return t.repo.String()
+}
 
 // Identity reports the claimant identity claims are made as: the actor given
 // to Open or As on a local tracker, the authenticated login on GitHub.

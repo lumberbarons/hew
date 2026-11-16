@@ -112,6 +112,17 @@ func New(repo Repo) (*GitHub, error) {
 	return NewWithOptions(repo, api.ClientOptions{})
 }
 
+// NewWithTransport builds a client whose requests go through transport. It is
+// the seam an in-process consumer uses to serve GitHub responses from an
+// httptest server, with no network and no `gh` process; hew's own CLI leaves
+// the transport nil and the default HTTP client is used.
+func NewWithTransport(repo Repo, transport http.RoundTripper) (*GitHub, error) {
+	if transport == nil {
+		return New(repo)
+	}
+	return NewWithOptions(repo, api.ClientOptions{Transport: transport})
+}
+
 // NewWithOptions exists for tests, which inject a Transport, and is where the
 // retry policy's defaults are installed.
 func NewWithOptions(repo Repo, opts api.ClientOptions) (*GitHub, error) {
