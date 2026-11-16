@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -84,6 +85,15 @@ func TestMissingTargetsArePublicNotFoundErrors(t *testing.T) {
 			_, err := tr.Close(ctx, missing, tracker.CloseOptions{Reason: "done"})
 			return err
 		},
+		"Edit": func() error {
+			title := "Renamed"
+			_, err := tr.Edit(ctx, tracker.EditRequest{Issue: missing, Title: &title})
+			return err
+		},
+		"Reopen": func() error {
+			_, err := tr.Reopen(ctx, missing, tracker.ReopenOptions{Reason: "r"})
+			return err
+		},
 		"Block": func() error {
 			_, err := tr.Block(ctx, missing, []int{1}, tracker.BlockOptions{})
 			return err
@@ -117,5 +127,112 @@ func TestMissingTargetsArePublicNotFoundErrors(t *testing.T) {
 				t.Errorf("%s error type is %T from %q, want a type from the public package", name, err, got)
 			}
 		})
+	}
+}
+
+// TestExternalCallerEditsAndReopens is done-when's first item from outside the
+// module: a consumer that can name only the public package edits every field,
+// moves and removes a parent, and reopens closed work with a reason.
+func TestExternalCallerEditsAndReopens(t *testing.T) {
+	tr := externalTracker(t)
+	ctx := context.Background()
+
+	applied, err := tr.ApplyPlan(ctx, []tracker.PlanEntry{
+		{ID: "epic", Title: "Epic: parent", Type: tracker.PlanTypeEpic},
+		{ID: "other", Title: "Epic: other", Type: tracker.PlanTypeEpic},
+		{ID: "work", Title: "Work", Type: "task"},
+	}, tracker.ApplyOptions{})
+	if err != nil {
+		t.Fatalf("ApplyPlan: %v", err)
+	}
+	number := applied.Mapping["work"]
+	parent := applied.Mapping["epic"]
+	other := applied.Mapping["other"]
+	if number == 0 || parent == 0 || other == 0 {
+		t.Fatalf("ApplyPlan mapping = %v", applied.Mapping)
+	}
+
+	title, body, priority, typ := "Renamed", "### Goal\n\nrewritten\n", "P1", "bug"
+	edit, err := tr.Edit(ctx, tracker.EditRequest{
+		Issue:    number,
+		Title:    &title,
+		Body:     &body,
+		Priority: &priority,
+		Type:     &typ,
+		AddAreas: []string{"api"},
+		Parent:   &parent,
+	})
+	if err != nil {
+		t.Fatalf("Edit: %v", err)
+	}
+	wantApplied := []string{"priority", "type", "addAreas", "title", "body", "parent"}
+	if !slices.Equal(edit.Applied, wantApplied) {
+		t.Errorf("Applied = %v, want %v", edit.Applied, wantApplied)
+	}
+
+	got, err := tr.Get(ctx, number)
+	if err != nil {
+		t.Fatalf("Get after edit: %v", err)
+	}
+	if got.Title != title {
+		t.Errorf("title = %q, want %q", got.Title, title)
+	}
+	if got.Body == nil || *got.Body != body {
+		t.Errorf("body = %v, want %q", got.Body, body)
+	}
+	if got.Priority == nil || *got.Priority != priority {
+		t.Errorf("priority = %v, want %q", got.Priority, priority)
+	}
+	if got.Type == nil || *got.Type != typ {
+		t.Errorf("type = %v, want %q", got.Type, typ)
+	}
+	if !slices.Equal(got.Areas, []string{"api"}) {
+		t.Errorf("areas = %v, want [api]", got.Areas)
+	}
+	if got.Parent == nil || *got.Parent != parent {
+		t.Errorf("parent = %v, want #%d", got.Parent, parent)
+	}
+
+	if _, err := tr.Edit(ctx, tracker.EditRequest{Issue: number, Parent: &other}); err != nil {
+		t.Fatalf("Edit (move parent): %v", err)
+	}
+	moved, err := tr.Get(ctx, number)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved.Parent == nil || *moved.Parent != other {
+		t.Errorf("parent after move = %v, want #%d", moved.Parent, other)
+	}
+
+	if _, err := tr.Close(ctx, number, tracker.CloseOptions{Reason: "done", Completed: true}); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	reopened, err := tr.Reopen(ctx, number, tracker.ReopenOptions{Reason: "regressed in v1.2"})
+	if err != nil {
+		t.Fatalf("Reopen: %v", err)
+	}
+	if !reopened.Reopened {
+		t.Error("Reopen reported the issue was already open")
+	}
+	after, err := tr.Get(ctx, number)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.State != "open" {
+		t.Errorf("state = %q, want open", after.State)
+	}
+	if len(after.Comments) == 0 || !strings.Contains(after.Comments[len(after.Comments)-1].Body, "regressed in v1.2") {
+		t.Errorf("comments = %+v, want the reopen reason", after.Comments)
+	}
+
+	if _, err := tr.Edit(ctx, tracker.EditRequest{Issue: number, NoParent: true}); err != nil {
+		t.Fatalf("Edit (remove parent): %v", err)
+	}
+	detached, err := tr.Get(ctx, number)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detached.Parent != nil {
+		t.Errorf("parent = %v, want it removed", detached.Parent)
 	}
 }

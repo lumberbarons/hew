@@ -111,6 +111,26 @@ func (s *memoryStore) CloseIssue(_ context.Context, _ int, _ gh.CloseReason) err
 	return s.take("CloseIssue")
 }
 
+func (s *memoryStore) ReopenIssue(_ context.Context, _ int) error {
+	return s.take("ReopenIssue")
+}
+
+func (s *memoryStore) EditTitle(_ context.Context, _ int, _ string) error {
+	return s.take("EditTitle")
+}
+
+func (s *memoryStore) EditBody(_ context.Context, _ int, _ string) error {
+	return s.take("EditBody")
+}
+
+func (s *memoryStore) AddSubIssue(_ context.Context, _, _ int, _ bool) error {
+	return s.take("AddSubIssue")
+}
+
+func (s *memoryStore) RemoveSubIssue(_ context.Context, _, _ int) error {
+	return s.take("RemoveSubIssue")
+}
+
 func (s *memoryStore) AddBlockedBy(_ context.Context, _, _ int) error {
 	return s.take("AddBlockedBy")
 }
@@ -267,6 +287,118 @@ func TestAuthFailuresAtEveryMutationStageArePublicAuthErrors(t *testing.T) {
 			store: newMemoryStore(fixture(1, "Work", "P2", "bug")).inject("CloseIssue", authErr, 0),
 			run: func(ctx context.Context, tr *Tracker, _ *Writer) error {
 				_, err := tr.Close(ctx, 1, CloseOptions{Reason: "done"})
+				return err
+			},
+		},
+		{
+			name:  "edit pre-read",
+			store: newMemoryStore(fixture(1, "Work", "P2", "bug")).inject("GetIssue", authErr, 0),
+			run: func(ctx context.Context, tr *Tracker, _ *Writer) error {
+				_, err := tr.Edit(ctx, EditRequest{Issue: 1, Title: point("Renamed")})
+				return err
+			},
+		},
+		{
+			name:  "edit parent read",
+			store: newMemoryStore(fixture(1, "Work", "P2", "bug"), fixture(2, "Parent", "P2", "epic")).inject("GetIssue", authErr, 2),
+			run: func(ctx context.Context, tr *Tracker, _ *Writer) error {
+				_, err := tr.Edit(ctx, EditRequest{Issue: 1, Parent: point(2)})
+				return err
+			},
+		},
+		{
+			name:  "edit priority write",
+			store: newMemoryStore(fixture(1, "Work", "P3", "bug")).inject("RemoveLabel", authErr, 0),
+			run: func(ctx context.Context, tr *Tracker, _ *Writer) error {
+				_, err := tr.Edit(ctx, EditRequest{Issue: 1, Priority: point("P1")})
+				return err
+			},
+		},
+		{
+			name:  "edit type write",
+			store: newMemoryStore(fixture(1, "Work", "P2", "bug")).inject("AddLabels", authErr, 0),
+			run: func(ctx context.Context, tr *Tracker, _ *Writer) error {
+				_, err := tr.Edit(ctx, EditRequest{Issue: 1, Type: point("task")})
+				return err
+			},
+		},
+		{
+			name:  "edit area write",
+			store: newMemoryStore(fixture(1, "Work", "P2", "bug")).inject("AddLabels", authErr, 0),
+			run: func(ctx context.Context, tr *Tracker, _ *Writer) error {
+				_, err := tr.Edit(ctx, EditRequest{Issue: 1, AddAreas: []string{"area"}})
+				return err
+			},
+		},
+		{
+			name:  "edit title write",
+			store: newMemoryStore(fixture(1, "Work", "P2", "bug")).inject("EditTitle", authErr, 0),
+			run: func(ctx context.Context, tr *Tracker, _ *Writer) error {
+				_, err := tr.Edit(ctx, EditRequest{Issue: 1, Title: point("Renamed")})
+				return err
+			},
+		},
+		{
+			name:  "edit body write",
+			store: newMemoryStore(fixture(1, "Work", "P2", "bug")).inject("EditBody", authErr, 0),
+			run: func(ctx context.Context, tr *Tracker, _ *Writer) error {
+				_, err := tr.Edit(ctx, EditRequest{Issue: 1, Body: point("### Goal\n\nnew\n")})
+				return err
+			},
+		},
+		{
+			name:  "edit parent write",
+			store: newMemoryStore(fixture(1, "Work", "P2", "bug"), fixture(2, "Parent", "P2", "epic")).inject("AddSubIssue", authErr, 0),
+			run: func(ctx context.Context, tr *Tracker, _ *Writer) error {
+				_, err := tr.Edit(ctx, EditRequest{Issue: 1, Parent: point(2)})
+				return err
+			},
+		},
+		{
+			name:  "edit no-parent write",
+			store: newMemoryStore(withParent()).inject("RemoveSubIssue", authErr, 0),
+			run: func(ctx context.Context, tr *Tracker, _ *Writer) error {
+				_, err := tr.Edit(ctx, EditRequest{Issue: 1, NoParent: true})
+				return err
+			},
+		},
+		{
+			name:  "reopen pre-read",
+			store: newMemoryStore(closedFixtureIssue(1)).inject("GetIssue", authErr, 0),
+			run: func(ctx context.Context, tr *Tracker, _ *Writer) error {
+				_, err := tr.Reopen(ctx, 1, ReopenOptions{Reason: "r"})
+				return err
+			},
+		},
+		{
+			name:  "reopen reason comment",
+			store: newMemoryStore(closedFixtureIssue(1)).inject("Comment", authErr, 0),
+			run: func(ctx context.Context, tr *Tracker, _ *Writer) error {
+				_, err := tr.Reopen(ctx, 1, ReopenOptions{Reason: "r"})
+				return err
+			},
+		},
+		{
+			name:  "reopen state change",
+			store: newMemoryStore(closedFixtureIssue(1)).inject("ReopenIssue", authErr, 0),
+			run: func(ctx context.Context, tr *Tracker, _ *Writer) error {
+				_, err := tr.Reopen(ctx, 1, ReopenOptions{Reason: "r"})
+				return err
+			},
+		},
+		{
+			name:  "reopen claim label",
+			store: newMemoryStore(withClaim(closedFixtureIssue(1), "actor-a")).inject("RemoveLabel", authErr, 0),
+			run: func(ctx context.Context, tr *Tracker, _ *Writer) error {
+				_, err := tr.Reopen(ctx, 1, ReopenOptions{Reason: "r"})
+				return err
+			},
+		},
+		{
+			name:  "reopen claim assignee",
+			store: newMemoryStore(withClaim(closedFixtureIssue(1), "actor-a")).inject("RemoveAssignees", authErr, 0),
+			run: func(ctx context.Context, tr *Tracker, _ *Writer) error {
+				_, err := tr.Reopen(ctx, 1, ReopenOptions{Reason: "r"})
 				return err
 			},
 		},
@@ -547,6 +679,29 @@ func (s *staleRead) ReleaseIssueClaim(ctx context.Context, number int, login str
 
 func claimedBy(number int, actor string) model.Issue {
 	issue := fixture(number, "Work", "P2", "task", "in-progress")
+	issue.Assignees = []string{actor}
+	return issue
+}
+
+// withParent is a fixture that already has a parent, the state a NoParent edit
+// starts from.
+func withParent() model.Issue {
+	issue := fixture(1, "Work", "P2", "bug")
+	issue.Parent = &model.Ref{Number: 2, State: "OPEN"}
+	return issue
+}
+
+// closedFixtureIssue is a closed issue, the state a reopen starts from.
+func closedFixtureIssue(number int) model.Issue {
+	issue := fixture(number, "Work", "P2", "bug")
+	issue.State = "CLOSED"
+	return issue
+}
+
+// withClaim adds both halves of a claim to an issue, so a reopen has one to
+// clear.
+func withClaim(issue model.Issue, actor string) model.Issue {
+	issue.Labels = append(issue.Labels, model.InProgressLabel)
 	issue.Assignees = []string{actor}
 	return issue
 }

@@ -2,11 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/model"
+	"github.com/lumberbarons/hew/tracker"
 )
 
 // childlessEpicBackends runs a test body against the fake client and the
@@ -95,6 +97,12 @@ func TestEpicLabelIsReservedFromAreas(t *testing.T) {
 	if !model.IsConventionLabel("Epic") {
 		t.Error("the epic marker is a convention label in any case")
 	}
-	err := validateAreaLabels("--area", []string{"epic"})
-	exitCode(t, err, ExitUsage)
+	// The rule lives in tracker, so a library caller is refused before the
+	// CLI ever composes a flag spelling for it.
+	var invalid *tracker.InvalidInputError
+	if err := tracker.ValidateAreaLabel("epic"); !errors.As(err, &invalid) {
+		t.Errorf("ValidateAreaLabel(epic) = %v, want an InvalidInputError", err)
+	}
+	app, _, _ := newApp(newFake(issue(1, "Work", "P2", "bug")))
+	exitCode(t, app.Set(ctx, 1, SetOpts{AddAreas: []string{"epic"}}), ExitUsage)
 }

@@ -43,27 +43,39 @@ func (t *Tracker) Release(ctx context.Context, number int, opts ReleaseOptions) 
 	if releaser, ok := t.store.(gh.ClaimReleaser); ok {
 		return asReleaseError(releaser.ReleaseIssueClaim(ctx, number, actor, opts.Force))
 	}
-	if err := clearClaim(ctx, t.store, issue); err != nil {
+	if _, err := clearClaim(ctx, t.store, issue); err != nil {
 		return &PartialReleaseError{Issue: number, Err: asWriteError(err)}
 	}
 	return nil
 }
 
+// clearedClaim reports the halves of a claim clearClaim removed.
+type clearedClaim struct {
+	Label     bool
+	Assignees []string
+}
+
 // clearClaim drops the in-progress label and every assignee from issue. The
 // label goes first: if the assignee removal then fails the issue is still
 // claimed either way, and the caller reports exactly that.
-func clearClaim(ctx context.Context, store gh.IssueStore, issue model.Issue) error {
+func clearClaim(ctx context.Context, store gh.IssueStore, issue model.Issue) (clearedClaim, error) {
+	var cleared clearedClaim
 	// Remove each in-progress label by the spelling the issue carries, so the
 	// removal does not depend on the backend resolving case.
 	for _, l := range issue.Labels {
 		if model.IsInProgressLabel(l) {
 			if err := store.RemoveLabel(ctx, issue.Number, l); err != nil {
-				return err
+				return cleared, err
 			}
+			cleared.Label = true
 		}
 	}
 	if len(issue.Assignees) == 0 {
-		return nil
+		return cleared, nil
 	}
-	return store.RemoveAssignees(ctx, issue.Number, issue.Assignees)
+	if err := store.RemoveAssignees(ctx, issue.Number, issue.Assignees); err != nil {
+		return cleared, err
+	}
+	cleared.Assignees = slices.Clone(issue.Assignees)
+	return cleared, nil
 }

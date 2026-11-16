@@ -220,6 +220,54 @@ func (e *PartialCloseError) Error() string {
 
 func (e *PartialCloseError) Unwrap() error { return e.Err }
 
+// PartialEditError reports an edit that stopped partway: the fields named in
+// Applied were written, Failed is the field whose write failed, and the edits
+// after it never ran. Err is the backend cause.
+type PartialEditError struct {
+	Issue   int
+	Applied []string
+	Failed  string
+	Err     error
+}
+
+func (e *PartialEditError) Error() string {
+	return fmt.Sprintf("editing #%d failed at %s after %s: %v",
+		e.Issue, e.Failed, strings.Join(e.Applied, ", "), e.Err)
+}
+
+func (e *PartialEditError) Unwrap() error { return e.Err }
+
+// ReopenStage names the step a failed Reopen stopped at.
+type ReopenStage string
+
+const (
+	// ReopenStageComment is a reopen whose reason comment posted but whose
+	// state change did not land. A retry comments again.
+	ReopenStageComment ReopenStage = "comment"
+	// ReopenStageClaim is a reopen whose issue is open but whose stale claim
+	// could not be cleared. A retry is a no-op reopen that will not clear it;
+	// the claim needs a forced release.
+	ReopenStageClaim ReopenStage = "claim"
+)
+
+// PartialReopenError reports a reopen that stopped partway. Stage says what
+// survived: the reason comment with the issue still closed, or an open issue
+// that is still claimed. Err is the backend cause.
+type PartialReopenError struct {
+	Issue int
+	Stage ReopenStage
+	Err   error
+}
+
+func (e *PartialReopenError) Error() string {
+	if e.Stage == ReopenStageClaim {
+		return fmt.Sprintf("reopened #%d but clearing its stale claim failed; it is open and still claimed: %v", e.Issue, e.Err)
+	}
+	return fmt.Sprintf("posted the reason comment on #%d but reopening it failed: %v", e.Issue, e.Err)
+}
+
+func (e *PartialReopenError) Unwrap() error { return e.Err }
+
 // MigratedError reports that a local tracker has moved to a GitHub repo. Repo
 // is the repository the migration record names, empty when that record is
 // unreadable. Err carries the store's own refusal when the boundary translated
