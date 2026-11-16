@@ -593,10 +593,12 @@ func TestExternalConsumerFreezesTheTrackerDuringMigration(t *testing.T) {
 	}
 }
 
-// TestExternalConsumerResumesALocalMigration is done-when's second item: an
-// injected mid-run failure leaves the tracker usable and local, and the
-// checkpointed rerun finishes without duplicating what already landed.
-func TestExternalConsumerResumesALocalMigration(t *testing.T) {
+// TestExternalConsumerFailedLocalRunLeavesTrackerUsableAndRefusesAStaleCheckpoint
+// is done-when's second item, first half: an injected mid-run failure leaves
+// the tracker usable and local, and a checkpoint bound to an issues.jsonl that
+// has since changed is refused rather than resumed. The resume itself is
+// TestExternalConsumerResumesAnInterruptedLocalRun.
+func TestExternalConsumerFailedLocalRunLeavesTrackerUsableAndRefusesAStaleCheckpoint(t *testing.T) {
 	root, tr := localWork(t)
 	ctx := context.Background()
 	for i := 1; i <= 3; i++ {
