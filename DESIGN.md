@@ -706,10 +706,12 @@ agent silently duplicating half a plan.
     layouts the shortcut cannot read. Anything else — git failing for another
     reason, or a config that exists but cannot be read — is an error, never a
     silent fall back to GitHub, since that would send writes to the wrong tracker.
-- **Testing**: unit tests against a fake API layer; golden files for renderer output.
-  An integration smoke test against a real scratch repo (behind a build tag, run
-  manually — it needs a token and mutates state, so it stays out of CI) is deferred
-  for now.
+- **Testing**: unit tests against a fake API layer; golden files for renderer output;
+  the external-consumer module in `consumer/`, which imports only the public
+  packages and runs their workflows against a real local tracker and an isolated
+  GitHub transport. An integration smoke test against a real scratch repo (behind a
+  build tag, run manually — it needs a token and mutates state, so it stays out of
+  CI) is deferred for now.
 
 ## Local backend
 
@@ -793,11 +795,13 @@ This section is the contract. It maps every command to the public operation that
 performs its workflow, or to the integration concern that justifies keeping it
 in the adapter; it names the request, result, warning and error types an external
 module can refer to; and it states the concurrency, identity, backend and
-authentication guarantees those operations carry. The extraction lands in
-#309–#317. Until an operation ships, its command still runs through the adapter,
-which is the only place a workflow decision may live while the contract is being
-implemented. Changing this contract changes the compatibility policy (#171) as
-much as it changes code.
+authentication guarantees those operations carry. The extraction landed in
+#309–#317, and every operation below ships: `consumer/` is a separate Go module
+that imports only `tracker`, `pr` and `migrate` and runs these workflows in CI,
+so a command that still owned a workflow, or an operation that needed an
+internal type, would fail there rather than pass its own unit tests. Changing
+this contract changes the compatibility policy (#171) as much as it changes
+code.
 
 ### Package layout
 
@@ -807,10 +811,11 @@ much as it changes code.
 | `pr` | Pull-request workflows: issue inference, body composition, creation and amendment. | `tracker`, `internal/git`, `internal/gh`, `internal/conventions`; never `internal/cli`, `internal/render` or `cmd/hew` |
 | `migrate` | The source-neutral migration engine and the beads and local-to-GitHub workflows, including source mapping, checkpointed resume and the local tracker's seal. | `tracker`, `internal/beads`, `internal/local`, `internal/gh`, `internal/model`, `internal/conventions`; never `internal/cli`, `internal/render` or `cmd/hew` |
 
-The table is the destination every extraction issue shares. Until a package
-lands, its workflows still live in `internal/cli`; the row for each command in
-the operation inventory below says which operation it will call and what the
-adapter keeps either way.
+The table is the destination every extraction issue shared, and every row now
+holds: no workflow lives in `internal/cli` any more, which the consumer module
+in `consumer/` demonstrates by importing only the three public packages. The
+row for each command in the operation inventory below names the operation it
+calls and what the adapter keeps.
 
 The dependency rule is one-way: `internal/cli` may import every public package,
 and no public package may import the CLI, the renderers or the command wiring.
@@ -1147,11 +1152,13 @@ same bytes and maps the same typed error to the same exit code.
 All three public packages are experimental until 1.0: the API may change in any
 v0.x minor release. A breaking change ships as a `feat!:`/`fix!:` commit, so it
 lands under Breaking changes in the release notes rather than Features, and the
-CI API-surface check diffs every public package against the base commit so the
-change is deliberate and visible in review (#317 extends the check from
-`tracker` alone). From 1.0 the compatibility policy (#171) governs the same
-surface. The minimum toolchain is the `go` directive in `go.mod`; a consumer that
-pins an older toolchain than that is out of contract.
+CI API-surface check diffs every public package — `tracker`, `pr` and `migrate`
+— against the base commit so the change is deliberate and visible in review.
+The external-consumer module in `consumer/` is the other half of the gate: it
+compiles and runs the supported workflows using only those packages. From 1.0
+the compatibility policy (#171) governs the same surface. The minimum toolchain
+is the `go` directive in `go.mod`, and `consumer/go.mod` declares the same
+minimum; a consumer that pins an older toolchain than that is out of contract.
 
 ## Build & distribution
 
@@ -1160,6 +1167,15 @@ pins an older toolchain than that is out of contract.
   full test suite (`go test -race -coverprofile ./...`), plus `shellcheck` on
   `install.sh` — the one thing strangers pipe into bash gets linted like everything
   else. Go version comes from `go.mod`.
+- **The external-consumer gate**: `consumer/` is its own module with a local
+  replace to the checkout, importing only `tracker`, `pr` and `migrate`. CI runs
+  it with the race detector on a PATH without a hew binary, and checks that the
+  module is tidy, that its go directive matches the root's, and that the public
+  packages' production dependency graph excludes `internal/cli`,
+  `internal/render` and `cmd/hew`. Its tests are the contract's scenarios:
+  initialization, queries, creation, claims, dependencies, plans, pull requests
+  and both migrations, plus typed refusals, concurrency, rate-limit retry and
+  auth recovery against an isolated transport.
 - **Coverage gate**: 90% minimum, blocking. Go's toolchain measures *statement*
   coverage only (line-equivalent in practice; there is no native branch coverage —
   see gobco note in open questions), enforced with `go-test-coverage` in CI.

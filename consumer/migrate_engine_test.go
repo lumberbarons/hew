@@ -2,7 +2,7 @@
 // external module does: only public imports, a Target the consumer writes,
 // and tracker's in-memory checkpoint. Nothing here runs the hew binary or
 // reaches the network.
-package migrate_test
+package consumer_test
 
 import (
 	"context"

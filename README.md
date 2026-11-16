@@ -565,25 +565,30 @@ of which worker holds which issue. Every call takes a `context.Context`;
 cancellation is matchable with `errors.Is`, and an interrupted multi-write
 operation reports the part that landed.
 
-Today `tracker` ships backend detection and target metadata, snapshot and
-single-issue reads, the query policy behind `ready`, `list`, `show`,
+The whole inventory ships today: backend detection and target metadata, snapshot
+and single-issue reads, the query policy behind `ready`, `list`, `show`,
 `epic status`, `search`, `triage` and `prime` — including the untriaged
-boundary and advisory text findings — the claim lifecycle (`Start`, `Release`,
-`Close`), `Block`/`Unblock` and `ApplyPlan`. The rest of the contract's
-inventory — creation and editing, initialization, pull requests and migrations
-— is being extracted from the CLI under epic #270; until an operation ships,
-the CLI is still its only caller.
+boundary and advisory text findings — creation and epics, editing and
+reopening, the claim lifecycle (`Start`, `Release`, `Close`), `Block`/`Unblock`
+and `ApplyPlan` with its checkpoints, initialization, pull-request creation and
+amendment, and both migrations. [`consumer/`](consumer/) is a separate Go
+module that imports only these three packages and runs those workflows in CI,
+against a real local tracker and an isolated GitHub transport; an operation
+that needs an internal type fails to build there instead of passing its own
+unit tests.
 
 **Stability: experimental.** The public packages are experimental until 1.0: the
 API may change in any v0.x minor release. A breaking change ships as a
 `feat!:`/`fix!:` commit, so it lands under Breaking changes in the release notes
 rather than Features, and CI diffs the exported surface of every public package
-so each change is deliberate and visible in review; from 1.0 it will be covered
+so each change is deliberate and visible in review; the [`consumer/`](consumer/)
+module is the compile-time half of the same gate. From 1.0 it will be covered
 by the project's compatibility policy. The minimum toolchain is the `go`
 directive in [`go.mod`](go.mod), which carries an explicit patch release and is
-raised when a standard-library advisory lands; it is also what CI builds with.
-The GitHub backend needs the same `gh auth login` credentials as the CLI; the
-local backend needs neither `gh` nor a network.
+raised when a standard-library advisory lands; it is also what CI builds with,
+and the consumer module declares the same minimum. The GitHub backend needs the
+same `gh auth login` credentials as the CLI; the local backend needs neither
+`gh` nor a network.
 
 ## Design
 

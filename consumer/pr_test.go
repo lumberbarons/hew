@@ -2,7 +2,7 @@
 // external module does: only public imports, an isolated GitHub transport, and
 // a real checkout with a pushed branch. Nothing here runs the hew binary or
 // reaches the network.
-package pr_test
+package consumer_test
 
 import (
 	"context"
@@ -24,7 +24,7 @@ import (
 )
 
 // issueNode is the GraphQL shape the client reads for one issue.
-func issueNode(number int, title string, labels []string, assignee string) map[string]any {
+func pullIssueNode(number int, title string, labels []string, assignee string) map[string]any {
 	nodes := make([]map[string]any, len(labels))
 	for i, label := range labels {
 		nodes[i] = map[string]any{"name": label}
@@ -56,10 +56,10 @@ type createdPull struct {
 	draft  bool
 }
 
-// githubFake answers the GraphQL queries and REST calls the workflow makes,
+// pullRequestFake answers the GraphQL queries and REST calls the workflow makes,
 // from one in-memory issue set and pull-request state. It is a transport, not
 // a process: nothing listens on a public address and no credential is read.
-type githubFake struct {
+type pullRequestFake struct {
 	mu       sync.Mutex
 	issues   []map[string]any
 	viewer   string
@@ -69,7 +69,7 @@ type githubFake struct {
 	updates  []createdPull
 }
 
-func (f *githubFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (f *pullRequestFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
@@ -115,7 +115,7 @@ func (f *githubFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (f *githubFake) graphQL(w http.ResponseWriter, r *http.Request) {
+func (f *pullRequestFake) graphQL(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Query string `json:"query"`
 	}
@@ -163,27 +163,8 @@ func (f *githubFake) graphQL(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func writeJSON(w http.ResponseWriter, value any) {
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
-
-// rewriteTransport sends every API request to the fake server while keeping
-// go-gh's own host and path, which is what makes the transport a stand-in for
-// the network rather than a different client.
-type rewriteTransport struct{ target *url.URL }
-
-func (t rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	clone := req.Clone(req.Context())
-	clone.URL.Scheme = t.target.Scheme
-	clone.URL.Host = t.target.Host
-	clone.Host = t.target.Host
-	return http.DefaultTransport.RoundTrip(clone)
-}
-
 // openWorkflow serves the fake and opens the workflow against it.
-func openWorkflow(t *testing.T, worktree string, fake *githubFake) (*pr.Client, error) {
+func openWorkflow(t *testing.T, worktree string, fake *pullRequestFake) (*pr.Client, error) {
 	t.Helper()
 	server := httptest.NewServer(fake)
 	t.Cleanup(server.Close)
@@ -245,9 +226,9 @@ func gitRun(t *testing.T, dir string, args ...string) {
 // outside the package: typed requests and results, an isolated transport, and
 // a real checkout, with no hew binary and no network.
 func TestExternalConsumerCreatesAndAmendsAPullRequest(t *testing.T) {
-	fake := &githubFake{
+	fake := &pullRequestFake{
 		viewer: "octocat",
-		issues: []map[string]any{issueNode(314, "PR workflow", []string{"P2", "task", "in-progress"}, "octocat")},
+		issues: []map[string]any{pullIssueNode(314, "PR workflow", []string{"P2", "task", "in-progress"}, "octocat")},
 	}
 	client, err := openWorkflow(t, checkout(t), fake)
 	if err != nil {
@@ -298,7 +279,7 @@ func TestExternalConsumerCreatesAndAmendsAPullRequest(t *testing.T) {
 // A credential failure reaches the consumer as the public tracker type, so an
 // orchestrator branches on one error vocabulary whichever handle failed.
 func TestExternalConsumerSeesATypedAuthFailure(t *testing.T) {
-	fake := &githubFake{viewer: "octocat", authFail: true}
+	fake := &pullRequestFake{viewer: "octocat", authFail: true}
 	_, err := openWorkflow(t, checkout(t), fake)
 	if err == nil {
 		t.Fatal("Open succeeded without credentials")
@@ -317,9 +298,9 @@ func ptr(value string) *string { return &value }
 // out rather than the one Open found.
 func TestExternalConsumerSeesTheCheckoutAsItIsNow(t *testing.T) {
 	dir := checkout(t)
-	fake := &githubFake{
+	fake := &pullRequestFake{
 		viewer: "octocat",
-		issues: []map[string]any{issueNode(314, "PR workflow", []string{"P2", "task", "in-progress"}, "octocat")},
+		issues: []map[string]any{pullIssueNode(314, "PR workflow", []string{"P2", "task", "in-progress"}, "octocat")},
 	}
 	gitRun(t, dir, "checkout", "-b", "feat/314-second")
 	client, err := openWorkflow(t, dir, fake)
@@ -349,7 +330,7 @@ func TestExternalConsumerSeesTheCheckoutAsItIsNow(t *testing.T) {
 func TestExternalConsumerOnADetachedHead(t *testing.T) {
 	dir := checkout(t)
 	gitRun(t, dir, "checkout", "--detach")
-	_, err := openWorkflow(t, dir, &githubFake{viewer: "octocat"})
+	_, err := openWorkflow(t, dir, &pullRequestFake{viewer: "octocat"})
 	if err == nil || !strings.Contains(err.Error(), "detached") {
 		t.Fatalf("err = %v, want a detached-HEAD refusal", err)
 	}
