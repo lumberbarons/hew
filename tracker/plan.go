@@ -49,7 +49,8 @@ type Sections struct {
 	DoneWhen []string
 }
 
-func (s Sections) isZero() bool { return conventions.Sections(s).IsZero() }
+// IsZero reports whether no section was provided.
+func (s Sections) IsZero() bool { return conventions.Sections(s).IsZero() }
 
 // Compose renders the sections in template order, provided sections only,
 // with Done when as a checklist — the same body `hew create` writes.
@@ -305,20 +306,15 @@ func validatePlanEntry(e PlanEntry, index int) error {
 		return entryError(e, index, "discovered-from must be an issue number (got %d)", e.DiscoveredFrom)
 	}
 	// The section fields follow the create flags' rules: wording pairs pick
-	// one, and structured sections don't mix with a raw body.
-	if e.Sections.Problem != "" && e.Sections.Goal != "" {
-		return entryError(e, index, "problem and goal are mutually exclusive")
-	}
-	if e.Sections.Fix != "" && e.Sections.Approach != "" {
-		return entryError(e, index, "fix and approach are mutually exclusive")
-	}
-	for _, item := range e.Sections.DoneWhen {
-		if strings.TrimSpace(item) == "" {
-			return entryError(e, index, "done-when items cannot be empty")
+	// one, and structured sections don't mix with a raw body. The rules live
+	// in the same composition a direct caller uses, so a plan cannot carry a
+	// body ComposeBody would refuse.
+	if err := validateBody(Body{Sections: e.Sections, Text: e.Body}); err != nil {
+		var invalid *InvalidInputError
+		if errors.As(err, &invalid) {
+			return entryError(e, index, "%s", invalid.Reason)
 		}
-	}
-	if e.Body != "" && !e.Sections.isZero() {
-		return entryError(e, index, "body and section fields (where/problem/goal/fix/approach/done-when) are mutually exclusive")
+		return err
 	}
 	return nil
 }
@@ -476,19 +472,14 @@ func PlanTitle(e PlanEntry) string {
 
 // PlanBody is the body ApplyPlan creates for an entry before the provenance
 // marker: the entry's body, or its composed sections, plus the
-// discovered-from link when it has one.
+// discovered-from link when it has one. It goes through the same composition a
+// direct caller uses, so a plan and the create command cannot drift apart.
 func PlanBody(e PlanEntry) string {
-	body := e.Body
-	if !e.Sections.isZero() {
-		body = e.Sections.Compose()
-	}
-	if e.DiscoveredFrom > 0 {
-		link := conventions.DiscoveredFrom(e.DiscoveredFrom)
-		if body == "" {
-			body = link
-		} else {
-			body = strings.TrimRight(body, "\n") + "\n\n" + link
-		}
+	body, err := composeBodyText(Body{Sections: e.Sections, Text: e.Body, DiscoveredFrom: e.DiscoveredFrom})
+	if err != nil {
+		// ValidatePlan refuses a conflicting entry before any write; a body
+		// asked for anyway keeps the caller's own text.
+		return e.Body
 	}
 	return body
 }
