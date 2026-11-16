@@ -162,7 +162,7 @@ func TestDetailEpicCarriesChildrenNextAndWarnings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := issueNumbers(detail.Children), []int{11, 12, 13}; !slices.Equal(got, want) {
+	if got, want := issueNumberList(detail.Children), []int{11, 12, 13}; !slices.Equal(got, want) {
 		t.Errorf("Children = %v, want %v", got, want)
 	}
 	// The blocked head is not next; the untriaged child is skipped too, and
@@ -204,7 +204,7 @@ func TestDetailMissingIssueIsAPublicNotFound(t *testing.T) {
 	}
 }
 
-func issueNumbers(issues []Issue) []int {
+func issueNumberList(issues []Issue) []int {
 	out := make([]int, len(issues))
 	for n, i := range issues {
 		out[n] = i.Number
@@ -230,7 +230,7 @@ func TestSearchKeepsOrderOmitsUntriagedAndReportsCompleteness(t *testing.T) {
 	if store.terms != "retry" {
 		t.Errorf("SearchIssues terms = %q, want the trimmed terms", store.terms)
 	}
-	if got, want := issueNumbers(result.Issues), []int{1, 2}; !slices.Equal(got, want) {
+	if got, want := issueNumberList(result.Issues), []int{1, 2}; !slices.Equal(got, want) {
 		t.Errorf("Issues = %v, want the best-match order with the untriaged match omitted", got)
 	}
 	if result.Total != 43 || result.Fetched != 3 {
@@ -275,7 +275,7 @@ func TestTriageQueueListsUntriagedOldestFirstWithFindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := issueNumbers(result.Issues), []int{1, 3}; !slices.Equal(got, want) {
+	if got, want := issueNumberList(result.Issues), []int{1, 3}; !slices.Equal(got, want) {
 		t.Errorf("Issues = %v, want open untriaged oldest first", got)
 	}
 	if result.Total != 2 || result.Fetched != 2 {
@@ -304,7 +304,7 @@ func TestTriageSearchSpansBothStatesAndReportsCompleteness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := issueNumbers(result.Issues), []int{2, 3}; !slices.Equal(got, want) {
+	if got, want := issueNumberList(result.Issues), []int{2, 3}; !slices.Equal(got, want) {
 		t.Errorf("Issues = %v, want untriaged matches in both states", got)
 	}
 	if result.Total != 43 || result.Fetched != 3 {
@@ -384,19 +384,19 @@ func TestPrimerCarriesUncappedStateWarningsAndConventions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, want := issueNumbers(result.Ready), []int{4, 1, 5, 11}; !slices.Equal(got, want) {
+			if got, want := issueNumberList(result.Ready), []int{4, 1, 5, 11}; !slices.Equal(got, want) {
 				t.Errorf("Ready = %v, want %v", got, want)
 			}
 			if result.ReadyTotal != 4 || result.OpenTotal != 10 {
 				t.Errorf("ready/open totals = %d/%d, want 4/10", result.ReadyTotal, result.OpenTotal)
 			}
-			if got, want := issueNumbers(result.InProgress), []int{3, 10}; !slices.Equal(got, want) {
+			if got, want := issueNumberList(result.InProgress), []int{3, 10}; !slices.Equal(got, want) {
 				t.Errorf("InProgress = %v, want %v", got, want)
 			}
 			if result.InProgressTotal != 2 {
 				t.Errorf("InProgressTotal = %d, want 2", result.InProgressTotal)
 			}
-			if got, want := issueNumbers(result.Epics), []int{10}; !slices.Equal(got, want) {
+			if got, want := issueNumberList(result.Epics), []int{10}; !slices.Equal(got, want) {
 				t.Errorf("Epics = %v, want %v", got, want)
 			}
 			if result.EpicsTotal != 1 || result.Untriaged != 1 {
@@ -483,18 +483,18 @@ func TestQueriesHoldOnTheLocalStore(t *testing.T) {
 	// #1 is ready P2, #2 is an untriaged child of the epic, #3 is a claimed
 	// P1 and the epic is last. List order puts ready first, then claimed, then
 	// the epic; the untriaged child is omitted.
-	if got, want := issueNumbers(snapshot.List(ListFilter{})), []int{1, 3, epic}; !slices.Equal(got, want) {
+	if got, want := issueNumberList(snapshot.List(ListFilter{})), []int{1, 3, epic}; !slices.Equal(got, want) {
 		t.Errorf("List = %v, want %v", got, want)
 	}
 	if got := snapshot.List(ListFilter{Epic: epic}); len(got) != 0 {
-		t.Errorf("List(epic) = %v, want no triaged child", issueNumbers(got))
+		t.Errorf("List(epic) = %v, want no triaged child", issueNumberList(got))
 	}
 
 	detail, err := tr.Detail(ctx, epic)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := issueNumbers(detail.Children), []int{2}; !slices.Equal(got, want) {
+	if got, want := issueNumberList(detail.Children), []int{2}; !slices.Equal(got, want) {
 		t.Errorf("Children = %v, want the untriaged child on explicit epic retrieval", got)
 	}
 	if detail.Next != nil {
@@ -505,7 +505,7 @@ func TestQueriesHoldOnTheLocalStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := issueNumbers(untriaged.Issues), []int{2}; !slices.Equal(got, want) {
+	if got, want := issueNumberList(untriaged.Issues), []int{2}; !slices.Equal(got, want) {
 		t.Errorf("Triage = %v, want %v", got, want)
 	}
 }
@@ -612,7 +612,7 @@ func TestSearchKeepsTheLocalStoresTitleFirstOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := issueNumbers(result.Issues), []int{titleMatch, bodyMatch}; !slices.Equal(got, want) {
+	if got, want := issueNumberList(result.Issues), []int{titleMatch, bodyMatch}; !slices.Equal(got, want) {
 		t.Errorf("Search = %v, want the title match then the body match", got)
 	}
 	if result.Total != 2 || result.Fetched != 2 {

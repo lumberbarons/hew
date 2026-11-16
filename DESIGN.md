@@ -910,6 +910,13 @@ owning any of its policy. `Target` is the read-only backend report — `Backend`
 `Repo`, `Dir`, `MainCheckout`, and the local tracker's stable `ID` — and
 `RateLimit` is the GitHub client's last observed budget.
 
+`InitResult` reports the backend initialization ran against, the local tracker's
+directory, the convention labels the run created and the notices it would have
+printed; the notices are data because the library never writes to stdout or
+stderr. Initializing a repo whose tracker belongs to another backend is refused
+with `InitializedElsewhereError` rather than creating a second tracker no command
+would read, so a migrated repo's archive is never made live again.
+
 `pr.Config` takes the same worktree, repository, backend pin, actor, notice and
 transport inputs as `tracker.Config`; `pr.Open` opens the tracker it reads and
 the client it writes pull requests through, so a caller does not wire two
@@ -981,7 +988,8 @@ that the CLI cannot map is a bug in the mapping, not a reason to widen the table
 `BlockedError`, `CycleError`, `UnverifiableCycleError`, `NotOpenError`,
 `EpicError`, `UntriagedError`, `NotClaimedError`, `NotOwnerError`,
 `OpenChildrenError`, `PartialWriteError`, `PartialReleaseError`,
-`PartialCloseError`, `LockTimeoutError`, `MigratedError`. A workflow in another
+`PartialCloseError`, `LockTimeoutError`, `MigratedError`,
+`InitializedElsewhereError`. A workflow in another
 package that adds a refusal names its own type and wraps the tracker cause
 rather than inventing a second auth or not-found error:
 
@@ -1020,14 +1028,13 @@ checkpoint and a run, so callers run one migration at a time per migrator.
   advisory `.hew/migrating` marker; a writer that waits reports it and then fails
   with `LockTimeoutError` rather than proceeding.
 - **GitHub backend.** One `Open` builds one client shared by every operation on
-  it. Until #279 ships, the guarantees in this bullet are the target and not yet
-  true: the node-ID cache is an unsynchronized map, so a GitHub-backed `Tracker`
-  must not be shared across goroutines, and there is no token refresh, secondary
-  rate-limit retry, `RateLimit` or `Config.Transport` yet. Once it ships, the
-  client is safe for concurrent use: the node-ID cache is synchronized,
+  it. The client is safe for concurrent use: the node-ID cache is synchronized,
   `Viewer` is cached, an expired token is refreshed or rebuilt on an auth error,
   and a 403/429 secondary limit is retried with `Retry-After` backoff up to the
   caller's deadline; the observed budget is available as `tracker.RateLimit`.
+  `Config.Transport` replaces the HTTP transport the client sends through, so a
+  consumer's tests run `Open` and `Init` with neither the network nor a `gh`
+  process.
   GitHub offers no transaction across calls: a claim is check-then-act, `Start`
   re-reads the issue afterwards, and two workers racing the same issue can both
   observe success; with a shared login the tracker cannot even tell them apart.

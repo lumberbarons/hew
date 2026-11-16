@@ -1100,7 +1100,7 @@ func initCmd() *ucli.Command {
 				if cmd.String("repo") != "" {
 					return appcli.UsageError("--local and --repo are alternatives: --repo always targets GitHub")
 				}
-				return newApp(cmd).InitLocal("")
+				return newApp(cmd).InitLocal(ctx, "")
 			}
 			app, err := buildApp(cmd)
 			if err != nil {

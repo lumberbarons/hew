@@ -15,7 +15,7 @@ import (
 // consumer contract: target metadata, snapshot list filtering, detail, search,
 // triage and primer state are all obtainable without an internal import.
 func TestAnExternalModuleDrivesQueriesAndPrimerFromPublicTypes(t *testing.T) {
-	root, tr := externalCheckout(t)
+	root, tr := externalTrackerCheckout(t)
 	ctx := context.Background()
 
 	applied, err := tr.ApplyPlan(ctx, []tracker.PlanEntry{

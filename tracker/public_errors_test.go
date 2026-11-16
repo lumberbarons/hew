@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -20,30 +19,13 @@ import (
 // tracker could satisfy the same assertions while an internal error still
 // leaked, because it can name the internal type; this one cannot.
 
-// externalCheckout opens a local tracker in a throwaway checkout using the
-// documented on-disk shape, so nothing here depends on an internal package.
-func externalCheckout(t *testing.T) (string, *tracker.Tracker) {
+// externalTrackerCheckout opens a local tracker in a throwaway checkout using
+// the documented on-disk shape, so nothing here depends on an internal
+// package. It returns the checkout's root alongside the tracker for tests that
+// need the path the tracker was opened from.
+func externalTrackerCheckout(t *testing.T) (string, *tracker.Tracker) {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not installed")
-	}
-	for _, kv := range os.Environ() {
-		if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "GIT_") {
-			t.Setenv(k, os.Getenv(k)) // registers the restore
-			if err := os.Unsetenv(k); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
-	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
-	root, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out, err := exec.Command("git", "-C", root, "init", "--initial-branch=main").CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v: %s", err, out)
-	}
+	root := externalCheckout(t)
 	dir := filepath.Join(root, ".hew")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -66,7 +48,7 @@ func externalCheckout(t *testing.T) (string, *tracker.Tracker) {
 
 func externalTracker(t *testing.T) *tracker.Tracker {
 	t.Helper()
-	_, tr := externalCheckout(t)
+	_, tr := externalTrackerCheckout(t)
 	return tr
 }
 
