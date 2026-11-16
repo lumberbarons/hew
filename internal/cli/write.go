@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/lumberbarons/hew/internal/conventions"
-	"github.com/lumberbarons/hew/internal/model"
 	"github.com/lumberbarons/hew/internal/render"
 	"github.com/lumberbarons/hew/tracker"
 )
@@ -29,91 +29,103 @@ type CreateOpts struct {
 
 // Create files a new issue conforming to the conventions: exactly one
 // priority and one type label, template-scaffolded body, native
-// dependencies and parent links.
+// dependencies and parent links. The decisions live in tracker.Create; what
+// stays here is the flag-level body input, the flag spelling of its refusals,
+// the markup warning, and rendering the result.
 func (a *App) Create(ctx context.Context, opts CreateOpts) error {
 	if opts.Type == "epic" {
 		return usageErr("--type epic is not supported here; use hew epic create")
 	}
-	if strings.TrimSpace(opts.Title) == "" {
-		return usageErr("--title is required")
-	}
-	if err := validateTitle(opts.Title); err != nil {
-		return err
-	}
-	if !model.IsType(opts.Type) {
-		return usageErr("--type must be one of %s", strings.Join(model.Types, "|"))
-	}
-	priority := model.DefaultPriority
-	if opts.Priority != "" {
-		p, ok := model.ParsePriority(opts.Priority)
-		if !ok {
-			return usageErr("--priority must be P0..P4")
-		}
-		priority = p
-	}
 	if err := validateBodySource(opts.Sections, opts.BodyFile, opts.Edit); err != nil {
 		return err
 	}
-	areas, err := normalizeAreas("--area", opts.Areas)
-	if err != nil {
-		return err
-	}
-
-	// Every reference is resolved before the editor opens or the issue is
-	// created, so a typo leaves nothing behind. A closed issue is still a
-	// valid --discovered-from or --parent reference: discovery follows a close.
-	// A closed blocker is refused, as it is by block: it blocks nothing. A
-	// reference can still vanish between this read and the mutation — GitHub
-	// has no transaction spanning them — so the write paths keep naming the
-	// created issue on that residual failure.
-	if opts.DiscoveredFrom > 0 {
-		if _, err := a.requireIssues(ctx, "--discovered-from", []int{opts.DiscoveredFrom}); err != nil {
-			return err
-		}
-	}
-	blockedBy := uniqueInts(opts.BlockedBy)
-	blockers, err := a.requireIssues(ctx, "--blocked-by", blockedBy)
-	if err != nil {
-		return err
-	}
-	for _, blocker := range blockers {
-		if !blocker.IsOpen() {
-			return genericErr("--blocked-by: #%d is closed%s; closed blockers don't block", blocker.Number, closeState(blocker))
-		}
-	}
-	if opts.Parent > 0 {
-		if _, err := a.requireIssues(ctx, "--parent", []int{opts.Parent}); err != nil {
-			return err
-		}
-	}
-
-	body, err := a.composeBody(bodySource{
+	body, err := a.bodyInput(bodySource{
 		issueType: opts.Type, sections: opts.Sections,
 		bodyFile: opts.BodyFile, edit: opts.Edit,
-		discoveredFrom: opts.DiscoveredFrom,
 	})
 	if err != nil {
 		return err
 	}
-
-	labels := append([]string{priority.String(), opts.Type}, areas...)
-	created, err := a.Client.CreateIssue(ctx, opts.Title, body, labels)
+	result, err := tracker.WrapAs(a.Client, a.backend(), "").Create(ctx, tracker.CreateRequest{
+		Title:          opts.Title,
+		Type:           opts.Type,
+		Priority:       opts.Priority,
+		Areas:          opts.Areas,
+		Body:           body,
+		Parent:         opts.Parent,
+		BlockedBy:      opts.BlockedBy,
+		DiscoveredFrom: opts.DiscoveredFrom,
+	})
 	if err != nil {
+		return createError(opts, err)
+	}
+	a.warnFindings(result.Findings, "hew set <n> --body-file")
+	return a.reportMutation(ctx, result.Issue.Number, "created #%d: %s\n", result.Issue.Number, result.Issue.Title)
+}
+
+// creationInputError spells a library field rejection in the create flags. The
+// rule is shared; the flag names belong to the command surface.
+func creationInputError(invalid *tracker.InvalidInputError) error {
+	switch invalid.Field {
+	case "title":
+		if invalid.Reason == "must not be empty" {
+			return usageErr("--title is required")
+		}
+		return usageErr("--title %s", invalid.Reason)
+	case "type":
+		return usageErr("--type %s", invalid.Reason)
+	case "priority":
+		return usageErr("--priority %s", invalid.Reason)
+	case "areas":
+		return usageErr("--area %s", invalid.Reason)
+	case "problem":
+		return usageErr("--problem and --goal are mutually exclusive; pick one wording")
+	case "fix":
+		return usageErr("--fix and --approach are mutually exclusive; pick one wording")
+	case "done-when":
+		return usageErr("--done-when items cannot be empty")
+	}
+	return usageErr("%s", invalid.Reason)
+}
+
+// createError maps tracker.Create's typed refusals onto the create command's
+// flags and exit codes. A missing reference names the flag whose number it was,
+// in the order Create reads them; the partial-create error names the issue that
+// already exists so the operator can finish by hand.
+func createError(req CreateOpts, err error) error {
+	var invalid *tracker.InvalidInputError
+	if errors.As(err, &invalid) {
+		return creationInputError(invalid)
+	}
+	var notFound *tracker.NotFoundError
+	if errors.As(err, &notFound) {
+		switch {
+		case req.DiscoveredFrom > 0 && notFound.Issue == req.DiscoveredFrom:
+			return fmt.Errorf("--discovered-from: %w", err)
+		case slices.Contains(req.BlockedBy, notFound.Issue):
+			return fmt.Errorf("--blocked-by: %w", err)
+		case req.Parent > 0 && notFound.Issue == req.Parent:
+			return fmt.Errorf("--parent: %w", err)
+		}
 		return err
 	}
-	// A brand-new issue has no dependents, so --blocked-by can't create a
-	// cycle; no transitive check needed on this path.
-	for _, blocker := range blockedBy {
-		if err := a.Client.AddBlockedBy(ctx, created.Number, blocker); err != nil {
-			return fmt.Errorf("created #%d but --blocked-by %d failed: %w", created.Number, blocker, err)
-		}
+	var closed *tracker.ClosedError
+	if errors.As(err, &closed) {
+		return genericErr("--blocked-by: #%d is closed%s; closed blockers don't block", closed.Issue, closedState(closed.Reason))
 	}
-	if opts.Parent > 0 {
-		if err := a.Client.AddSubIssue(ctx, opts.Parent, created.Number, false); err != nil {
-			return fmt.Errorf("created #%d but --parent %d failed: %w", created.Number, opts.Parent, err)
+	var partial *tracker.PartialCreateError
+	if errors.As(err, &partial) {
+		switch partial.Stage {
+		case tracker.CreateStageBlockedBy:
+			return fmt.Errorf("created #%d but --blocked-by %d failed: %w", partial.Issue.Number, partial.Failed.To, partial.Err)
+		case tracker.CreateStageParent:
+			return fmt.Errorf("created #%d but --parent %d failed: %w", partial.Issue.Number, partial.Failed.To, partial.Err)
+		case tracker.CreateStageAssignees:
+			return fmt.Errorf("created #%d but claiming it for its assignees failed: %w", partial.Issue.Number, partial.Err)
 		}
+		return fmt.Errorf("created #%d but finishing it failed: %w", partial.Issue.Number, partial.Err)
 	}
-	return a.reportMutation(ctx, created.Number, "created #%d: %s\n", created.Number, opts.Title)
+	return err
 }
 
 // validateBodySource enforces the body paths' exclusivity: section flags
@@ -158,11 +170,10 @@ func validateSections(s conventions.Sections) error {
 
 // bodySource is the body input shared by create and epic create.
 type bodySource struct {
-	issueType      string // seeds the --edit skeleton; empty means goal/approach wording
-	sections       conventions.Sections
-	bodyFile       string
-	edit           bool
-	discoveredFrom int
+	issueType string // seeds the --edit skeleton; empty means goal/approach wording
+	sections  conventions.Sections
+	bodyFile  string
+	edit      bool
 }
 
 func (a *App) composeBody(src bodySource) (string, error) {
@@ -179,32 +190,42 @@ func (a *App) composeBody(src bodySource) (string, error) {
 // own remedy. Reading the chosen file or launching the editor is the
 // adapter's; composing and checking the bytes is the library's.
 func (a *App) renderBody(src bodySource) (tracker.ComposedBody, error) {
-	body := tracker.Body{
-		Sections:       tracker.Sections(src.sections),
-		DiscoveredFrom: src.discoveredFrom,
-	}
-	switch {
-	case src.sections.IsZero() && src.bodyFile != "":
-		b, err := os.ReadFile(src.bodyFile)
-		if err != nil {
-			return tracker.ComposedBody{}, genericErr("cannot read --body-file: %v", err)
-		}
-		body.Text = string(b)
-	case src.sections.IsZero() && src.edit:
-		if a.Edit == nil {
-			return tracker.ComposedBody{}, genericErr("--edit is not available here")
-		}
-		edited, err := a.Edit(conventions.TemplateSkeleton(src.issueType))
-		if err != nil {
-			return tracker.ComposedBody{}, genericErr("editor failed: %v", err)
-		}
-		body.Text = conventions.StripEmptySections(edited)
+	body, err := a.bodyInput(src)
+	if err != nil {
+		return tracker.ComposedBody{}, err
 	}
 	composed, err := tracker.ComposeBody(body)
 	if err != nil {
 		return tracker.ComposedBody{}, usageErr("%s", bodyErrorReason(err))
 	}
 	return composed, nil
+}
+
+// bodyInput reads the body source the flags selected without composing it:
+// section flags hand the structured sections over, --body-file supplies the
+// text, and --edit supplies the editor's output. The library operation
+// composes and validates the body and reports its findings, so a create and a
+// direct library caller share one implementation.
+func (a *App) bodyInput(src bodySource) (tracker.Body, error) {
+	body := tracker.Body{Sections: tracker.Sections(src.sections)}
+	switch {
+	case src.sections.IsZero() && src.bodyFile != "":
+		b, err := os.ReadFile(src.bodyFile)
+		if err != nil {
+			return tracker.Body{}, genericErr("cannot read --body-file: %v", err)
+		}
+		body.Text = string(b)
+	case src.sections.IsZero() && src.edit:
+		if a.Edit == nil {
+			return tracker.Body{}, genericErr("--edit is not available here")
+		}
+		edited, err := a.Edit(conventions.TemplateSkeleton(src.issueType))
+		if err != nil {
+			return tracker.Body{}, genericErr("editor failed: %v", err)
+		}
+		body.Text = conventions.StripEmptySections(edited)
+	}
+	return body, nil
 }
 
 // bodyErrorReason renders a composition refusal, which is always the
@@ -251,12 +272,7 @@ func formatStateReason(reason string) string {
 	return strings.ToLower(strings.ReplaceAll(reason, "_", " "))
 }
 
-// closeState renders " (completed)" for an issue whose close reason GitHub
-// recorded, and nothing for one closed before that field existed — "#20 is
-// closed ()" reads as a bug in the tool rather than a gap in the data.
-func closeState(issue model.Issue) string { return closedState(issue.StateReason) }
-
-// closedState is closeState for a raw backend state reason, such as the one a
+// closedState renders " (completed)" for a raw backend state reason, such as the one a
 // typed tracker error carries.
 func closedState(reason string) string {
 	if reason == "" {
@@ -514,39 +530,6 @@ func editFieldFlag(field string) string {
 	return field
 }
 
-// validateTitle checks the stored title, including any cosmetic epic prefix.
-// The rule lives in tracker so every writer shares it; this maps the library's
-// typed rejection onto the command's flag-named usage error.
-func validateTitle(title string) error {
-	if err := tracker.ValidateTitle(title); err != nil {
-		var invalid *tracker.InvalidInputError
-		if errors.As(err, &invalid) {
-			return usageErr("--title %s", invalid.Reason)
-		}
-		return err
-	}
-	return nil
-}
-
-// normalizeAreas returns the area names trimmed of surrounding whitespace and
-// de-duplicated, or a usage error. The rules — no blank name, at most 50
-// characters, no comma, no convention label — live in tracker, so a plan or a
-// direct library caller cannot store an area the CLI would refuse. The area
-// flags split on commas before this runs, so the comma rule guards the callers
-// that hand over a name verbatim — `apply` plans and direct API use — while
-// `--area x,y` stays two areas.
-func normalizeAreas(flag string, areas []string) ([]string, error) {
-	trimmed, err := tracker.NormalizeAreas(areas)
-	if err != nil {
-		var invalid *tracker.InvalidInputError
-		if errors.As(err, &invalid) {
-			return nil, usageErr("%s %s", flag, invalid.Reason)
-		}
-		return nil, err
-	}
-	return trimmed, nil
-}
-
 // Close comments the reason and closes: not-planned unless --completed or
 // --duplicate-of. Closing via PR is the norm; this is for wontfix/duplicate.
 // An epic with open sub-issues is refused without force: closing one strands
@@ -608,52 +591,6 @@ func closeError(number, duplicateOf int, err error) error {
 		return fmt.Errorf("posted the reason comment on #%d but closing it failed (a retry will comment again): %w", number, partial.Err)
 	}
 	return err
-}
-
-// requireIssue resolves an issue number the caller names from another issue's
-// text or state, so a typo fails before anything is written rather than
-// leaving a reference that points nowhere. The error keeps its chain, so an
-// auth failure still maps to its exit code.
-func (a *App) requireIssue(ctx context.Context, number int, flag string) (model.Issue, error) {
-	issue, err := a.Client.GetIssue(ctx, number)
-	if err != nil {
-		return model.Issue{}, fmt.Errorf("%s: %w", flag, err)
-	}
-	return issue, nil
-}
-
-// requireIssues resolves the issues a reference flag names, in order, so a
-// typo fails before anything is written rather than leaving a reference that
-// points nowhere. The resolved issues are returned so a caller can apply a
-// rule beyond existence. Keeping the loop here is what stops the next
-// reference flag from repeating #232: the flag stays an argument instead of a
-// pre-check each command has to remember.
-func (a *App) requireIssues(ctx context.Context, flag string, numbers []int) ([]model.Issue, error) {
-	issues := make([]model.Issue, 0, len(numbers))
-	for _, number := range numbers {
-		issue, err := a.requireIssue(ctx, number, flag)
-		if err != nil {
-			return nil, err
-		}
-		issues = append(issues, issue)
-	}
-	return issues, nil
-}
-
-// uniqueInts drops repeated numbers, keeping first-seen order, so a reference
-// flag that names an issue twice neither fetches it twice nor attaches it
-// twice — a second attach of the same edge is the failure GitHub may reject
-// after the issue is already filed.
-func uniqueInts(numbers []int) []int {
-	seen := make(map[int]bool, len(numbers))
-	out := make([]int, 0, len(numbers))
-	for _, n := range numbers {
-		if !seen[n] {
-			seen[n] = true
-			out = append(out, n)
-		}
-	}
-	return out
 }
 
 // Reopen is close's inverse: comment the reason, reopen the issue. The
@@ -830,52 +767,57 @@ type EpicCreateOpts struct {
 // get the cosmetic title prefix, a priority label and the epic label but no
 // type — they are containers, not work. The epic label is what keeps a
 // childless epic triaged, listed and unworkable until its first child lands.
+// The decisions live in tracker.CreateEpic; what stays here is the body input,
+// the flag spelling of its refusals, and rendering the result.
 func (a *App) EpicCreate(ctx context.Context, opts EpicCreateOpts) error {
-	if strings.TrimSpace(opts.Title) == "" {
-		return usageErr("--title is required")
-	}
 	if err := validateBodySource(opts.Sections, opts.BodyFile, opts.Edit); err != nil {
 		return err
 	}
-	title := opts.Title
-	if !strings.HasPrefix(title, conventions.EpicTitlePrefix) {
-		title = conventions.EpicTitlePrefix + title
-	}
-	if err := validateTitle(title); err != nil {
-		return err
-	}
-	// Check the children before the editor opens or the epic is created: a
-	// typo must not leave a childless epic that looks like a triage mistake.
-	// A child already in another epic is the same kind of bad reference —
-	// AddSubIssue refuses it, so catching it here is what keeps the epic from
-	// being filed first. A child that disappears before the attach keeps the
-	// partial-failure message below, which names the epic already filed.
-	childNumbers := uniqueInts(opts.Children)
-	children, err := a.requireIssues(ctx, "--children", childNumbers)
-	if err != nil {
-		return err
-	}
-	for _, child := range children {
-		if child.Parent != nil {
-			return genericErr("--children: #%d already has a parent (#%d); detach it first with `hew set %d --no-parent`", child.Number, child.Parent.Number, child.Number)
-		}
-	}
-	body, err := a.composeBody(bodySource{
+	body, err := a.bodyInput(bodySource{
 		sections: opts.Sections, bodyFile: opts.BodyFile, edit: opts.Edit,
 	})
 	if err != nil {
 		return err
 	}
-	created, err := a.Client.CreateIssue(ctx, title, body, []string{model.DefaultPriority.String(), model.EpicLabel})
+	result, err := tracker.WrapAs(a.Client, a.backend(), "").CreateEpic(ctx, tracker.CreateEpicRequest{
+		Title:    opts.Title,
+		Children: opts.Children,
+		Body:     body,
+	})
 	if err != nil {
+		return epicCreateError(opts, err)
+	}
+	a.warnFindings(result.Findings, "hew set <n> --body-file")
+	return a.reportMutation(ctx, result.Issue.Number, "created epic #%d: %s (%d children)\n",
+		result.Issue.Number, result.Issue.Title, len(result.Edges))
+}
+
+// epicCreateError maps tracker.CreateEpic's typed refusals onto the epic
+// create command's flags. A child that already has a parent names the remedy,
+// because detaching is the caller's deliberate next step rather than something
+// the command should do for them.
+func epicCreateError(req EpicCreateOpts, err error) error {
+	var invalid *tracker.InvalidInputError
+	if errors.As(err, &invalid) {
+		return creationInputError(invalid)
+	}
+	var notFound *tracker.NotFoundError
+	if errors.As(err, &notFound) {
+		if slices.Contains(req.Children, notFound.Issue) {
+			return fmt.Errorf("--children: %w", err)
+		}
 		return err
 	}
-	for _, child := range childNumbers {
-		if err := a.Client.AddSubIssue(ctx, created.Number, child, false); err != nil {
-			return fmt.Errorf("created epic #%d but attaching #%d failed: %w", created.Number, child, err)
-		}
+	var parented *tracker.ParentedError
+	if errors.As(err, &parented) {
+		return genericErr("--children: #%d already has a parent (#%d); detach it first with `hew set %d --no-parent`",
+			parented.Issue, parented.Parent, parented.Issue)
 	}
-	return a.reportMutation(ctx, created.Number, "created epic #%d: %s (%d children)\n", created.Number, title, len(childNumbers))
+	var partial *tracker.PartialCreateError
+	if errors.As(err, &partial) && partial.Stage == tracker.CreateStageChildren {
+		return fmt.Errorf("created epic #%d but attaching #%d failed: %w", partial.Issue.Number, partial.Failed.To, partial.Err)
+	}
+	return err
 }
 
 // initResult is what `init` reports under --json, on either backend: the
