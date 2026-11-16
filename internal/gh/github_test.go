@@ -301,7 +301,7 @@ func TestSearchIssues(t *testing.T) {
 	f.graphql["search(type: ISSUE"] = fmt.Sprintf(
 		`{"data":{"search":{"issueCount":43,"nodes":[%s,{},%s]}}}`,
 		issueJSON(7, ""), issueJSON(9, ""))
-	issues, total, err := f.client(t).SearchIssues(context.Background(), "retry loop")
+	issues, total, err := f.client(t).SearchIssues(context.Background(), "retry loop", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,6 +333,33 @@ func TestSearchIssues(t *testing.T) {
 	}
 	if !strings.Contains(payload.Query, fmt.Sprintf("first: %d", searchCap)) {
 		t.Errorf("search not capped at %d: %s", searchCap, payload.Query)
+	}
+}
+
+func TestSearchIssuesStatesRideInTheSearchString(t *testing.T) {
+	for _, tc := range []struct {
+		states []IssueState
+		want   string
+	}{
+		{nil, "repo:o/r is:issue retry"},
+		{[]IssueState{StateOpen, StateClosed}, "repo:o/r is:issue retry"},
+		{[]IssueState{StateOpen}, "repo:o/r is:issue is:open retry"},
+		{[]IssueState{StateClosed}, "repo:o/r is:issue is:closed retry"},
+	} {
+		f := newFakeServer(t)
+		f.graphql["search(type: ISSUE"] = `{"data":{"search":{"issueCount":0,"nodes":[]}}}`
+		if _, _, err := f.client(t).SearchIssues(context.Background(), "retry", tc.states); err != nil {
+			t.Fatal(err)
+		}
+		var payload struct {
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.Unmarshal([]byte(f.requests[len(f.requests)-1].Body), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Variables["q"] != tc.want {
+			t.Errorf("states %v: q = %v, want %q", tc.states, payload.Variables["q"], tc.want)
+		}
 	}
 }
 

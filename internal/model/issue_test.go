@@ -458,3 +458,16 @@ func TestLabelRecognizers(t *testing.T) {
 		t.Error("IsType accepted Bug")
 	}
 }
+
+func TestEpicsOfIncludesClosedEpicsAndEpicsDoesNot(t *testing.T) {
+	openEpic := open(1, "P2", "epic")
+	closedEpic := Issue{Number: 2, State: "CLOSED", Labels: []string{"P2", "epic"}}
+	plain := open(3, "P2", "bug")
+	issues := []Issue{openEpic, closedEpic, plain}
+	if got := Epics(issues); len(got) != 1 || got[0].Number != 1 {
+		t.Errorf("Epics() = %v, want only the open epic", got)
+	}
+	if got := EpicsOf(issues); len(got) != 2 || got[0].Number != 1 || got[1].Number != 2 {
+		t.Errorf("EpicsOf() = %v, want both epics and not the plain issue", got)
+	}
+}

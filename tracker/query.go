@@ -137,6 +137,11 @@ type SearchRequest struct {
 	// Terms are the backend's search terms, passed through as written after
 	// trimming. Empty terms are invalid.
 	Terms string
+	// States narrows the search to these states before the backend's cap, so
+	// the cap bounds the matches asked for. Empty means open and closed —
+	// unlike SnapshotOptions.States, where empty means open only. An unknown
+	// state is an invalid-input error.
+	States []State
 }
 
 // SearchResult is a search listing: the triaged matches in the backend's
@@ -157,7 +162,14 @@ func (t *Tracker) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 	if terms == "" {
 		return SearchResult{}, &InvalidInputError{Field: "terms", Reason: "must not be empty"}
 	}
-	issues, total, err := t.store.SearchIssues(ctx, terms)
+	var fetch []gh.IssueState
+	if len(req.States) > 0 {
+		var err error
+		if _, fetch, err = resolveStates(req.States); err != nil {
+			return SearchResult{}, err
+		}
+	}
+	issues, total, err := t.store.SearchIssues(ctx, terms, fetch)
 	if err != nil {
 		return SearchResult{}, asReadError(err)
 	}
@@ -205,7 +217,7 @@ func (t *Tracker) Triage(ctx context.Context, req TriageRequest) (TriageResult, 
 			TextFindings: triageFindings(matches),
 		}, nil
 	}
-	issues, total, err := t.store.SearchIssues(ctx, strings.TrimSpace(req.Search))
+	issues, total, err := t.store.SearchIssues(ctx, strings.TrimSpace(req.Search), nil)
 	if err != nil {
 		return TriageResult{}, asReadError(err)
 	}

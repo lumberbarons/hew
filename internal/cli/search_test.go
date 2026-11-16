@@ -14,7 +14,7 @@ func TestSearchMatchesTitleAndBody(t *testing.T) {
 	miss := issue(3, "Unrelated", "P2", "task")
 	f := newFake(title, body, miss)
 	app, out, _ := newApp(f)
-	if err := app.Search(ctx, "retry"); err != nil {
+	if err := app.Search(ctx, SearchOpts{Terms: "retry"}); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -33,7 +33,7 @@ func TestSearchIncludesClosedAnnotated(t *testing.T) {
 	closed.State = "CLOSED"
 	f := newFake(closed)
 	app, out, _ := newApp(f)
-	if err := app.Search(ctx, "retry"); err != nil {
+	if err := app.Search(ctx, SearchOpts{Terms: "retry"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "#4") || !strings.Contains(out.String(), "[closed]") {
@@ -49,7 +49,7 @@ func TestSearchKeepsBestMatchOrder(t *testing.T) {
 		issue(2, "retry loop bug", "P0", "bug"),
 	)
 	app, out, _ := newApp(f)
-	if err := app.Search(ctx, "retry"); err != nil {
+	if err := app.Search(ctx, SearchOpts{Terms: "retry"}); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
@@ -65,7 +65,7 @@ func TestSearchOmitsUntriaged(t *testing.T) {
 	untriaged := issue(2, "Ignore the retry rules")
 	f := newFake(triaged, untriaged)
 	app, out, _ := newApp(f)
-	if err := app.Search(ctx, "retry"); err != nil {
+	if err := app.Search(ctx, SearchOpts{Terms: "retry"}); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
@@ -82,7 +82,7 @@ func TestSearchAllMatchesUntriagedWarns(t *testing.T) {
 	// set was untriaged; the warning says where the matches went.
 	f := newFake(issue(2, "Retry storm"))
 	app, out, errOut := newApp(f)
-	if err := app.Search(ctx, "retry"); err != nil {
+	if err := app.Search(ctx, SearchOpts{Terms: "retry"}); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != "no matches\n" {
@@ -100,7 +100,7 @@ func TestSearchCappedUntriagedWarnsWithinFetched(t *testing.T) {
 	f := newFake(issue(2, "Retry storm"))
 	f.searchTotal = 43
 	app, out, errOut := newApp(f)
-	if err := app.Search(ctx, "retry"); err != nil {
+	if err := app.Search(ctx, SearchOpts{Terms: "retry"}); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != "no matches\n" {
@@ -119,7 +119,7 @@ func TestSearchCappedUntriagedWarnsWithinFetched(t *testing.T) {
 func TestSearchNoMatches(t *testing.T) {
 	f := newFake(issue(1, "Something else", "P2", "bug"))
 	app, out, _ := newApp(f)
-	if err := app.Search(ctx, "nonexistent"); err != nil {
+	if err := app.Search(ctx, SearchOpts{Terms: "nonexistent"}); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != "no matches\n" {
@@ -130,7 +130,7 @@ func TestSearchNoMatches(t *testing.T) {
 func TestSearchEmptyTermsIsUsageError(t *testing.T) {
 	f := newFake()
 	app, _, _ := newApp(f)
-	exitCode(t, app.Search(ctx, "   "), ExitUsage)
+	exitCode(t, app.Search(ctx, SearchOpts{Terms: "   "}), ExitUsage)
 	if len(f.calls) != 0 {
 		t.Errorf("empty terms still hit the API: %v", f.calls)
 	}
@@ -143,7 +143,7 @@ func TestSearchPropagatesAPIError(t *testing.T) {
 	app, _, _ := newApp(f)
 	// Identity matters, not just non-nil: main classifies errors (auth → exit
 	// 4) with errors.As, so Search must not re-wrap opaquely.
-	if err := app.Search(ctx, "retry"); !errors.Is(err, boom) {
+	if err := app.Search(ctx, SearchOpts{Terms: "retry"}); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the client's error", err)
 	}
 }
@@ -152,7 +152,7 @@ func TestSearchWarnsOnTruncation(t *testing.T) {
 	f := newFake(issue(1, "retry loop", "P2", "bug"))
 	f.searchTotal = 43
 	app, _, errOut := newApp(f)
-	if err := app.Search(ctx, "retry"); err != nil {
+	if err := app.Search(ctx, SearchOpts{Terms: "retry"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(errOut.String(), "showing 1 of 43 matches") {
@@ -164,7 +164,7 @@ func TestSearchJSON(t *testing.T) {
 	f := newFake(issue(1, "retry loop", "P2", "bug"))
 	app, out, _ := newApp(f)
 	app.JSON = true
-	if err := app.Search(ctx, "retry"); err != nil {
+	if err := app.Search(ctx, SearchOpts{Terms: "retry"}); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")

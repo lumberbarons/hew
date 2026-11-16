@@ -1,0 +1,275 @@
+package cli
+
+import (
+	"encoding/json"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/lumberbarons/hew/internal/gh"
+	"github.com/lumberbarons/hew/internal/model"
+)
+
+func outputLines(out string) []string {
+	return strings.Split(strings.TrimSpace(out), "\n")
+}
+
+func threeIssues() *fakeClient {
+	return newFake(
+		issue(1, "Normal work", "P2", "bug"),
+		issue(2, "Urgent", "P0", "task"),
+		issue(3, "Middling", "P1", "bug"),
+	)
+}
+
+func TestListLimitCapsAfterSortingAndWarns(t *testing.T) {
+	app, out, errOut := newApp(threeIssues())
+	if err := app.List(ctx, ListOpts{Limit: 2}); err != nil {
+		t.Fatal(err)
+	}
+	lines := outputLines(out.String())
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "#2") || !strings.HasPrefix(lines[1], "#3") {
+		t.Errorf("List output, want the top two of list order:\n%s", out.String())
+	}
+	if !strings.Contains(errOut.String(), "showing 2 of 3 issues; --limit 0 for all") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+func TestListLimitZeroAndExactLimitPrintEverythingSilently(t *testing.T) {
+	for _, limit := range []int{0, 3} {
+		app, out, errOut := newApp(threeIssues())
+		if err := app.List(ctx, ListOpts{Limit: limit}); err != nil {
+			t.Fatal(err)
+		}
+		if got := len(outputLines(out.String())); got != 3 {
+			t.Errorf("limit %d printed %d lines, want 3", limit, got)
+		}
+		if errOut.String() != "" {
+			t.Errorf("limit %d: nothing was truncated; stderr = %q", limit, errOut.String())
+		}
+	}
+}
+
+func TestListLimitWarnsOnStderrUnderJSON(t *testing.T) {
+	app, out, errOut := newApp(threeIssues())
+	app.JSON = true
+	if err := app.List(ctx, ListOpts{Limit: 1}); err != nil {
+		t.Fatal(err)
+	}
+	lines := outputLines(out.String())
+	var got map[string]any
+	if len(lines) != 1 || json.Unmarshal([]byte(lines[0]), &got) != nil || got["number"].(float64) != 2 {
+		t.Fatalf("want one NDJSON line for #2, got:\n%s", out.String())
+	}
+	if !strings.Contains(errOut.String(), "showing 1 of 3") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+func TestListAndSearchRejectNegativeLimit(t *testing.T) {
+	f := threeIssues()
+	app, out, _ := newApp(f)
+	usageError(t, app.List(ctx, ListOpts{Limit: -1}), "--limit must be 0 or greater")
+	usageError(t, app.Search(ctx, SearchOpts{Terms: "work", Limit: -1}), "--limit must be 0 or greater")
+	if out.String() != "" {
+		t.Errorf("nothing should be printed; stdout = %q", out.String())
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("a bad --limit must be refused before any fetch; calls = %v", f.calls)
+	}
+}
+
+func searchFake() *fakeClient {
+	closed := issue(3, "Retry storm fixed", "P2", "bug")
+	closed.State = "CLOSED"
+	return newFake(
+		issue(1, "retry helper", "P4", "task"),
+		issue(2, "retry loop bug", "P0", "bug"),
+		closed,
+	)
+}
+
+func TestSearchLimitKeepsTheBestMatchesAndWarns(t *testing.T) {
+	app, out, errOut := newApp(searchFake())
+	if err := app.Search(ctx, SearchOpts{Terms: "retry", Limit: 2}); err != nil {
+		t.Fatal(err)
+	}
+	lines := outputLines(out.String())
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "#1") || !strings.HasPrefix(lines[1], "#2") {
+		t.Errorf("Search output, want the first two matches in relevance order:\n%s", out.String())
+	}
+	if !strings.Contains(errOut.String(), "showing 2 of 3 matches; --limit 0 for all") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+}
+
+func TestSearchLimitDoesNotPromiseEverythingWhenTheBackendCapped(t *testing.T) {
+	f := searchFake()
+	f.searchTotal = 50 // the backend found 50 and returned only these three
+	app, _, errOut := newApp(f)
+	if err := app.Search(ctx, SearchOpts{Terms: "retry", Limit: 2}); err != nil {
+		t.Fatal(err)
+	}
+	got := errOut.String()
+	if !strings.Contains(got, "showing 3 of 50 matches; refine the terms") || !strings.Contains(got, "showing 2 of 3 matches") {
+		t.Errorf("stderr = %q, want both the backend-cap and the limit warnings", got)
+	}
+	if strings.Contains(got, "--limit 0") {
+		t.Errorf("stderr = %q: --limit 0 would not show all 50, so it must not be suggested", got)
+	}
+}
+
+// --limit 0 is the right advice whenever the backend returned everything,
+// including when some of it was untriaged and so never listed.
+func TestSearchLimitKeepsItsHintWhenOnlyUntriagedMatchesWereOmitted(t *testing.T) {
+	closed := issue(3, "Retry storm fixed", "P2", "bug")
+	closed.State = "CLOSED"
+	f := newFake(
+		issue(1, "retry helper", "P4", "task"),
+		issue(2, "retry loop bug", "P0", "bug"),
+		closed,
+		issue(4, "retry untriaged"), // no labels: matched, then omitted from the listing
+	)
+	app, _, errOut := newApp(f)
+	if err := app.Search(ctx, SearchOpts{Terms: "retry", Limit: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errOut.String(), "showing 1 of 3 matches; --limit 0 for all") {
+		t.Errorf("stderr = %q, want the triaged count and the --limit 0 hint", errOut.String())
+	}
+}
+
+func TestSearchLimitZeroAndExactLimitDoNotWarn(t *testing.T) {
+	for _, limit := range []int{0, 3} {
+		app, out, errOut := newApp(searchFake())
+		if err := app.Search(ctx, SearchOpts{Terms: "retry", Limit: limit}); err != nil {
+			t.Fatal(err)
+		}
+		if got := len(outputLines(out.String())); got != 3 {
+			t.Errorf("limit %d printed %d lines, want 3", limit, got)
+		}
+		if errOut.String() != "" {
+			t.Errorf("limit %d: stderr = %q", limit, errOut.String())
+		}
+	}
+}
+
+func TestSearchStateNarrowsTheBackendQuery(t *testing.T) {
+	both := []gh.IssueState{gh.StateOpen, gh.StateClosed}
+	for _, tc := range []struct {
+		state      string
+		wantStates []gh.IssueState
+		want       []string
+		omit       []string
+	}{
+		{"", both, []string{"#1", "#2", "#3"}, nil},
+		{stateAll, both, []string{"#1", "#2", "#3"}, nil},
+		{stateOpen, []gh.IssueState{gh.StateOpen}, []string{"#1", "#2"}, []string{"#3"}},
+		{stateClosed, []gh.IssueState{gh.StateClosed}, []string{"#3"}, []string{"#1", "#2"}},
+	} {
+		f := searchFake()
+		app, out, _ := newApp(f)
+		if err := app.Search(ctx, SearchOpts{Terms: "retry", State: tc.state}); err != nil {
+			t.Fatalf("state %q: %v", tc.state, err)
+		}
+		if !slices.Equal(f.searchStates, tc.wantStates) {
+			t.Errorf("state %q reached the backend as %v, want %v", tc.state, f.searchStates, tc.wantStates)
+		}
+		for _, w := range tc.want {
+			if !strings.Contains(out.String(), w) {
+				t.Errorf("state %q: missing %s:\n%s", tc.state, w, out.String())
+			}
+		}
+		for _, o := range tc.omit {
+			if strings.Contains(out.String(), o) {
+				t.Errorf("state %q: %s leaked in:\n%s", tc.state, o, out.String())
+			}
+		}
+	}
+}
+
+// The backend's cap bounds the matches asked for: with three closed matches
+// ahead of the open one and a cap of two, only a query narrowed in the
+// backend can still find the open issue.
+func TestSearchStateNarrowsBeforeTheBackendCap(t *testing.T) {
+	var issues []*model.Issue
+	for n := 1; n <= 3; n++ {
+		c := issue(n, "retry storm", "P2", "bug")
+		c.State = "CLOSED"
+		issues = append(issues, c)
+	}
+	issues = append(issues, issue(4, "retry still open", "P2", "bug"))
+	f := newFake(issues...)
+	f.searchCap = 2
+	app, out, _ := newApp(f)
+	if err := app.Search(ctx, SearchOpts{Terms: "retry", State: stateOpen}); err != nil {
+		t.Fatal(err)
+	}
+	if lines := outputLines(out.String()); len(lines) != 1 || !strings.HasPrefix(lines[0], "#4") {
+		t.Errorf("--state open behind a capped page of closed matches:\n%s", out.String())
+	}
+}
+
+func TestSearchRejectsAnUnknownState(t *testing.T) {
+	f := searchFake()
+	app, _, _ := newApp(f)
+	usageError(t, app.Search(ctx, SearchOpts{Terms: "retry", State: "OPEN"}), "--state must be open, closed, or all")
+	for _, call := range f.calls {
+		if strings.HasPrefix(call, "SearchIssues") {
+			t.Errorf("backend called for a bad state: %v", f.calls)
+		}
+	}
+}
+
+func epicFake() *fakeClient {
+	open := issue(10, "Epic: open one", "P2")
+	open.SubIssues = []model.Ref{{Number: 11, State: "OPEN"}}
+	child := issue(11, "Child", "P2", "task")
+	child.Parent = &model.Ref{Number: 10, State: "OPEN"}
+	done := issue(20, "Epic: finished", "P2")
+	done.State = "CLOSED"
+	done.SubIssues = []model.Ref{{Number: 21, State: "CLOSED"}}
+	doneChild := issue(21, "Done child", "P2", "task")
+	doneChild.State = "CLOSED"
+	doneChild.Parent = &model.Ref{Number: 20, State: "CLOSED"}
+	return newFake(open, child, done, doneChild)
+}
+
+func TestEpicStatusStateSelectsWhichEpicsRollUp(t *testing.T) {
+	for _, tc := range []struct {
+		state      string
+		wantOpen   bool
+		wantClosed bool
+	}{
+		{"", true, false},
+		{stateOpen, true, false},
+		{stateClosed, false, true},
+		{stateAll, true, true},
+	} {
+		app, out, _ := newApp(epicFake())
+		if err := app.EpicStatus(ctx, EpicStatusOpts{State: tc.state}); err != nil {
+			t.Fatalf("state %q: %v", tc.state, err)
+		}
+		got := out.String()
+		if has := strings.Contains(got, "#10"); has != tc.wantOpen {
+			t.Errorf("state %q: open epic listed = %v, want %v:\n%s", tc.state, has, tc.wantOpen, got)
+		}
+		if has := strings.Contains(got, "#20"); has != tc.wantClosed {
+			t.Errorf("state %q: closed epic listed = %v, want %v:\n%s", tc.state, has, tc.wantClosed, got)
+		}
+	}
+}
+
+func TestEpicStatusStateRejectedForOneEpicAndForUnknownValues(t *testing.T) {
+	f := epicFake()
+	app, out, _ := newApp(f)
+	usageError(t, app.EpicStatus(ctx, EpicStatusOpts{Number: 10, State: stateAll}), "does not apply to one epic's children")
+	usageError(t, app.EpicStatus(ctx, EpicStatusOpts{State: "done"}), "--state must be open, closed, or all")
+	if out.String() != "" {
+		t.Errorf("nothing should be printed; stdout = %q", out.String())
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("a bad --state must be refused before any fetch; calls = %v", f.calls)
+	}
+}

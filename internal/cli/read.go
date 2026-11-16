@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/model"
 	"github.com/lumberbarons/hew/internal/render"
 	"github.com/lumberbarons/hew/tracker"
@@ -23,9 +22,9 @@ const (
 )
 
 var (
-	openStates   = []gh.IssueState{gh.StateOpen}
-	closedStates = []gh.IssueState{gh.StateClosed}
-	allStates    = []gh.IssueState{gh.StateOpen, gh.StateClosed}
+	openStates   = []tracker.State{tracker.StateOpen}
+	closedStates = []tracker.State{tracker.StateClosed}
+	allStates    = []tracker.State{tracker.StateOpen, tracker.StateClosed}
 )
 
 // The values --state accepts. "all" is what makes `list --json --bodies` an
@@ -51,11 +50,40 @@ type ReadyOpts struct {
 	Limit int
 }
 
+// limitIssues is the one implementation of --limit for ready, list and
+// search: 0 keeps everything, a positive N keeps the first N and says so on
+// stderr, a negative N is a usage error. Truncation is never silent — a
+// capped list read as complete reads as a smaller backlog. what names the
+// items in the warning ("ready issues", "issues", "matches"). hint is the
+// advice after the counts: "--limit 0 for all" wherever that is true, empty
+// where something else bounds the list too and lifting the limit would not
+// show everything.
+func (a *App) limitIssues(issues []model.Issue, limit int, what, hint string) []model.Issue {
+	if limit > 0 && len(issues) > limit {
+		if hint != "" {
+			hint = "; " + hint
+		}
+		a.warnf("showing %d of %d %s%s", limit, len(issues), what, hint)
+		return issues[:limit]
+	}
+	return issues
+}
+
+const limitAllHint = "--limit 0 for all"
+
+// checkLimit rejects a negative --limit before any fetch.
+func checkLimit(limit int) error {
+	if limit < 0 {
+		return usageErr("--limit must be 0 or greater")
+	}
+	return nil
+}
+
 // Ready lists open, non-epic, unclaimed issues with zero open blockers.
 // No results is exit 0: an empty queue is an answer, not an error.
 func (a *App) Ready(ctx context.Context, opts ReadyOpts) error {
-	if opts.Limit < 0 {
-		return usageErr("--limit must be 0 or greater")
+	if err := checkLimit(opts.Limit); err != nil {
+		return err
 	}
 	snapshot, err := tracker.Wrap(a.Client).Snapshot(ctx, tracker.SnapshotOptions{})
 	if err != nil {
@@ -69,11 +97,7 @@ func (a *App) Ready(ctx context.Context, opts ReadyOpts) error {
 			a.warnf("%s", render.FormatWarning(w))
 		}
 	}
-	ready := issuesFromTracker(snapshot.Ready())
-	if opts.Limit > 0 && len(ready) > opts.Limit {
-		a.warnf("showing %d of %d ready issues; --limit 0 for all", opts.Limit, len(ready))
-		ready = ready[:opts.Limit]
-	}
+	ready := a.limitIssues(issuesFromTracker(snapshot.Ready()), opts.Limit, "ready issues", limitAllHint)
 	return a.emitList(ready, "no ready work", render.List)
 }
 
@@ -93,19 +117,16 @@ type ListOpts struct {
 	// dedup in one call (untriaged issues stay behind `hew triage`). JSON-only:
 	// text output has no place for bodies.
 	Bodies bool
+	// Limit caps how many issues are printed; 0, the default, prints all.
+	// The cap applies after sorting, so it keeps the top N of list order.
+	Limit int
 }
 
-// listStates resolves the requested state filter to the states to fetch, so
-// the query asks for exactly what the caller wants and nothing is dropped
-// again client-side.
-func listStates(opts ListOpts) ([]gh.IssueState, error) {
-	state := opts.State
-	if opts.Closed {
-		if state != "" {
-			return nil, usageErr("--closed and --state are alternatives; use --state %s", stateClosed)
-		}
-		state = stateClosed
-	}
+// parseState is the one reading of --state for every command that takes it:
+// the three values name their states, and empty means whenEmpty — which is
+// the command's own default, because the commands disagree (list and epic
+// status default to open, search to both).
+func parseState(state string, whenEmpty []tracker.State) ([]tracker.State, error) {
 	switch state {
 	case stateOpen:
 		return openStates, nil
@@ -114,13 +135,30 @@ func listStates(opts ListOpts) ([]gh.IssueState, error) {
 	case stateAll:
 		return allStates, nil
 	case "":
-		if opts.Epic > 0 {
-			return allStates, nil
-		}
-		return openStates, nil
+		return whenEmpty, nil
 	default:
 		return nil, usageErr("--state must be %s, %s, or %s", stateOpen, stateClosed, stateAll)
 	}
+}
+
+// listStates resolves the requested state filter to the states to fetch, so
+// the query asks for exactly what the caller wants and nothing is dropped
+// again client-side.
+func listStates(opts ListOpts) ([]tracker.State, error) {
+	state := opts.State
+	if opts.Closed {
+		if state != "" {
+			return nil, usageErr("--closed and --state are alternatives; use --state %s", stateClosed)
+		}
+		state = stateClosed
+	}
+	// Under an epic, progress means seeing what is done as well as what is
+	// left.
+	whenEmpty := openStates
+	if opts.Epic > 0 {
+		whenEmpty = allStates
+	}
+	return parseState(state, whenEmpty)
 }
 
 // List shows issues, open by default, filtered by state, label, or epic
@@ -131,17 +169,20 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 	if opts.Bodies && !a.JSON {
 		return usageErr("--bodies requires --json")
 	}
+	if err := checkLimit(opts.Limit); err != nil {
+		return err
+	}
 	states, err := listStates(opts)
 	if err != nil {
 		return err
 	}
 	snapshot, err := tracker.Wrap(a.Client).Snapshot(ctx, tracker.SnapshotOptions{
-		States: trackerStates(states),
+		States: states,
 	})
 	if err != nil {
 		return err
 	}
-	out := issuesFromTracker(snapshot.List(tracker.ListFilter{Label: opts.Label, Epic: opts.Epic}))
+	out := a.limitIssues(issuesFromTracker(snapshot.List(tracker.ListFilter{Label: opts.Label, Epic: opts.Epic})), opts.Limit, "issues", limitAllHint)
 	return a.emitListBodies(out, "no issues", render.List, opts.Bodies)
 }
 
@@ -160,18 +201,37 @@ func (a *App) Show(ctx context.Context, number int) error {
 	return a.emitIssue(subject, children)
 }
 
+// SearchOpts shapes a search.
+type SearchOpts struct {
+	Terms string
+	// State is "open", "closed", or "all"; empty means all, because the
+	// point of search is finding "already fixed" as well as "already filed".
+	State string
+	// Limit caps how many matches are printed; 0, the default, prints all
+	// that came back.
+	Limit int
+}
+
 // Search runs a repo-scoped text search over open and closed issues — the
 // dedupe step before filing discovered work, where "already fixed" answers
 // the question as well as "already filed". Output keeps the API's
 // best-match order rather than the list sort: relevance is the point.
 // Untriaged matches are omitted (their text is unvetted input); the other
 // half of dedup, over the untriaged queue, is `hew triage --search`.
-func (a *App) Search(ctx context.Context, terms string) error {
-	terms = strings.TrimSpace(terms)
+func (a *App) Search(ctx context.Context, opts SearchOpts) error {
+	terms := strings.TrimSpace(opts.Terms)
 	if terms == "" {
 		return usageErr("usage: hew search <terms>")
 	}
-	result, err := a.readTracker().Search(ctx, tracker.SearchRequest{Terms: terms})
+	if err := checkLimit(opts.Limit); err != nil {
+		return err
+	}
+	// Unlike list, search spans both states unless told otherwise.
+	states, err := parseState(opts.State, allStates)
+	if err != nil {
+		return err
+	}
+	result, err := a.readTracker().Search(ctx, tracker.SearchRequest{Terms: terms, States: states})
 	if err != nil {
 		return err
 	}
@@ -188,7 +248,14 @@ func (a *App) Search(ctx context.Context, terms string) error {
 	case result.Total > result.Fetched:
 		a.warnf("showing %d of %d matches; refine the terms", len(out), result.Total)
 	}
-	return a.emitList(out, "no matches", render.List)
+	// The backend returns at most one capped page, so when it was capped
+	// --limit 0 would still not show every match; the warning above has
+	// already said what does.
+	hint := limitAllHint
+	if result.Total > result.Fetched {
+		hint = ""
+	}
+	return a.emitList(a.limitIssues(out, opts.Limit, "matches", hint), "no matches", render.List)
 }
 
 // TriageOpts retargets triage at the dedup case.
@@ -276,12 +343,31 @@ func (a *App) Prime(ctx context.Context, opts PrimeOpts) error {
 	return a.emitPrime(result.Conventions, d)
 }
 
-// EpicStatus with number <= 0 lists all open epics with progress rollups;
-// with a number it shows that epic's children and the next workable one.
-func (a *App) EpicStatus(ctx context.Context, number int) error {
+// EpicStatusOpts selects what epic status shows.
+type EpicStatusOpts struct {
+	// Number, when positive, shows that epic's children instead of the rollup.
+	Number int
+	// State is "open", "closed", or "all" and selects which epics the rollup
+	// lists; empty means open. It has no meaning for one epic's children,
+	// which always show every state so progress reads as done and left.
+	State string
+}
+
+// EpicStatus with no number lists the epics in the requested state — open by
+// default — with progress rollups; with a number it shows that epic's
+// children and the next workable one.
+func (a *App) EpicStatus(ctx context.Context, opts EpicStatusOpts) error {
 	t := a.readTracker()
+	number := opts.Number
+	if number > 0 && opts.State != "" {
+		return usageErr("--state selects which epics the rollup lists; it does not apply to one epic's children")
+	}
 	if number <= 0 {
-		snapshot, err := t.Snapshot(ctx, tracker.SnapshotOptions{})
+		states, err := parseState(opts.State, openStates)
+		if err != nil {
+			return err
+		}
+		snapshot, err := t.Snapshot(ctx, tracker.SnapshotOptions{States: states})
 		if err != nil {
 			return err
 		}
@@ -328,21 +414,6 @@ func (a *App) readTracker() *tracker.Tracker {
 		backend = tracker.BackendLocal
 	}
 	return tracker.WrapAs(a.Client, backend, "")
-}
-
-// trackerStates maps the CLI's resolved state filter onto the library's
-// states, so `list` asks the backend for exactly what it prints.
-func trackerStates(states []gh.IssueState) []tracker.State {
-	out := make([]tracker.State, len(states))
-	for n, s := range states {
-		switch s {
-		case gh.StateOpen:
-			out[n] = tracker.StateOpen
-		case gh.StateClosed:
-			out[n] = tracker.StateClosed
-		}
-	}
-	return out
 }
 
 // issueFromTracker converts the library's flat issue back to the domain shape

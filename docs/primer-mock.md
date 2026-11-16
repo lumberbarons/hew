@@ -29,8 +29,8 @@ Conventions (enforced by the tool's write path):
 Output: one line per issue — #n priority type (areas) title [blocked by #m; epic done/total; in progress @user].
 list sorts ready work first, then claimed, blocked, epics. Prefer text output; --json on list commands emits NDJSON.
 
-Commands: ready [--limit N (0 for all)] | list [--label X --epic N --state open/closed/all --bodies (with --json)] |
-show <n> | config (read-only: backend, repo or path/id) | search <terms> | triage [--search <terms>] |
+Commands: ready [--limit N (0 for all)] | list [--label X --epic N --state open/closed/all --limit N --bodies (with --json)] |
+show <n> | config (read-only: backend, repo or path/id) | search <terms> [--state open/closed --limit N] | triage [--search <terms>] |
 create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
 draft [same section flags] --out F | --check F (compose/validate a body locally, no GitHub; then create --body-file F) |
@@ -41,7 +41,7 @@ pr [--for N --testing "..." --what "..." --why "..." --risk "..." --title "..." 
 release <n> [--force] (give up a claim; --force releases any owner) |
 close <n> --reason "..." [--completed | --duplicate-of M] [--force: close an epic with open sub-issues] | reopen <n> --reason "..." |
 block <n> --on <m> | unblock <n> --from <m> |
-epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n>] |
+epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n> | --state open/closed/all] |
 apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew apply --help). All take --json.
 
 ## Ready (8 of 19 open)
@@ -93,8 +93,8 @@ Conventions (enforced by the tool's write path):
 Output: one line per issue — #n priority type (areas) title [blocked by #m; epic done/total; in progress @user].
 list sorts ready work first, then claimed, blocked, epics. Prefer text output; --json on list commands emits NDJSON.
 
-Commands: ready [--limit N (0 for all)] | list [--label X --epic N --state open/closed/all --bodies (with --json)] |
-show <n> | config (read-only: backend, repo or path/id) | search <terms> | triage [--search <terms>] |
+Commands: ready [--limit N (0 for all)] | list [--label X --epic N --state open/closed/all --limit N --bodies (with --json)] |
+show <n> | config (read-only: backend, repo or path/id) | search <terms> [--state open/closed --limit N] | triage [--search <terms>] |
 create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
 draft [same section flags] --out F | --check F (compose/validate a body locally, no GitHub; then create --body-file F) |
@@ -102,7 +102,7 @@ start <n> [--priority Pn --show] (--show or --json includes the body, so skip sh
 release <n> [--force] (give up a claim; --force releases any owner) |
 close <n> --reason "..." [--completed | --duplicate-of M] [--force: close an epic with open sub-issues] | reopen <n> --reason "..." |
 block <n> --on <m> | unblock <n> --from <m> |
-epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n>] |
+epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n> | --state open/closed/all] |
 apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew apply --help). All take --json.
 
 ## Ready (2 of 2 open)

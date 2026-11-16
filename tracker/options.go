@@ -15,7 +15,8 @@ const (
 // SnapshotOptions selects which issues to fetch. The zero value fetches open
 // issues only. An unknown state is an invalid-input error.
 type SnapshotOptions struct {
-	// States selects the issue states to fetch. Empty means open only.
+	// States selects the issue states to fetch. Empty means open only —
+	// unlike SearchRequest.States, where empty means open and closed.
 	States []State
 }
 

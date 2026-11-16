@@ -309,17 +309,30 @@ func primeCmd() *ucli.Command {
 	}
 }
 
+// limitFlag is --limit for the list-shaped reads. The semantics are shared —
+// 0 for all, truncation warns on stderr — and only the default differs:
+// ready caps its queue, while list and search print everything unless asked.
+func limitFlag(def int) *ucli.IntFlag {
+	return &ucli.IntFlag{
+		Name:  "limit",
+		Value: def,
+		Usage: "print at most `N` issues (0 for all); truncation warns on stderr",
+	}
+}
+
+// searchLimitFlag is limitFlag worded for search, where the backend returns
+// one capped page: 0 lifts --limit, not that cap.
+func searchLimitFlag() *ucli.IntFlag {
+	f := limitFlag(0)
+	f.Usage = "print at most `N` matches (0 for everything the backend returned); truncation warns on stderr"
+	return f
+}
+
 func readyCmd() *ucli.Command {
 	return &ucli.Command{
-		Name:  "ready",
-		Usage: "open, non-epic, triaged issues with zero open blockers, priority-sorted",
-		Flags: []ucli.Flag{
-			&ucli.IntFlag{
-				Name:  "limit",
-				Value: appcli.DefaultReadyLimit,
-				Usage: "print at most `N` issues (0 for all); truncation warns on stderr",
-			},
-		},
+		Name:   "ready",
+		Usage:  "open, non-epic, triaged issues with zero open blockers, priority-sorted",
+		Flags:  []ucli.Flag{limitFlag(appcli.DefaultReadyLimit)},
 		Before: fixedArgs(0, 0),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
@@ -341,6 +354,7 @@ func listCmd() *ucli.Command {
 			&ucli.StringFlag{Name: "state", Usage: "issue state: `open`, closed, or all"},
 			&ucli.BoolFlag{Name: "closed", Hidden: true, Usage: "deprecated: use --state closed"},
 			&ucli.BoolFlag{Name: "bodies", Usage: "include issue bodies (requires --json) for single-call dedup"},
+			limitFlag(0),
 		},
 		Before: before(fixedArgs(0, 0), noteDeprecated("closed", "--state closed")),
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
@@ -354,6 +368,7 @@ func listCmd() *ucli.Command {
 				State:  cmd.String("state"),
 				Closed: cmd.Bool("closed"),
 				Bodies: cmd.Bool("bodies"),
+				Limit:  cmd.Int("limit"),
 			})
 		},
 	}
@@ -384,12 +399,20 @@ func searchCmd() *ucli.Command {
 		Name:      "search",
 		Usage:     "text search over open and closed issues — dedupe before filing",
 		ArgsUsage: "<terms>",
+		Flags: []ucli.Flag{
+			&ucli.StringFlag{Name: "state", Usage: "narrow to `open` or closed issues (default all)"},
+			searchLimitFlag(),
+		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)
 			if err != nil {
 				return err
 			}
-			return app.Search(ctx, strings.Join(cmd.Args().Slice(), " "))
+			return app.Search(ctx, appcli.SearchOpts{
+				Terms: strings.Join(cmd.Args().Slice(), " "),
+				State: cmd.String("state"),
+				Limit: cmd.Int("limit"),
+			})
 		},
 	}
 }
@@ -833,9 +856,12 @@ func epicCmd() *ucli.Command {
 				Aliases: []string{"list"},
 				Usage:   "progress rollup for all epics, or one epic's children",
 				Description: `With a number: the epic's rollup, the next workable child (next:),
-then every child. Without one: one rollup line per open epic.`,
+then every child. Without one: one rollup line per epic, open unless --state says otherwise.`,
 				ArgsUsage: "[<n>]",
-				Before:    fixedArgs(0, 1),
+				Flags: []ucli.Flag{
+					&ucli.StringFlag{Name: "state", Usage: "epics to roll up: `open`, closed, or all (not with <n>)"},
+				},
+				Before: fixedArgs(0, 1),
 				Action: func(ctx context.Context, cmd *ucli.Command) error {
 					n := 0
 					if cmd.Args().First() != "" {
@@ -848,7 +874,7 @@ then every child. Without one: one rollup line per open epic.`,
 					if err != nil {
 						return err
 					}
-					return app.EpicStatus(ctx, n)
+					return app.EpicStatus(ctx, appcli.EpicStatusOpts{Number: n, State: cmd.String("state")})
 				},
 			},
 		},

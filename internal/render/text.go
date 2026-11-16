@@ -220,7 +220,7 @@ func ListWithAssignees(w io.Writer, issues []model.Issue, s Style) {
 
 // EpicList renders epics with their progress rollups.
 func EpicList(w io.Writer, issues []model.Issue, s Style) {
-	lines(w, issues, lineOpts{progress: true}, s)
+	lines(w, issues, lineOpts{progress: true, state: true}, s)
 }
 
 // localDay is t's calendar day in the reader's zone, with the zone's name when

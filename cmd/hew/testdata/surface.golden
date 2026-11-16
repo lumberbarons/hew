@@ -87,11 +87,13 @@ flag hew epic create --goal string
 flag hew epic create --problem string
 flag hew epic create --title string
 flag hew epic create --where string
+flag hew epic status --state string
 flag hew init --local bool
 flag hew list --bodies bool
 flag hew list --closed bool
 flag hew list --epic int
 flag hew list --label string
+flag hew list --limit int
 flag hew list --state string
 flag hew migrate beads --checkpoint string
 flag hew migrate beads --dry-run bool
@@ -117,6 +119,8 @@ flag hew prime --hook-format string
 flag hew ready --limit int
 flag hew release --force bool
 flag hew reopen --reason string
+flag hew search --limit int
+flag hew search --state string
 flag hew set --add-area string repeatable
 flag hew set --body-file string
 flag hew set --closed bool

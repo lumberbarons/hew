@@ -68,8 +68,12 @@ func TestFlagNamesKeepOneMeaning(t *testing.T) {
 		return paths
 	}
 	// --state is an issue state filter, and only that.
-	if got, want := carriers("state"), []string{"hew list"}; !slices.Equal(got, want) {
+	if got, want := carriers("state"), []string{"hew epic status", "hew list", "hew search"}; !slices.Equal(got, want) {
 		t.Errorf("--state is taught by %v, want only %v: a resume file is --checkpoint", got, want)
+	}
+	// --limit caps a list-shaped read, and nothing else.
+	if got, want := carriers("limit"), []string{"hew list", "hew ready", "hew search"}; !slices.Equal(got, want) {
+		t.Errorf("--limit is taught by %v, want %v", got, want)
 	}
 	// --closed is the closed-target override, and only that.
 	if got, want := carriers("closed"), []string{"hew block", "hew set", "hew unblock"}; !slices.Equal(got, want) {

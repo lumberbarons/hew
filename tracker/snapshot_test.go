@@ -440,3 +440,28 @@ func TestReadsTypeStoreErrorsAtTheBoundary(t *testing.T) {
 		t.Errorf("Get error = %q, want the store's message %q", got, want)
 	}
 }
+
+func TestSnapshotEpicsSpanTheFetchedStates(t *testing.T) {
+	openEpic := fixture(1, "Open epic", "P2", "task", "epic")
+	closedEpic := fixture(2, "Finished epic", "P2", "task", "epic")
+	closedEpic.State = "CLOSED"
+	store := &fakeClient{issues: []model.Issue{openEpic, closedEpic}}
+
+	for _, tc := range []struct {
+		states []State
+		want   []int
+	}{
+		{nil, []int{1}},
+		{[]State{StateOpen}, []int{1}},
+		{[]State{StateClosed}, []int{2}},
+		{[]State{StateOpen, StateClosed}, []int{1, 2}},
+	} {
+		snapshot, err := Wrap(store).Snapshot(context.Background(), SnapshotOptions{States: tc.states})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := numbers(snapshot.Epics()); !slices.Equal(got, tc.want) {
+			t.Errorf("states %v: Epics = %v, want %v", tc.states, got, tc.want)
+		}
+	}
+}

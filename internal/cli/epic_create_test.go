@@ -49,19 +49,19 @@ func TestEpicCreateChildlessIsVisibleAndNotWorkable(t *testing.T) {
 		}
 
 		out.Reset()
-		mustLocal(t, app.EpicStatus(ctx, 0))
+		mustLocal(t, app.EpicStatus(ctx, EpicStatusOpts{Number: 0}))
 		if !strings.Contains(out.String(), "Epic: Roadmap") {
 			t.Errorf("epic status omits the childless epic:\n%s", out.String())
 		}
 
 		out.Reset()
-		mustLocal(t, app.EpicStatus(ctx, n))
+		mustLocal(t, app.EpicStatus(ctx, EpicStatusOpts{Number: n}))
 		if !strings.Contains(out.String(), "0/0") {
 			t.Errorf("epic status <n> refuses the childless epic:\n%s", out.String())
 		}
 
 		out.Reset()
-		mustLocal(t, app.Search(ctx, "Roadmap"))
+		mustLocal(t, app.Search(ctx, SearchOpts{Terms: "Roadmap"}))
 		if !strings.Contains(out.String(), "Epic: Roadmap") {
 			t.Errorf("search omits the childless epic:\n%s", out.String())
 		}

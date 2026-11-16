@@ -35,6 +35,13 @@ type fakeClient struct {
 	// searchTotal, when larger than the match count, simulates a capped
 	// search response where the server reports more matches than returned.
 	searchTotal int
+	// searchCap, when positive, caps what SearchIssues returns the way the
+	// real backends do — after the state filter, so narrowing in the backend
+	// and filtering the capped page afterwards give different answers.
+	searchCap int
+	// searchStates is the state filter the last SearchIssues received, nil
+	// when it was asked for both.
+	searchStates []gh.IssueState
 	// onGetIssue runs after a GetIssue has captured its result, so a test can
 	// change the issue behind the tool's back — the concurrent edit that a
 	// re-check between two passes exists to catch.
@@ -180,19 +187,26 @@ func (f *fakeClient) GetIssue(ctx context.Context, number int) (model.Issue, err
 
 // SearchIssues fakes best-match search as a case-insensitive substring
 // match over title and body, both states.
-func (f *fakeClient) SearchIssues(ctx context.Context, terms string) ([]model.Issue, int, error) {
+func (f *fakeClient) SearchIssues(ctx context.Context, terms string, states []gh.IssueState) ([]model.Issue, int, error) {
 	if err := f.record("SearchIssues " + terms); err != nil {
 		return nil, 0, err
 	}
 	f.refreshRefs()
+	f.searchStates = states
 	needle := strings.ToLower(terms)
 	var out []model.Issue
 	for _, i := range f.issues {
+		if len(states) > 0 && !slices.Contains(states, gh.IssueState(i.State)) {
+			continue
+		}
 		if strings.Contains(strings.ToLower(i.Title+" "+i.Body), needle) {
 			out = append(out, *i)
 		}
 	}
 	total := max(len(out), f.searchTotal)
+	if f.searchCap > 0 && len(out) > f.searchCap {
+		out = out[:f.searchCap]
+	}
 	return out, total, nil
 }
 

@@ -21,12 +21,14 @@ type searchStore struct {
 	total   int
 	err     error
 	terms   string
+	states  []gh.IssueState
 	calls   int
 }
 
-func (s *searchStore) SearchIssues(_ context.Context, terms string) ([]model.Issue, int, error) {
+func (s *searchStore) SearchIssues(_ context.Context, terms string, states []gh.IssueState) ([]model.Issue, int, error) {
 	s.calls++
 	s.terms = terms
+	s.states = states
 	if s.err != nil {
 		return nil, 0, s.err
 	}
@@ -617,5 +619,37 @@ func TestSearchKeepsTheLocalStoresTitleFirstOrder(t *testing.T) {
 	}
 	if result.Total != 2 || result.Fetched != 2 {
 		t.Errorf("Total/Fetched = %d/%d, want 2/2", result.Total, result.Fetched)
+	}
+}
+
+func TestSearchStatesNarrowTheBackendQuery(t *testing.T) {
+	for _, tc := range []struct {
+		states []State
+		want   []gh.IssueState
+	}{
+		{nil, nil},
+		{[]State{StateOpen}, []gh.IssueState{gh.StateOpen}},
+		{[]State{StateClosed}, []gh.IssueState{gh.StateClosed}},
+		{[]State{StateOpen, StateClosed}, []gh.IssueState{gh.StateOpen, gh.StateClosed}},
+	} {
+		store := &searchStore{fakeClient: &fakeClient{}}
+		if _, err := WrapAs(store, BackendGitHub, "").Search(context.Background(), SearchRequest{Terms: "retry", States: tc.states}); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(store.states, tc.want) {
+			t.Errorf("states %v reached the backend as %v, want %v", tc.states, store.states, tc.want)
+		}
+	}
+}
+
+func TestSearchRejectsAnUnknownStateBeforeCallingTheBackend(t *testing.T) {
+	store := &searchStore{fakeClient: &fakeClient{}}
+	_, err := WrapAs(store, BackendGitHub, "").Search(context.Background(), SearchRequest{Terms: "retry", States: []State{"bogus"}})
+	var invalid *InvalidInputError
+	if !errors.As(err, &invalid) || invalid.Field != "states" {
+		t.Fatalf("err = %v, want InvalidInputError for states", err)
+	}
+	if store.calls != 0 {
+		t.Errorf("SearchIssues called %d times for an unknown state", store.calls)
 	}
 }
