@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/lumberbarons/hew/internal/conventions"
+	"github.com/lumberbarons/hew/tracker"
 )
 
 // DraftOpts are the draft command's inputs: either section flags to compose
@@ -39,19 +40,16 @@ func (a *App) draftCompose(opts DraftOpts) error {
 	if opts.Sections.IsZero() {
 		return usageErr("nothing to compose; pass section flags (--where/--problem/--goal/--fix/--approach/--done-when), or --check FILE to revalidate a draft")
 	}
-	body, err := a.renderBody(bodySource{sections: opts.Sections})
+	composed, err := a.renderBody(bodySource{sections: opts.Sections})
 	if err != nil {
 		return err
 	}
-	body += "\n"
+	body := composed.Body + "\n"
 
-	tokens := conventions.UnmarkedCodeText(body)
-	if tokens == nil {
-		tokens = []string{}
-	}
+	tokens := unmarkedCode(composed.Findings)
 	if opts.Out == "" {
 		return a.emitResult(map[string]any{"body": body, "unmarkedCode": tokens}, func() {
-			a.warnUnmarkedCode(body, "fix the flag text and compose again")
+			a.warnFindings(composed.Findings, "fix the flag text and compose again")
 			a.printf("%s", body)
 		})
 	}
@@ -75,7 +73,7 @@ func (a *App) draftCompose(opts DraftOpts) error {
 		return genericErr("cannot write --out: %v", err)
 	}
 	return a.emitResult(map[string]any{"file": opts.Out, "unmarkedCode": tokens}, func() {
-		a.warnUnmarkedCode(body, fmt.Sprintf("edit %s, then `hew draft --check %s`", opts.Out, opts.Out))
+		a.warnFindings(composed.Findings, fmt.Sprintf("edit %s, then `hew draft --check %s`", opts.Out, opts.Out))
 		a.printf("wrote %s — publish with: hew create --body-file %s\n", opts.Out, opts.Out)
 	})
 }
@@ -92,15 +90,16 @@ func (a *App) draftCheck(opts DraftOpts) error {
 	if strings.TrimSpace(body) == "" {
 		return usageErr("--check %s is empty; nothing to publish", opts.Check)
 	}
-	tokens := conventions.UnmarkedCodeText(body)
-	if tokens == nil {
-		tokens = []string{}
+	check, err := tracker.CheckBody(body)
+	if err != nil {
+		return err
 	}
+	tokens := unmarkedCode(check.Findings)
 	return a.emitResult(map[string]any{"file": opts.Check, "unmarkedCode": tokens}, func() {
 		if len(tokens) == 0 {
 			a.printf("%s: no unmarked code text — publish with: hew create --body-file %s\n", opts.Check, opts.Check)
 			return
 		}
-		a.warnUnmarkedCode(body, fmt.Sprintf("edit %s, then `hew draft --check %s` again", opts.Check, opts.Check))
+		a.warnFindings(check.Findings, fmt.Sprintf("edit %s, then `hew draft --check %s` again", opts.Check, opts.Check))
 	})
 }
