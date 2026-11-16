@@ -311,6 +311,39 @@ func TestExternalConsumerSeesATypedAuthFailure(t *testing.T) {
 
 func ptr(value string) *string { return &value }
 
+// A Client outlives the moment it was opened: the branch is pushed, or
+// replaced, afterwards. Each operation reads the checkout as it is then, so a
+// push after Open is seen and a pull request opens from the branch now checked
+// out rather than the one Open found.
+func TestExternalConsumerSeesTheCheckoutAsItIsNow(t *testing.T) {
+	dir := checkout(t)
+	fake := &githubFake{
+		viewer: "octocat",
+		issues: []map[string]any{issueNode(314, "PR workflow", []string{"P2", "task", "in-progress"}, "octocat")},
+	}
+	gitRun(t, dir, "checkout", "-b", "feat/314-second")
+	client, err := openWorkflow(t, dir, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := pr.Body{Sections: pr.Sections{Testing: "`go test ./...` passes"}}
+
+	_, err = client.Create(context.Background(), pr.CreateRequest{Body: body})
+	var noUpstream *pr.NoUpstreamError
+	if !errors.As(err, &noUpstream) || noUpstream.Branch != "feat/314-second" {
+		t.Fatalf("err = %T (%v), want *pr.NoUpstreamError for feat/314-second", err, err)
+	}
+
+	gitRun(t, dir, "push", "-u", "origin", "feat/314-second")
+	created, err := client.Create(context.Background(), pr.CreateRequest{Body: body})
+	if err != nil {
+		t.Fatalf("Create after the push: %v", err)
+	}
+	if created.Head != "feat/314-second" {
+		t.Errorf("head = %q, want the branch pushed after Open", created.Head)
+	}
+}
+
 // A detached HEAD has no branch name to open a pull request from, and Open
 // refuses before the workflow reads an issue.
 func TestExternalConsumerOnADetachedHead(t *testing.T) {

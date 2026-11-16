@@ -58,7 +58,10 @@ type Client struct {
 	store   gh.IssueStore
 	prs     gh.PullRequests
 	repo    gh.Repo
-	state   git.State
+	// worktree is the checkout a Client built by Open reads branch state from;
+	// empty on a wrapped Client, whose caller supplied state itself.
+	worktree string
+	state    git.State
 }
 
 // Open opens the tracker a pull request is composed against and the GitHub
@@ -112,7 +115,7 @@ func openClient(ctx context.Context, tr *tracker.Tracker, worktree string, trans
 	if err != nil {
 		return nil, err
 	}
-	return &Client{tracker: tr, prs: prs, repo: repo, state: state}, nil
+	return &Client{tracker: tr, prs: prs, repo: repo, worktree: worktree, state: state}, nil
 }
 
 // asAuthError turns the GitHub client's auth failure into the tracker
@@ -170,13 +173,17 @@ func (c *Client) prepare(ctx context.Context, requested []int) (prepared, error)
 	if c.prs == nil {
 		return prepared{}, &NoPullRequestsError{}
 	}
-	if !c.state.Pushed {
-		return prepared{}, &NoUpstreamError{Branch: c.state.Branch}
+	state, err := c.branchState()
+	if err != nil {
+		return prepared{}, err
+	}
+	if !state.Pushed {
+		return prepared{}, &NoUpstreamError{Branch: state.Branch}
 	}
 	// Everything from here on is about the branch GitHub can see, which is not
 	// always the one checked out locally — the head it rejects, the head it
 	// matches an existing pull request by, and the name a reviewer reads.
-	head := c.state.Head()
+	head := state.Head()
 
 	snapshot, err := c.tracker.Snapshot(ctx, tracker.SnapshotOptions{})
 	if err != nil {
@@ -195,6 +202,18 @@ func (c *Client) prepare(ctx context.Context, requested []int) (prepared, error)
 		return prepared{}, asAuthError(err)
 	}
 	return prepared{head: head, actor: actor, linked: linked, prCtx: prCtx}, nil
+}
+
+// branchState is the checkout's branch state for one operation. A Client built
+// by Open lives as long as its caller keeps it, and the branch it was opened on
+// can be pushed or replaced in the meantime, so the state is read again from
+// the worktree rather than trusted from Open. A wrapped Client carries the
+// state its caller supplied.
+func (c *Client) branchState() (git.State, error) {
+	if c.worktree == "" {
+		return c.state, nil
+	}
+	return git.CurrentFor(c.worktree)
 }
 
 // repoName is the repository as owner/name, the form messages and the
