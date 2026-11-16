@@ -92,29 +92,32 @@ function show(...kids) {
 
 const num = n => '#' + n;
 
+function chip(text, cls) { return h('span', { class: 'chip' + (cls ? ' ' + cls : '') }, text); }
+const prioClass = p => 'p' + (p || '?').slice(1).replace('?', '');
+
 function issueRow(i) {
   const prio = i.priority || 'P?';
   const meta = [];
-  if (i.epic) meta.push(h('span', { class: 'chip' }, 'epic'));
-  if (i.type) meta.push(h('span', { class: 'chip' }, i.type));
-  for (const a of i.areas || []) meta.push(h('span', { class: 'chip' }, a));
-  if (i.openBlockers && i.openBlockers.length) meta.push(h('span', { class: 'chip block' }, 'blocked by ' + i.openBlockers.map(num).join(', ')));
+  if (i.epic) meta.push(chip('epic'));
+  if (i.type) meta.push(chip(i.type));
+  for (const a of i.areas || []) meta.push(chip(a));
+  if (i.openBlockers && i.openBlockers.length) meta.push(chip('blocked by ' + i.openBlockers.map(num).join(', '), 'block'));
   if (i.epic && i.subIssuesTotal) {
     const pct = Math.round(100 * i.subIssuesCompleted / i.subIssuesTotal);
-    meta.push(h('span', { class: 'muted' }, `${i.subIssuesCompleted}/${i.subIssuesTotal}`), h('span', { class: 'bar' }, h('i', { style: `width:${pct}%` })));
+    meta.push(h('span', { class: 'progress' }, `${i.subIssuesCompleted}/${i.subIssuesTotal}`, h('span', { class: 'bar' }, h('i', { style: `width:${pct}%` }))));
   }
   if (i.inProgress || (i.assignees && i.assignees.length)) {
-    meta.push(h('span', { class: 'chip claim' }, 'in progress' + (i.assignees && i.assignees.length ? ' @' + i.assignees.join(', @') : '')));
+    meta.push(chip('in progress' + (i.assignees && i.assignees.length ? ' @' + i.assignees.join(', @') : ''), 'claim'));
   }
   return h('div', { class: 'row' },
     h('a', { class: 'num', href: `#/issue/${i.number}` }, num(i.number)),
-    h('span', { class: 'chip ' + prio.toLowerCase().replace('?', '') }, prio),
+    chip(prio, prioClass(i.priority)),
     h('a', { class: 'title', href: `#/issue/${i.number}` }, i.title),
-    ...meta);
+    meta.length ? h('div', { class: 'meta' }, ...meta) : null);
 }
 
 function section(title, issues, emptyText) {
-  return [h('h2', {}, `${title} (${issues.length})`),
+  return [h('h2', {}, title, h('span', { class: 'count' }, ` · ${issues.length}`)),
     h('div', { class: 'list' }, issues.length ? issues.map(issueRow) : h('div', { class: 'empty' }, emptyText || 'Nothing here.'))];
 }
 
@@ -124,13 +127,28 @@ function warnings(ws) {
       : `${w.kind}${w.issue ? ' on ' + num(w.issue) : ''}${w.total ? ` (${w.fetched} of ${w.total} fetched)` : ''}`));
 }
 
-function field(label, input) { return h('div', {}, h('label', {}, label), input); }
+let uid = 0;
+// field wraps a control in a labelled block; the label is tied to the control
+// by id so clicking it focuses the input and screen readers announce it.
+function field(label, input, hint) {
+  const id = 'f' + (++uid);
+  input.id = id;
+  return h('div', { class: 'field' }, h('label', { for: id }, label), input, hint ? h('p', { class: 'hint' }, hint) : null);
+}
+
+function formSection(title, sub, ...kids) {
+  return h('div', { class: 'form-section' }, h('h3', {}, title, sub ? h('small', {}, sub) : null), ...kids);
+}
+
+function pageHead(title, sub) {
+  return h('div', { class: 'page-head' }, h('h1', {}, title), sub ? h('span', { class: 'sub' }, sub) : null);
+}
 
 // ---------- views ----------
 
 async function viewBoard() {
   const b = await api('GET', '/api/board');
-  show(h('h1', {}, 'Board'),
+  show(pageHead('Board'),
     ...warnings(b.warnings),
     b.untriaged ? h('div', { class: 'note' }, `${b.untriaged} untriaged issue${b.untriaged === 1 ? '' : 's'} hidden. `, h('a', { href: '#/triage' }, 'Open triage')) : null,
     ...section('Epics', b.epics),
@@ -143,151 +161,199 @@ async function viewIssue(n) {
   const d = await api('GET', `/api/issues/${n}`);
   const i = d.issue;
   const reload = () => route();
+  const open = i.state === 'open';
   const claimed = i.inProgress || (i.assignees || []).length > 0;
 
-  const prioSel = h('select', {}, ['', 'P0', 'P1', 'P2', 'P3', 'P4'].map(p => h('option', { value: p }, p || (i.untriaged ? 'priority…' : 'keep priority'))));
-  const actions = h('div', { class: 'actions' });
-  if (i.state === 'open') {
-    if (!i.epic) {
-      if (i.untriaged || !i.priority) actions.append(prioSel);
-      actions.append(h('button', { class: 'primary', onclick: async () => {
-        if (await act(() => api('POST', `/api/issues/${n}/start`, { priority: prioSel.value }), `Started ${num(n)}`)) reload();
-      } }, 'Start'));
-    }
-    if (claimed) actions.append(h('button', { onclick: async () => {
-      if (await act(() => api('POST', `/api/issues/${n}/release`, {}), `Released ${num(n)}`)) reload();
-    } }, 'Release'));
+  // claim
+  const prioSel = h('select', { 'aria-label': 'Priority', style: 'width:auto' },
+    ['', 'P0', 'P1', 'P2', 'P3', 'P4'].map(p => h('option', { value: p }, p || (i.untriaged ? 'Choose priority…' : 'Keep priority'))));
+  const claim = h('div', { class: 'toolbar' });
+  if (open && !i.epic) {
+    if (i.untriaged || !i.priority) claim.append(prioSel);
+    claim.append(h('button', { class: 'primary', onclick: async () => {
+      if (await act(() => api('POST', `/api/issues/${n}/start`, { priority: prioSel.value }), `Started ${num(n)}`)) reload();
+    } }, 'Start'));
   }
+  if (open && claimed) claim.append(h('button', { onclick: async () => {
+    if (await act(() => api('POST', `/api/issues/${n}/release`, {}), `Released ${num(n)}`)) reload();
+  } }, 'Release'));
+  if (open && i.epic) claim.append(h('span', { class: 'muted' }, 'Epics are containers. Work their children instead.'));
 
-  const reason = h('input', { type: 'text', placeholder: i.state === 'open' ? 'Close reason (required)' : 'Reopen reason (required)' });
+  // close / reopen
+  const reason = h('input', { type: 'text', 'aria-label': 'Reason', placeholder: open ? 'Reason for closing (required)' : 'Reason for reopening (required)' });
   const completed = h('input', { type: 'checkbox' });
-  const closeRow = h('div', { class: 'actions' }, reason,
-    i.state === 'open' ? h('label', {}, completed, ' completed') : null,
-    h('button', { class: i.state === 'open' ? 'danger' : '', onclick: async () => {
-      const call = i.state === 'open'
+  const closer = h('div', { class: 'toolbar' }, reason,
+    open ? h('label', { class: 'check' }, completed, 'Completed') : null,
+    h('button', { class: open ? 'danger' : '', onclick: async () => {
+      const call = open
         ? () => api('POST', `/api/issues/${n}/close`, { reason: reason.value, completed: completed.checked })
         : () => api('POST', `/api/issues/${n}/reopen`, { reason: reason.value });
-      if (await act(call, i.state === 'open' ? `Closed ${num(n)}` : `Reopened ${num(n)}`)) reload();
-    } }, i.state === 'open' ? 'Close' : 'Reopen'));
+      if (await act(call, open ? `Closed ${num(n)}` : `Reopened ${num(n)}`)) reload();
+    } }, open ? 'Close issue' : 'Reopen issue'));
 
-  // inline edit
+  // dependencies
+  const blockIn = h('input', { type: 'text', 'aria-label': 'Blocked by issue number', placeholder: 'Blocked by #…', style: 'max-width:200px' });
+  const blockers = (i.blockedBy || []).map(b => chip([h('a', { href: `#/issue/${b}` }, num(b)),
+    h('a', { href: '#', title: 'Remove', 'aria-label': `Remove blocker ${num(b)}`, onclick: async ev => {
+      ev.preventDefault();
+      if (await act(() => api('DELETE', `/api/issues/${n}/blockers/${b}?allowClosed=1`), `Unblocked from ${num(b)}`)) reload();
+    } }, '×')].flat(), 'block'));
+  const deps = h('div', { class: 'toolbar' },
+    ...(blockers.length ? blockers : [h('span', { class: 'muted' }, 'Nothing')]),
+    blockIn, h('button', { onclick: async () => {
+      const m = parseInt(blockIn.value.replace('#', ''), 10);
+      if (await act(() => api('POST', `/api/issues/${n}/blockers`, { blockers: [m] }), `Blocked on ${num(m)}`)) reload();
+    } }, 'Add blocker'));
+
+  // edit
   const title = h('input', { type: 'text', value: i.title });
   const ePrio = h('select', {}, ['P0', 'P1', 'P2', 'P3', 'P4'].map(p => h('option', { value: p, selected: p === i.priority }, p)));
   const eType = h('select', {}, ['bug', 'enhancement', 'task'].map(t => h('option', { value: t, selected: t === i.type }, t)));
-  const addArea = h('input', { type: 'text', placeholder: 'add area' });
-  const edit = h('details', {}, h('summary', {}, 'Edit'),
-    h('div', { class: 'cols3' }, field('Priority', ePrio), field('Type', eType), field('Add area', addArea)),
+  const addArea = h('input', { type: 'text', placeholder: 'e.g. cli' });
+  const edit = h('details', { class: 'card panel' }, h('summary', {}, 'Edit details'),
     field('Title', title),
-    h('div', { class: 'actions' }, h('button', { onclick: async () => {
-      const req = { allowClosed: i.state !== 'open' };
+    h('div', { class: 'grid-3' }, field('Priority', ePrio), field('Type', eType), field('Add area', addArea)),
+    h('div', { class: 'toolbar' }, h('button', { class: 'primary', onclick: async () => {
+      const req = { allowClosed: !open };
       if (title.value !== i.title) req.title = title.value;
       if (ePrio.value !== i.priority) req.priority = ePrio.value;
       if (eType.value !== i.type) req.type = eType.value;
       if (addArea.value.trim()) req.addAreas = [addArea.value.trim()];
       if (await act(() => api('PATCH', `/api/issues/${n}`, req), 'Saved')) reload();
-    } }, 'Save')));
-
-  // dependencies
-  const blockIn = h('input', { type: 'text', placeholder: 'blocked by #', size: 8 });
-  const blockers = (i.blockedBy || []).map(b => h('span', { class: 'chip block' }, h('a', { href: `#/issue/${b}` }, num(b)), ' ',
-    h('a', { href: '#', title: 'remove', onclick: async ev => {
-      ev.preventDefault();
-      if (await act(() => api('DELETE', `/api/issues/${n}/blockers/${b}?allowClosed=1`), `Unblocked from ${num(b)}`)) reload();
-    } }, '×')));
-  const deps = h('div', { class: 'actions' }, h('span', { class: 'muted' }, 'Blocked by:'), ...blockers, blockers.length ? null : h('span', { class: 'muted' }, 'none'),
-    blockIn, h('button', { onclick: async () => {
-      const m = parseInt(blockIn.value.replace('#', ''), 10);
-      if (await act(() => api('POST', `/api/issues/${n}/blockers`, { blockers: [m] }), `Blocked on ${num(m)}`)) reload();
-    } }, 'Block'));
+    } }, 'Save changes')));
 
   const findings = (d.textFindings || []).map(f => h('div', { class: 'note warn' },
     `Unusual characters in ${f.source}: ` + ['zeroWidth', 'bidiControl', 'unicodeTags', 'confusable'].filter(k => f[k]).join(', ')));
 
+  const prow = (label, body) => h('div', { class: 'prow' }, h('div', { class: 'label' }, label), body);
   show(
-    h('h1', {}, `${num(i.number)} ${i.title}`),
-    h('div', { class: 'row' }, h('span', { class: 'chip ' + (i.priority || 'p?').toLowerCase().replace('?', '') }, i.priority || 'P?'),
-      i.type ? h('span', { class: 'chip' }, i.type) : null, i.epic ? h('span', { class: 'chip' }, 'epic') : null,
-      h('span', { class: 'chip' }, i.state), ...(i.areas || []).map(a => h('span', { class: 'chip' }, a)),
-      claimed ? h('span', { class: 'chip claim' }, 'in progress @' + (i.assignees || []).join(', @')) : null,
+    h('div', { class: 'issue-head' }, h('h1', {}, h('span', { class: 'n' }, num(i.number)), i.title)),
+    h('div', { class: 'issue-meta' }, chip(i.priority || 'P?', prioClass(i.priority)),
+      i.type ? chip(i.type) : null, i.epic ? chip('epic') : null,
+      chip(i.state, open ? '' : 'state-closed'), ...(i.areas || []).map(a => chip(a)),
+      claimed ? chip('in progress @' + (i.assignees || []).join(', @'), 'claim') : null,
       i.parent ? h('span', { class: 'muted' }, 'in epic ', h('a', { href: `#/issue/${i.parent}` }, num(i.parent))) : null),
-    ...findings, actions, closeRow, edit, deps,
+    ...findings,
+    h('div', { class: 'card prows' },
+      claim.children.length ? prow('Work', claim) : null,
+      prow(open ? 'Close' : 'Reopen', closer),
+      prow('Blocked by', deps)),
+    edit,
     h('h2', {}, 'Body'), i.body ? renderMarkdown(i.body) : h('p', { class: 'muted' }, '(empty)'),
-    d.children.length ? [h('h2', {}, `Children (${d.children.length})${d.next ? ` — next: ${num(d.next)}` : ''}`),
+    d.children.length ? [h('h2', {}, 'Children', h('span', { class: 'count' }, ` · ${d.children.length}${d.next ? ` · next ${num(d.next)}` : ''}`)),
       h('div', { class: 'list' }, d.children.map(issueRow))] : null,
-    i.comments && i.comments.length ? [h('h2', {}, `Comments (${i.commentsTotal || i.comments.length})`),
-      ...i.comments.map(c => h('div', { class: 'comment' }, h('div', { class: 'muted' }, `${c.author} · ${new Date(c.createdAt).toLocaleString()}`), renderMarkdown(c.body)))] : null);
+    i.comments && i.comments.length ? [h('h2', {}, 'Comments', h('span', { class: 'count' }, ` · ${i.commentsTotal || i.comments.length}`)),
+      ...i.comments.map(c => h('div', { class: 'card comment' }, h('div', { class: 'who' }, `${c.author} · ${new Date(c.createdAt).toLocaleString()}`), renderMarkdown(c.body)))] : null);
 }
 
 function viewNew() {
   const kind = h('select', {}, h('option', { value: 'issue' }, 'Issue'), h('option', { value: 'epic' }, 'Epic'));
-  const title = h('input', { type: 'text' });
+  const title = h('input', { type: 'text', autocomplete: 'off' });
   const type = h('select', {}, ['task', 'bug', 'enhancement'].map(t => h('option', { value: t }, t)));
   const prio = h('select', {}, ['P2', 'P0', 'P1', 'P3', 'P4'].map(p => h('option', { value: p }, p)));
-  const areas = h('input', { type: 'text', placeholder: 'comma separated' });
-  const where = h('textarea', {});
-  const problem = h('textarea', {});
-  const fix = h('textarea', {});
-  const done = h('textarea', { placeholder: 'one per line' });
+  const areas = h('input', { type: 'text', placeholder: 'e.g. cli, docs' });
+  const where = h('textarea', { rows: 2 });
+  const problem = h('textarea', { rows: 4 });
+  const fix = h('textarea', { rows: 4 });
+  const done = h('textarea', { rows: 4 });
   const blockedBy = h('input', { type: 'text', placeholder: '#3, #4' });
-  const parent = h('input', { type: 'text', placeholder: '#epic' });
-  const children = h('input', { type: 'text', placeholder: 'epic children: #3, #4' });
-  const status = h('div', {});
+  const parent = h('input', { type: 'text', placeholder: '#12' });
+  const children = h('input', { type: 'text', placeholder: '#3, #4' });
+  const status = h('div', { class: 'status', role: 'status' });
+
+  const fTitle = field('Title', title);
+  const fType = field('Type', type);
+  const fPrio = field('Priority', prio);
+  const fAreas = field('Areas', areas, 'Comma separated. Use sparingly: only once several issues share one.');
+  const fProblem = field('Problem', problem);
+  const fFix = field('Fix', fix);
+  const fBlocked = field('Blocked by', blockedBy, 'Issues that must close first.');
+  const fParent = field('Parent epic', parent);
+  const fChildren = field('Children', children, 'Existing issues to attach as sub-issues. They must not already have a parent.');
+  const relGrid = h('div', { class: 'grid-2' }, fBlocked, fParent);
+  const relSection = formSection('Relationships', null, relGrid, fChildren);
+  const fKind = field('Kind', kind);
+  const typeGrid = h('div', { class: 'grid-3' }, fKind, fType, fPrio);
+
   const ints = s => s.split(/[\s,]+/).map(x => parseInt(x.replace('#', ''), 10)).filter(Number.isInteger);
+  const isEpic = () => kind.value === 'epic';
+  const label = (f, text) => { f.firstChild.textContent = text; };
+
+  // Show only the fields that apply to the chosen kind and type, so the
+  // form never asks for something the write path would refuse.
+  const sync = () => {
+    const epic = isEpic();
+    for (const f of [fType, fPrio, fAreas, relGrid]) f.hidden = epic;
+    fChildren.hidden = !epic;
+    typeGrid.className = epic ? 'grid-2' : 'grid-3';
+    const bug = !epic && type.value === 'bug';
+    label(fProblem, bug ? 'Problem' : 'Goal');
+    label(fFix, bug ? 'Fix' : 'Approach');
+    relSection.hidden = false;
+    label(fTitle, epic ? 'Title' : 'Title');
+  };
+
   const payload = () => {
     const body = { where: where.value, doneWhen: done.value.split('\n').map(s => s.trim()).filter(Boolean) };
-    if (type.value === 'bug' && kind.value === 'issue') { body.problem = problem.value; body.fix = fix.value; }
+    if (type.value === 'bug' && !isEpic()) { body.problem = problem.value; body.fix = fix.value; }
     else { body.goal = problem.value; body.approach = fix.value; }
-    if (kind.value === 'epic') return { title: title.value, children: ints(children.value), body };
+    if (isEpic()) return { title: title.value, children: ints(children.value), body };
     return {
       title: title.value, type: type.value, priority: prio.value,
       areas: areas.value.split(',').map(s => s.trim()).filter(Boolean),
       parent: ints(parent.value)[0] || 0, blockedBy: ints(blockedBy.value), body,
     };
   };
-  const path = () => (kind.value === 'epic' ? '/api/epics' : '/api/issues');
+  const path = () => (isEpic() ? '/api/epics' : '/api/issues');
   let timer;
   const validate = () => {
     clearTimeout(timer);
     timer = setTimeout(async () => {
       try {
         const r = await api('POST', path() + '?dryRun=1', payload());
-        status.replaceChildren(h('div', { class: 'note ok' }, 'Valid.'),
+        status.replaceChildren(h('div', { class: 'note ok' }, 'Ready to create.'),
           ...(r.findings || []).map(f => h('div', { class: 'note warn' }, 'Wrap in backticks: ' + f.tokens.join(', '))));
       } catch (e) { status.replaceChildren(h('div', { class: 'note bad' }, explain(e))); }
     }, 300);
   };
-  const form = h('form', { oninput: validate, onchange: validate, onsubmit: async ev => {
+
+  const create = h('button', { class: 'primary', type: 'submit' }, 'Create');
+  const form = h('form', { class: 'card form', oninput: validate, onchange: () => { sync(); validate(); }, onsubmit: async ev => {
     ev.preventDefault();
+    create.disabled = true;
     const r = await act(() => api('POST', path(), payload()), 'Created');
+    create.disabled = false;
     if (r) location.hash = `#/issue/${r.issue.number}`;
   } },
-    h('div', { class: 'cols3' }, field('Kind', kind), field('Type', type), field('Priority', prio)),
-    field('Title', title), field('Areas', areas),
-    field('Where', where), field('Problem / Goal', problem), field('Fix / Approach', fix), field('Done when', done),
-    h('div', { class: 'cols3' }, field('Blocked by', blockedBy), field('Parent', parent), field('Children', children)),
-    status, h('div', { class: 'actions' }, h('button', { class: 'primary', type: 'submit' }, 'Create')));
-  show(h('h1', {}, 'New'), form);
+    formSection('Basics', null, typeGrid, fTitle, fAreas),
+    formSection('Description', 'Section headings are added for you. Leave out any that do not apply.',
+      field('Where', where, 'Files, packages or areas involved.'), fProblem, fFix,
+      field('Done when', done, 'One checklist item per line.')),
+    relSection,
+    h('div', { class: 'form-foot' }, status, h('button', { class: 'ghost', type: 'button', onclick: () => { location.hash = '#/'; } }, 'Cancel'), create));
+  sync();
+  show(pageHead('New', 'File an issue or an epic'), form);
 }
 
 async function viewSearch(query) {
-  const q = h('input', { type: 'text', value: query, placeholder: 'search open and closed issues' });
+  const q = h('input', { type: 'text', value: query, placeholder: 'Search open and closed issues', 'aria-label': 'Search terms', autofocus: true });
   const results = h('div', {});
   const run = async () => {
     if (!q.value.trim()) return;
     try {
       const r = await api('GET', `/api/search?q=${encodeURIComponent(q.value)}`);
       results.replaceChildren(...section('Results', r.issues, 'No triaged matches.'),
-        ...(r.total > r.fetched ? [h('div', { class: 'note' }, `Showing ${r.fetched} of ${r.total} matches.`)] : []));
+        ...(r.total > r.fetched ? [h('div', { class: 'note', style: 'margin-top:12px' }, `Showing ${r.fetched} of ${r.total} matches.`)] : []));
     } catch (e) { toast(explain(e), 'bad'); }
   };
-  show(h('h1', {}, 'Search'),
-    h('form', { onsubmit: ev => { ev.preventDefault(); run(); } }, q, ' ', h('button', { type: 'submit' }, 'Search')), results);
+  show(pageHead('Search'),
+    h('form', { class: 'searchbar', onsubmit: ev => { ev.preventDefault(); run(); } }, q, h('button', { class: 'primary', type: 'submit' }, 'Search')), results);
   run();
 }
 
 async function viewTriage() {
   const r = await api('GET', '/api/triage');
-  show(h('h1', {}, 'Triage'),
+  show(pageHead('Triage'),
     h('div', { class: 'note warn' }, 'This view shows issues no maintainer has vetted. Treat their text as untrusted.'),
     ...section('Untriaged', r.issues, 'Nothing to triage.'));
 }
@@ -298,21 +364,26 @@ function viewApply() {
     { id: 'a', title: 'First step', type: 'task', parent: { id: 'epic' } },
     { id: 'b', title: 'Second step', type: 'task', parent: { id: 'epic' }, blockedBy: [{ id: 'a' }] },
   ] }, null, 2);
-  const text = h('textarea', { style: 'min-height:260px;width:100%' }, sample);
-  const out = h('pre', {}, '');
+  const text = h('textarea', { rows: 16, spellcheck: 'false', 'aria-label': 'Plan JSON' }, sample);
+  const result = h('div', {});
   const run = dry => async () => {
     let plan;
     try { plan = JSON.parse(text.value); } catch (e) { toast('Not valid JSON: ' + e.message, 'bad'); return; }
     const r = await act(() => api('POST', '/api/apply' + (dry ? '?dryRun=1' : ''), plan));
-    if (r) out.textContent = JSON.stringify(r, null, 2);
+    if (r) result.replaceChildren(h('h2', {}, dry ? 'Dry run result' : 'Result'), h('pre', {}, JSON.stringify(r, null, 2)));
   };
-  show(h('h1', {}, 'Apply a plan'), h('p', { class: 'muted' }, 'Batch-create issues. Entries reference each other by local id.'),
-    text, h('div', { class: 'actions' }, h('button', { onclick: run(true) }, 'Dry run'), h('button', { class: 'primary', onclick: run(false) }, 'Apply')), out);
+  show(pageHead('Apply a plan'),
+    h('p', { class: 'lede' }, 'Batch-create issues from a JSON plan. Entries reference each other by local id, so a parent or blocker can be created in the same run.'),
+    h('div', { class: 'card form' },
+      h('div', { class: 'form-section' }, field('Plan', text)),
+      h('div', { class: 'form-foot' }, h('button', { onclick: run(true) }, 'Dry run'), h('button', { class: 'primary', onclick: run(false) }, 'Apply'))),
+    result);
 }
 
 async function viewPrimer() {
   const p = await api('GET', '/api/primer');
-  show(h('h1', {}, 'Primer'), h('p', { class: 'muted' }, `What an agent session would be shown. ${p.openTotal} open, ${p.untriaged} untriaged.`),
+  show(pageHead('Primer'),
+    h('p', { class: 'lede' }, `What an agent session would be shown. ${p.openTotal} open, ${p.untriaged} untriaged.`),
     ...warnings(p.warnings),
     ...section('Ready', p.ready), ...section('In progress', p.inProgress), ...section('Epics', p.epics),
     h('h2', {}, 'Conventions'), h('pre', {}, p.conventions));
@@ -323,6 +394,11 @@ async function viewPrimer() {
 async function route() {
   const [, view, arg] = (location.hash || '#/').split(/[/?]/);
   const rest = (location.hash.split('?')[1]) || '';
+  const current = { new: '#/new', search: '#/search', triage: '#/triage', apply: '#/apply', primer: '#/primer' }[view] || '#/';
+  for (const a of document.querySelectorAll('nav a')) {
+    if (a.getAttribute('href') === current) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  }
+  window.scrollTo(0, 0);
   try {
     switch (view) {
       case 'issue': return await viewIssue(parseInt(arg, 10));
