@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -80,23 +81,6 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	// Reported first, so the plan can be fixed while fixing it is still free.
 	a.warnPlanCodeText(entries)
 
-	// Validate pending creates before any writes. Already-created entries
-	// may contain fields older releases accepted; re-gating them would
-	// strand a checkpoint whose source digest cannot be changed to repair it.
-	for i, e := range entries {
-		if _, created := checkpoint.Created(e.Key()); created {
-			continue
-		}
-		if err := validateTitle(applyTitle(e)); err != nil {
-			return usageErr("line %d: %v", e.Line, err)
-		}
-		areas, err := normalizeAreas("areas", e.Areas)
-		if err != nil {
-			return usageErr("line %d: %v", e.Line, err)
-		}
-		entries[i].Areas = areas
-	}
-
 	result, err := tracker.WrapAs(a.Client, a.applyBackend(), "").ApplyPlan(ctx, entries, tracker.ApplyOptions{
 		DryRun:     opts.DryRun,
 		Throttle:   opts.Throttle,
@@ -108,6 +92,13 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 		a.warnf("%s", warning)
 	}
 	if err != nil {
+		// ApplyPlan owns the title and area rules now, including the check
+		// that an already-created entry is not re-gated. A rejected plan is
+		// bad input, so it keeps the apply command's usage exit code.
+		var invalid *tracker.InvalidInputError
+		if errors.As(err, &invalid) && invalid.Field == "plan" {
+			return usageErr("%s", invalid.Reason)
+		}
 		return err
 	}
 

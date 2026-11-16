@@ -451,6 +451,107 @@ func TestApplyPlanKeysEntriesWithoutIDsByPosition(t *testing.T) {
 	}
 }
 
+func TestApplyPlanRefusesInvalidPendingFields(t *testing.T) {
+	tests := map[string]struct {
+		entry PlanEntry
+		want  string
+	}{
+		"whitespace title": {PlanEntry{Title: "   ", Type: "task"}, "must not be empty"},
+		"multi-line title": {PlanEntry{Title: "first\nsecond", Type: "task"}, "single line"},
+		"over-long title":  {PlanEntry{Title: strings.Repeat("a", 257), Type: "task"}, "256"},
+		"epic prefix pushes the title over": {
+			PlanEntry{Title: strings.Repeat("a", 251), Type: PlanTypeEpic}, "256",
+		},
+		"comma in an area": {PlanEntry{Title: "x", Type: "task", Areas: []string{"x,y"}}, "comma"},
+		"whitespace area":  {PlanEntry{Title: "x", Type: "task", Areas: []string{"   "}}, "must not be blank"},
+		"over-long area":   {PlanEntry{Title: "x", Type: "task", Areas: []string{strings.Repeat("a", 51)}}, "50"},
+		// Padding slips past ValidatePlan's untrimmed check, so these exercise
+		// the convention-label rule on the trimmed name.
+		"padded priority area": {PlanEntry{Title: "x", Type: "task", Areas: []string{" P1 "}}, "priority label"},
+		"padded type area":     {PlanEntry{Title: "x", Type: "task", Areas: []string{" bug "}}, "type label"},
+		"padded claim area":    {PlanEntry{Title: "x", Type: "task", Areas: []string{" in-progress "}}, "reserved convention label"},
+		"padded epic area":     {PlanEntry{Title: "x", Type: "task", Areas: []string{" epic "}}, "reserved convention label"},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			store := newApplyStore()
+			_, err := WrapAs(store, BackendGitHub, "").ApplyPlan(testCtx, []PlanEntry{tc.entry}, ApplyOptions{})
+			var invalid *InvalidInputError
+			if !errors.As(err, &invalid) || invalid.Field != "plan" {
+				t.Fatalf("err = %v, want an *InvalidInputError naming the plan", err)
+			}
+			if !strings.HasPrefix(invalid.Reason, "line 1: ") || !strings.Contains(invalid.Reason, tc.want) {
+				t.Errorf("reason = %q, want the entry position and %q", invalid.Reason, tc.want)
+			}
+			if store.createCalls != 0 || len(store.created) != 0 {
+				t.Errorf("refused plan created %d issues", store.createCalls)
+			}
+			if len(store.labels) != 0 {
+				t.Errorf("refused plan bootstrapped labels: %v", store.labels)
+			}
+		})
+	}
+}
+
+// The direct API's areas go through the same trim and de-duplication the CLI's
+// flags do, so a plan built in code does not create differently spelled labels.
+func TestApplyPlanNormalizesPendingEntryAreas(t *testing.T) {
+	store := newApplyStore()
+	entries := []PlanEntry{{ID: "a", Title: "A", Type: "task", Areas: []string{" api ", "api", " ui "}}}
+	if _, err := WrapAs(store, BackendGitHub, "").ApplyPlan(testCtx, entries, ApplyOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	issue := store.byTitle("A")
+	if issue == nil {
+		t.Fatal("issue was not created")
+	}
+	for _, want := range []string{"api", "ui"} {
+		if got := countStrings(issue.Labels, want); got != 1 {
+			t.Errorf("labels = %v, want %q exactly once", issue.Labels, want)
+		}
+	}
+	if slices.Contains(issue.Labels, " api ") {
+		t.Errorf("labels = %v, want the untrimmed spelling gone", issue.Labels)
+	}
+}
+
+// An entry the checkpoint already maps was created under a previous release's
+// rules; re-gating it would strand a resume whose source digest cannot change
+// to repair it. Only the pending entry gets the write path's field rules.
+func TestApplyPlanSkipsFieldValidationForCheckpointedEntries(t *testing.T) {
+	store := newApplyStore()
+	entries := normalizePlan([]PlanEntry{
+		{ID: "legacy", Title: "First\nsecond", Type: "task", Areas: []string{strings.Repeat("a", 80)}},
+		{ID: "next", Title: "Next", Type: "task"},
+	})
+	digest, err := planDigest(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.CreateIssue(testCtx, entries[0].Title, PlanBodyWithProvenance(entries[0], digest), []string{"P2", "task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := NewMemoryCheckpoint()
+	if err := checkpoint.RecordCreated("legacy", created.Number); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := WrapAs(store, BackendGitHub, "").ApplyPlan(testCtx, entries, ApplyOptions{Checkpoint: checkpoint})
+	if err != nil {
+		t.Fatalf("checkpointed entry was re-gated: %v", err)
+	}
+	if result.Created != 1 {
+		t.Errorf("created = %d, want only the pending entry", result.Created)
+	}
+	if result.Mapping["legacy"] != created.Number {
+		t.Errorf("mapping = %v, want the checkpointed issue kept", result.Mapping)
+	}
+	if store.byTitle("Next") == nil {
+		t.Error("pending entry was not created after the checkpointed one was skipped")
+	}
+}
+
 func TestValidatePlan(t *testing.T) {
 	valid := PlanEntry{Title: "x", Type: "task"}
 	tests := map[string]struct {

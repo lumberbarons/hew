@@ -7,9 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/gh"
@@ -531,71 +529,50 @@ func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 }
 
 // validateTitle checks the stored title, including any cosmetic epic prefix.
-// Count characters rather than bytes so non-ASCII titles get the same limit.
+// The rule lives in tracker so every writer shares it; this maps the library's
+// typed rejection onto the command's flag-named usage error.
 func validateTitle(title string) error {
-	if strings.TrimSpace(title) == "" {
-		return usageErr("--title must not be empty")
-	}
-	if strings.ContainsAny(title, "\r\n\v\f\u0085\u2028\u2029") {
-		return usageErr("--title must be a single line")
-	}
-	if utf8.RuneCountInString(title) > 256 {
-		return usageErr("--title must be at most 256 characters (including the Epic: prefix for epics)")
+	if err := tracker.ValidateTitle(title); err != nil {
+		var invalid *tracker.InvalidInputError
+		if errors.As(err, &invalid) {
+			return usageErr("--title %s", invalid.Reason)
+		}
+		return err
 	}
 	return nil
 }
 
 // normalizeAreas returns the area names trimmed of surrounding whitespace and
-// de-duplicated, or a usage error. A name that is blank after trimming is
-// refused: GitHub rejects a label with no visible name, and the local store
-// would otherwise keep one that renders as `( )` and breaks a later
-// `migrate local`. Everything else is checked against the trimmed name, so
-// " P0 " is the priority label it names.
-//
-// The checks enforce GitHub's label length limit and reserve convention
-// labels: areas must neither change priority/type nor manufacture a claim. A
-// comma is refused too: the text renderer joins areas with it, so an area named
-// "x,y" would be indistinguishable from the two areas "x" and "y". The area
-// flags split on commas before this runs, so the check guards the callers that
-// hand over a name verbatim — `apply` plans and direct API use — while
-// `--area x,y` stays two areas. Removal is checked by validateAreaLabels, which
-// has no comma rule.
+// de-duplicated, or a usage error. The rules — no blank name, at most 50
+// characters, no comma, no convention label — live in tracker, so a plan or a
+// direct library caller cannot store an area the CLI would refuse. The area
+// flags split on commas before this runs, so the comma rule guards the callers
+// that hand over a name verbatim — `apply` plans and direct API use — while
+// `--area x,y` stays two areas.
 func normalizeAreas(flag string, areas []string) ([]string, error) {
-	trimmed := make([]string, 0, len(areas))
-	for _, area := range areas {
-		area = strings.TrimSpace(area)
-		if area == "" {
-			return nil, usageErr("%s must not be blank", flag)
+	trimmed, err := tracker.NormalizeAreas(areas)
+	if err != nil {
+		var invalid *tracker.InvalidInputError
+		if errors.As(err, &invalid) {
+			return nil, usageErr("%s %s", flag, invalid.Reason)
 		}
-		// Trimming can make two spellings one name; keep the first.
-		if !slices.Contains(trimmed, area) {
-			trimmed = append(trimmed, area)
-		}
+		return nil, err
 	}
-	for _, area := range trimmed {
-		if utf8.RuneCountInString(area) > 50 {
-			return nil, usageErr("%s must be at most 50 characters", flag)
-		}
-		if strings.Contains(area, ",") {
-			return nil, usageErr("%s %q must not contain a comma; commas separate areas", flag, area)
-		}
-	}
-	return trimmed, validateAreaLabels(flag, trimmed)
+	return trimmed, nil
 }
 
+// validateAreaLabels checks names that must not be convention labels, without
+// the trim, length or comma rules normalizeAreas applies: a removal has to be
+// able to name an oversized area an older tracker stored, so it can be
+// repaired before a local migration.
 func validateAreaLabels(flag string, areas []string) error {
 	for _, area := range areas {
-		if _, ok := model.LabelPriority(area); ok {
-			return usageErr("%s %q is a priority label; use --priority", flag, area)
-		}
-		if _, ok := model.LabelType(area); ok {
-			return usageErr("%s %q is a type label; use --type", flag, area)
-		}
-		if model.IsInProgressLabel(area) {
-			return usageErr("%s %q is a reserved convention label; use hew start to claim an issue", flag, area)
-		}
-		if model.IsEpicLabel(area) {
-			return usageErr("%s %q is a reserved convention label; use hew epic create to make an epic", flag, area)
+		if err := tracker.ValidateAreaLabel(area); err != nil {
+			var invalid *tracker.InvalidInputError
+			if errors.As(err, &invalid) {
+				return usageErr("%s %s", flag, invalid.Reason)
+			}
+			return err
 		}
 	}
 	return nil
