@@ -60,16 +60,19 @@ func block(ctx context.Context, store gh.IssueStore, number int, blockers []int,
 	blockers = uniqueInts(blockers)
 	issues, err := store.ListIssues(ctx, []gh.IssueState{gh.StateOpen})
 	if err != nil {
-		return BlockResult{}, err
+		return BlockResult{}, asReadError(err)
 	}
 	byNum := model.ByNumber(issues)
 	issue, ok := byNum[number]
 	if !ok {
 		// Absent from the open set means closed or nonexistent. Re-read to
-		// tell them apart; only this path pays for the extra call.
+		// tell them apart; only this path pays for the extra call. A read that
+		// fails for any other reason is that failure, not absence: reporting
+		// it as NotFoundError would send a caller looking for a typo when the
+		// backend was unreachable.
 		target, getErr := store.GetIssue(ctx, number)
 		if getErr != nil {
-			return BlockResult{}, &NotFoundError{Issue: number}
+			return BlockResult{}, asWriteError(getErr)
 		}
 		if err := closedGuard(target, opts.AllowClosed); err != nil {
 			return BlockResult{}, err
@@ -100,7 +103,7 @@ func block(ctx context.Context, store gh.IssueStore, number int, blockers []int,
 	}
 	for i, blocker := range result.Added {
 		if err := store.AddBlockedBy(ctx, number, blocker); err != nil {
-			return BlockResult{}, partialWriteError(err, number, result.Added[:i], blocker, result.Added[i+1:])
+			return BlockResult{}, partialWriteError(asWriteError(err), number, result.Added[:i], blocker, result.Added[i+1:])
 		}
 	}
 	return result, nil
@@ -125,7 +128,7 @@ func unblock(ctx context.Context, store gh.IssueStore, number int, blockers []in
 	blockers = uniqueInts(blockers)
 	issue, err := store.GetIssue(ctx, number)
 	if err != nil {
-		return UnblockResult{}, err
+		return UnblockResult{}, asReadError(err)
 	}
 	if err := closedGuard(issue, opts.AllowClosed); err != nil {
 		return UnblockResult{}, err
@@ -140,7 +143,7 @@ func unblock(ctx context.Context, store gh.IssueStore, number int, blockers []in
 	}
 	for i, blocker := range result.Removed {
 		if err := store.RemoveBlockedBy(ctx, number, blocker); err != nil {
-			return UnblockResult{}, partialWriteError(err, number, result.Removed[:i], blocker, result.Removed[i+1:])
+			return UnblockResult{}, partialWriteError(asWriteError(err), number, result.Removed[:i], blocker, result.Removed[i+1:])
 		}
 	}
 	return result, nil

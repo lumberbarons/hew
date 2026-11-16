@@ -25,6 +25,18 @@ func TestExitCode(t *testing.T) {
 		{"wrapped auth", fmt.Errorf("context: %w", &gh.AuthError{Err: errors.New("401")}), ExitAuth},
 		{"tracker auth", &tracker.AuthError{Err: errors.New("401")}, ExitAuth},
 		{"wrapped tracker auth", fmt.Errorf("context: %w", &tracker.AuthError{Err: errors.New("401")}), ExitAuth},
+		// A partial operation reports what landed and what did not, but the
+		// failure that stopped it is still an auth failure: an agent loop has
+		// to see exit 4 and run gh auth login rather than retry blindly.
+		{"partial write auth", &tracker.PartialWriteError{
+			Issue: 1, Landed: []int{2}, Failed: 3, Err: &tracker.AuthError{Err: errors.New("401")},
+		}, ExitAuth},
+		{"partial release auth", &tracker.PartialReleaseError{
+			Issue: 1, Err: &tracker.AuthError{Err: errors.New("401")},
+		}, ExitAuth},
+		{"partial close auth", &tracker.PartialCloseError{
+			Issue: 1, Err: &tracker.AuthError{Err: errors.New("401")},
+		}, ExitAuth},
 		{"wrapped usage", fmt.Errorf("context: %w", usageErr("bad")), ExitUsage},
 	}
 	for _, tt := range tests {

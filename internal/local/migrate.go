@@ -112,14 +112,22 @@ func requireLocal(dir string) error {
 	return err
 }
 
-// readLocalConfig is ReadConfig for a tracker that must still be local.
+// readLocalConfig is ReadConfig for a tracker that must still be local. A
+// tracker that has moved to another backend is a MigratedError, with the
+// repository the migration record names when it is readable: that is the one
+// fact a caller needs to find the issues, and the config alone does not carry
+// it.
 func readLocalConfig(dir string) (Config, error) {
 	cfg, err := ReadConfig(dir)
 	if err != nil {
 		return cfg, err
 	}
 	if cfg.Backend != BackendLocal {
-		return cfg, fmt.Errorf("%s tracks issues in %q, not locally", dir, cfg.Backend)
+		refusal := &MigratedError{Dir: dir, Backend: cfg.Backend}
+		if m, err := ReadMigrated(dir); err == nil {
+			refusal.Repo = m.Repo
+		}
+		return cfg, refusal
 	}
 	return cfg, nil
 }
