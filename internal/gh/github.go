@@ -6,10 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cli/go-gh/v2/pkg/api"
+	"github.com/cli/go-gh/v2/pkg/auth"
 
 	"github.com/lumberbarons/hew/internal/model"
 )
@@ -29,15 +35,76 @@ const (
 	searchCap = 20
 )
 
+// Rate-limit retries. A secondary limit clears in seconds to a minute, so a
+// handful of attempts rides one out; beyond that the refusal is the answer.
+const (
+	defaultMaxRetries = 3
+	defaultRetryBase  = time.Second
+	// maxRetryWait caps what the client will wait on the server's word.
+	// Honouring an hour-long Retry-After would wedge the caller, and the next
+	// attempt is refused anyway.
+	maxRetryWait = 60 * time.Second
+)
+
 // GitHub implements Client against the real API via go-gh.
+//
+// One client serves a long-lived process, so it is safe for concurrent use:
+// the node-ID cache, the viewer cache, the observed rate limit and the API
+// clients themselves are all synchronized. The clients are replaced when the
+// token behind them goes stale, which is why they are read through accessors
+// rather than used directly.
 type GitHub struct {
 	repo Repo
-	gql  *api.GraphQLClient
-	rest *api.RESTClient
+	opts api.ClientOptions
+
+	// tokenSource re-resolves credentials after an auth failure. go-gh reads
+	// the token once, at construction, so a client that outlives its token has
+	// to be rebuilt from a fresh one rather than keep using the dead one.
+	tokenSource func() (string, error)
+
+	maxRetries int
+	retryBase  time.Duration
+	sleep      func(context.Context, time.Duration) error
+
+	clientsMu sync.RWMutex
+	gql       *api.GraphQLClient
+	rest      *api.RESTClient
+
 	// nodeIDs memoizes issue number → GraphQL node ID for this repo. Node
-	// IDs are immutable, so entries never invalidate. Not synchronized: a
-	// client serves one CLI command on one goroutine.
-	nodeIDs map[int]string
+	// IDs are immutable, so entries never invalidate.
+	nodeIDsMu sync.Mutex
+	nodeIDs   map[int]string
+
+	// viewerMu serializes the viewer lookup so concurrent callers share one
+	// request instead of racing to fill the cache.
+	viewerMu sync.Mutex
+	viewer   string
+	// authGen counts client rebuilds; viewerGen is the generation the cached
+	// login was resolved under. A refresh can switch accounts (gh auth
+	// switch), so a login cached before one is not trusted after it.
+	authGen   atomic.Uint64
+	viewerGen atomic.Uint64
+
+	rateMu    sync.Mutex
+	rateLimit RateLimit
+	rateKnown bool
+}
+
+// RateLimit is the GraphQL budget GitHub reported on the most recent list
+// query. A long-lived caller reads it to slow down before it is refused,
+// rather than discovering the limit by hitting it.
+type RateLimit struct {
+	Cost      int
+	Remaining int
+	ResetAt   time.Time
+}
+
+// RateLimit reports the budget captured from the last ListIssues query, and
+// false when no list query has run on this client yet.
+func (g *GitHub) RateLimit() (RateLimit, bool) {
+	g.rateMu.Lock()
+	defer g.rateMu.Unlock()
+	return g.rateLimit, g.rateKnown
 }
 
 // New builds a client using gh's stored credentials and host config.
@@ -45,7 +112,8 @@ func New(repo Repo) (*GitHub, error) {
 	return NewWithOptions(repo, api.ClientOptions{})
 }
 
-// NewWithOptions exists for tests, which inject a Transport.
+// NewWithOptions exists for tests, which inject a Transport, and is where the
+// retry policy's defaults are installed.
 func NewWithOptions(repo Repo, opts api.ClientOptions) (*GitHub, error) {
 	gql, err := api.NewGraphQLClient(opts)
 	if err != nil {
@@ -55,19 +123,226 @@ func NewWithOptions(repo Repo, opts api.ClientOptions) (*GitHub, error) {
 	if err != nil {
 		return nil, &AuthError{Err: err}
 	}
-	return &GitHub{repo: repo, gql: gql, rest: rest, nodeIDs: map[int]string{}}, nil
+	return &GitHub{
+		repo:        repo,
+		opts:        opts,
+		tokenSource: newTokenSource(opts),
+		maxRetries:  defaultMaxRetries,
+		retryBase:   defaultRetryBase,
+		sleep:       sleepContext,
+		gql:         gql,
+		rest:        rest,
+		nodeIDs:     map[int]string{},
+	}, nil
 }
 
+// newTokenSource resolves credentials the way go-gh does, but on demand: the
+// constructor pins the host, and every call re-reads whatever token gh
+// currently holds for it. An explicitly supplied token is returned as-is —
+// the caller owns refreshing it — which is also how the tests stay offline.
+func newTokenSource(opts api.ClientOptions) func() (string, error) {
+	if opts.AuthToken != "" {
+		token := opts.AuthToken
+		return func() (string, error) { return token, nil }
+	}
+	host := opts.Host
+	if host == "" {
+		host, _ = auth.DefaultHost()
+	}
+	return func() (string, error) {
+		token, _ := auth.TokenForHost(host)
+		if token == "" {
+			return "", fmt.Errorf("no authentication token found for host %s", host)
+		}
+		return token, nil
+	}
+}
+
+func (g *GitHub) graphql() *api.GraphQLClient {
+	g.clientsMu.RLock()
+	defer g.clientsMu.RUnlock()
+	return g.gql
+}
+
+func (g *GitHub) restClient() *api.RESTClient {
+	g.clientsMu.RLock()
+	defer g.clientsMu.RUnlock()
+	return g.rest
+}
+
+// refreshCredentials rebuilds both API clients from a freshly resolved token.
+// Replacing them under the lock is enough: a request already in flight holds
+// the client it started with, and each request carries its own token.
+func (g *GitHub) refreshCredentials() error {
+	token, err := g.tokenSource()
+	if err != nil {
+		return &AuthError{Err: err}
+	}
+	opts := g.opts
+	opts.AuthToken = token
+	gql, err := api.NewGraphQLClient(opts)
+	if err != nil {
+		return &AuthError{Err: err}
+	}
+	rest, err := api.NewRESTClient(opts)
+	if err != nil {
+		return &AuthError{Err: err}
+	}
+	g.clientsMu.Lock()
+	g.gql, g.rest = gql, rest
+	g.clientsMu.Unlock()
+	g.authGen.Add(1)
+	return nil
+}
+
+// gqlDo runs one GraphQL request under the client's retry and re-auth policy.
+func (g *GitHub) gqlDo(ctx context.Context, query string, vars map[string]any, out any) error {
+	return g.do(ctx, func() error {
+		return wrapErr(g.graphql().DoWithContext(ctx, query, vars, out))
+	})
+}
+
+// do runs one API call, retrying rate-limit refusals with backoff and, on an
+// auth failure, rebuilding the clients from freshly resolved credentials and
+// trying once more.
+//
+// Mutations go through this too: a rate-limit refusal is the server declining
+// the request before it ran, so re-sending it cannot apply a change twice.
+// Every other failure — a validation error, a 5xx, a timeout — surfaces on the
+// first attempt, where re-sending could duplicate a write.
+func (g *GitHub) do(ctx context.Context, fn func() error) error {
+	err := g.retry(ctx, fn)
+	var authErr *AuthError
+	if err == nil || !errors.As(err, &authErr) {
+		return err
+	}
+	// One refresh, then surface the failure: a token that is still refused is
+	// a credential problem the caller has to fix, not something to loop on.
+	if rerr := g.refreshCredentials(); rerr != nil {
+		return err
+	}
+	return g.retry(ctx, fn)
+}
+
+// retry re-runs fn while the server keeps answering with a rate limit, up to
+// maxRetries times.
+func (g *GitHub) retry(ctx context.Context, fn func() error) error {
+	for attempt := 0; ; attempt++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		wait, limited := rateLimitWait(err, attempt, g.retryBase)
+		if !limited || attempt >= g.maxRetries {
+			return err
+		}
+		if serr := g.sleep(ctx, wait); serr != nil {
+			return err
+		}
+	}
+}
+
+// rateLimitWait reports whether err is a rate-limit refusal and how long to
+// wait before retrying it. GitHub answers a secondary rate limit with 429, or
+// with 403 accompanied by Retry-After or an exhausted x-ratelimit-remaining;
+// any other 403 is a permission failure, and retrying it only makes the
+// eventual error slower to arrive.
+func rateLimitWait(err error, attempt int, base time.Duration) (time.Duration, bool) {
+	var httpErr *api.HTTPError
+	if !errors.As(err, &httpErr) {
+		return 0, false
+	}
+	switch httpErr.StatusCode {
+	case http.StatusTooManyRequests:
+	case http.StatusForbidden:
+		if !secondaryRateLimited(httpErr) {
+			return 0, false
+		}
+	default:
+		return 0, false
+	}
+	if wait, ok := parseRetryAfter(httpErr.Headers.Get("Retry-After")); ok {
+		return wait, true
+	}
+	return min(base<<attempt, maxRetryWait), true
+}
+
+// secondaryRateLimited distinguishes GitHub's rate-limit 403 from a plain
+// permission 403, which carries none of these signals.
+func secondaryRateLimited(e *api.HTTPError) bool {
+	if e.Headers.Get("Retry-After") != "" {
+		return true
+	}
+	if e.Headers.Get("X-RateLimit-Remaining") == "0" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(e.Message), "rate limit")
+}
+
+// parseRetryAfter reads a Retry-After header, which GitHub sends either as
+// delta-seconds or as an HTTP date. Absent or unparseable means no hint, and
+// the caller falls back to exponential backoff.
+func parseRetryAfter(v string) (time.Duration, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, false
+	}
+	if secs, err := strconv.Atoi(v); err == nil {
+		return min(time.Duration(max(secs, 0))*time.Second, maxRetryWait), true
+	}
+	if at, err := http.ParseTime(v); err == nil {
+		return min(max(time.Until(at), 0), maxRetryWait), true
+	}
+	return 0, false
+}
+
+// sleepContext waits for d unless ctx ends first, so a cancelled caller stops
+// the retry loop instead of outliving it.
+func sleepContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// recordRateLimit stores the budget a list page reported.
+func (g *GitHub) recordRateLimit(rl RateLimit) {
+	g.rateMu.Lock()
+	g.rateLimit, g.rateKnown = rl, true
+	g.rateMu.Unlock()
+}
+
+// Viewer returns the authenticated login. It is resolved once and cached: it
+// cannot change without a different token, and a long-lived caller asks for it
+// on every command.
 func (g *GitHub) Viewer(ctx context.Context) (string, error) {
+	g.viewerMu.Lock()
+	defer g.viewerMu.Unlock()
+	// Read the generation before the request, not after: a refresh that lands
+	// while this lookup is in flight may have switched accounts, and the
+	// answer we get back cannot be attributed to the new credentials.
+	gen := g.authGen.Load()
+	if g.viewer != "" && g.viewerGen.Load() == gen {
+		return g.viewer, nil
+	}
 	var resp struct {
 		Viewer struct {
 			Login string `json:"login"`
 		} `json:"viewer"`
 	}
-	if err := g.gql.DoWithContext(ctx, `query { viewer { login } }`, nil, &resp); err != nil {
-		return "", wrapErr(err)
+	if err := g.gqlDo(ctx, `query { viewer { login } }`, nil, &resp); err != nil {
+		return "", err
 	}
-	return resp.Viewer.Login, nil
+	g.viewer = resp.Viewer.Login
+	g.viewerGen.Store(gen)
+	return g.viewer, nil
 }
 
 // issueFields is the shared GraphQL selection for both list and get. Body
@@ -178,6 +453,7 @@ func (n issueNode) toModel() model.Issue {
 func (g *GitHub) ListIssues(ctx context.Context, states []IssueState) ([]model.Issue, error) {
 	query := fmt.Sprintf(`
 	query($owner: String!, $name: String!, $states: [IssueState!], $cursor: String) {
+		rateLimit { cost remaining resetAt }
 		repository(owner: $owner, name: $name) {
 			issues(states: $states, first: %d, after: $cursor) {
 				pageInfo { hasNextPage endCursor }
@@ -190,6 +466,14 @@ func (g *GitHub) ListIssues(ctx context.Context, states []IssueState) ([]model.I
 	var cursor *string
 	for {
 		var resp struct {
+			// The budget rides along on the query the list commands already
+			// make, so capturing it costs nothing. Nil means the server did
+			// not report one, which must not read as an exhausted budget.
+			RateLimit *struct {
+				Cost      int       `json:"cost"`
+				Remaining int       `json:"remaining"`
+				ResetAt   time.Time `json:"resetAt"`
+			} `json:"rateLimit"`
 			Repository struct {
 				Issues struct {
 					PageInfo struct {
@@ -206,8 +490,11 @@ func (g *GitHub) ListIssues(ctx context.Context, states []IssueState) ([]model.I
 			"states": states,
 			"cursor": cursor,
 		}
-		if err := g.gql.DoWithContext(ctx, query, vars, &resp); err != nil {
-			return nil, wrapErr(err)
+		if err := g.gqlDo(ctx, query, vars, &resp); err != nil {
+			return nil, err
+		}
+		if rl := resp.RateLimit; rl != nil {
+			g.recordRateLimit(RateLimit{Cost: rl.Cost, Remaining: rl.Remaining, ResetAt: rl.ResetAt})
 		}
 		for _, n := range resp.Repository.Issues.Nodes {
 			out = append(out, n.toModel())
@@ -236,11 +523,11 @@ func (g *GitHub) GetIssue(ctx context.Context, number int) (model.Issue, error) 
 		} `json:"repository"`
 	}
 	vars := map[string]any{"owner": g.repo.Owner, "name": g.repo.Name, "number": number}
-	if err := g.gql.DoWithContext(ctx, query, vars, &resp); err != nil {
+	if err := g.gqlDo(ctx, query, vars, &resp); err != nil {
 		if nf := g.notFoundError(err, number); nf != nil {
 			return model.Issue{}, nf
 		}
-		return model.Issue{}, wrapErr(err)
+		return model.Issue{}, err
 	}
 	if resp.Repository.Issue == nil {
 		return model.Issue{}, &NotFoundError{Issue: number, Repo: g.repo}
@@ -267,8 +554,8 @@ func (g *GitHub) SearchIssues(ctx context.Context, terms string) ([]model.Issue,
 	// search API has no structured equivalents. User terms follow, so
 	// qualifiers like label:bug pass through.
 	q := fmt.Sprintf("repo:%s/%s is:issue %s", g.repo.Owner, g.repo.Name, terms)
-	if err := g.gql.DoWithContext(ctx, query, map[string]any{"q": q}, &resp); err != nil {
-		return nil, 0, wrapErr(err)
+	if err := g.gqlDo(ctx, query, map[string]any{"q": q}, &resp); err != nil {
+		return nil, 0, err
 	}
 	var out []model.Issue
 	for _, n := range resp.Search.Nodes {
@@ -285,7 +572,7 @@ func (g *GitHub) SearchIssues(ctx context.Context, terms string) ([]model.Issue,
 // notFoundError classifies a GraphQL NOT_FOUND error by the field it points
 // at, so a bad --repo reports the repository as the problem rather than
 // blaming a missing issue. It returns nil when err isn't a NOT_FOUND we
-// recognise, leaving the caller to fall back to wrapErr. Classification is
+// recognise, leaving the caller to return err as it came. Classification is
 // on the structured Type/Path fields, not the server's prose, so a
 // GitHub-side rewording can't silently break it.
 func (g *GitHub) notFoundError(err error, number int) error {
@@ -369,7 +656,10 @@ func (g *GitHub) Comment(ctx context.Context, number int, body string) error {
 // (e.g. migrate wiring one parent to many children) pays one lookup per
 // distinct issue, not per edge.
 func (g *GitHub) nodeID(ctx context.Context, number int) (string, error) {
-	if id, ok := g.nodeIDs[number]; ok {
+	g.nodeIDsMu.Lock()
+	id, ok := g.nodeIDs[number]
+	g.nodeIDsMu.Unlock()
+	if ok {
 		return id, nil
 	}
 	query := `
@@ -384,16 +674,22 @@ func (g *GitHub) nodeID(ctx context.Context, number int) (string, error) {
 		} `json:"repository"`
 	}
 	vars := map[string]any{"owner": g.repo.Owner, "name": g.repo.Name, "number": number}
-	if err := g.gql.DoWithContext(ctx, query, vars, &resp); err != nil {
+	if err := g.gqlDo(ctx, query, vars, &resp); err != nil {
 		if nf := g.notFoundError(err, number); nf != nil {
 			return "", nf
 		}
-		return "", wrapErr(err)
+		return "", err
 	}
 	if resp.Repository.Issue == nil {
 		return "", &NotFoundError{Issue: number, Repo: g.repo}
 	}
+	// Two goroutines racing on the same uncached number resolve it twice and
+	// store the same immutable ID. That is cheaper than holding the lock
+	// across a request, and it keeps a slow lookup from serializing every
+	// other mutation.
+	g.nodeIDsMu.Lock()
 	g.nodeIDs[number] = resp.Repository.Issue.ID
+	g.nodeIDsMu.Unlock()
 	return resp.Repository.Issue.ID, nil
 }
 
@@ -410,7 +706,7 @@ func (g *GitHub) CloseIssue(ctx context.Context, number int, reason CloseReason)
 		closeIssue(input: {issueId: $id, stateReason: $reason}) { clientMutationId }
 	}`
 	vars := map[string]any{"id": id, "reason": string(reason)}
-	return wrapErr(g.gql.DoWithContext(ctx, query, vars, &struct{}{}))
+	return g.gqlDo(ctx, query, vars, &struct{}{})
 }
 
 func (g *GitHub) ReopenIssue(ctx context.Context, number int) error {
@@ -423,7 +719,7 @@ func (g *GitHub) ReopenIssue(ctx context.Context, number int) error {
 		reopenIssue(input: {issueId: $id}) { clientMutationId }
 	}`
 	vars := map[string]any{"id": id}
-	return wrapErr(g.gql.DoWithContext(ctx, query, vars, &struct{}{}))
+	return g.gqlDo(ctx, query, vars, &struct{}{})
 }
 
 func (g *GitHub) AddBlockedBy(ctx context.Context, number, blockingNumber int) error {
@@ -448,7 +744,7 @@ func (g *GitHub) dependencyMutation(ctx context.Context, name string, number, bl
 		%s(input: {issueId: $id, blockingIssueId: $blocking}) { clientMutationId }
 	}`, name)
 	vars := map[string]any{"id": id, "blocking": blockingID}
-	return wrapErr(g.gql.DoWithContext(ctx, query, vars, &struct{}{}))
+	return g.gqlDo(ctx, query, vars, &struct{}{})
 }
 
 func (g *GitHub) AddSubIssue(ctx context.Context, parentNumber, childNumber int, replaceParent bool) error {
@@ -465,7 +761,7 @@ func (g *GitHub) AddSubIssue(ctx context.Context, parentNumber, childNumber int,
 		addSubIssue(input: {issueId: $parent, subIssueId: $child, replaceParent: $replace}) { clientMutationId }
 	}`
 	vars := map[string]any{"parent": parentID, "child": childID, "replace": replaceParent}
-	return wrapErr(g.gql.DoWithContext(ctx, query, vars, &struct{}{}))
+	return g.gqlDo(ctx, query, vars, &struct{}{})
 }
 
 func (g *GitHub) RemoveSubIssue(ctx context.Context, parentNumber, childNumber int) error {
@@ -482,7 +778,7 @@ func (g *GitHub) RemoveSubIssue(ctx context.Context, parentNumber, childNumber i
 		removeSubIssue(input: {issueId: $parent, subIssueId: $child}) { clientMutationId }
 	}`
 	vars := map[string]any{"parent": parentID, "child": childID}
-	return wrapErr(g.gql.DoWithContext(ctx, query, vars, &struct{}{}))
+	return g.gqlDo(ctx, query, vars, &struct{}{})
 }
 
 func (g *GitHub) ListLabels(ctx context.Context) ([]Label, error) {
@@ -549,8 +845,8 @@ func (g *GitHub) PullRequestContext(ctx context.Context, head string) (PRContext
 		} `json:"repository"`
 	}
 	vars := map[string]any{"owner": g.repo.Owner, "name": g.repo.Name, "head": head}
-	if err := g.gql.DoWithContext(ctx, query, vars, &resp); err != nil {
-		return PRContext{}, wrapErr(err)
+	if err := g.gqlDo(ctx, query, vars, &resp); err != nil {
+		return PRContext{}, err
 	}
 	var out PRContext
 	if ref := resp.Repository.DefaultBranchRef; ref != nil {
@@ -597,15 +893,15 @@ func (g *GitHub) issuePath(number int, suffix string) string {
 }
 
 func (g *GitHub) restDo(ctx context.Context, method, path string, payload, resp any) error {
-	var body *bytes.Buffer
+	var body []byte
 	if payload != nil {
-		b, err := json.Marshal(payload)
-		if err != nil {
+		var err error
+		if body, err = json.Marshal(payload); err != nil {
 			return err
 		}
-		body = bytes.NewBuffer(b)
-	} else {
-		body = &bytes.Buffer{}
 	}
-	return wrapErr(g.rest.DoWithContext(ctx, method, path, body, resp))
+	// A fresh reader per attempt: the first one is consumed by the request.
+	return g.do(ctx, func() error {
+		return wrapErr(g.restClient().DoWithContext(ctx, method, path, bytes.NewReader(body), resp))
+	})
 }
