@@ -19,9 +19,9 @@ import (
 // tracker could satisfy the same assertions while an internal error still
 // leaked, because it can name the internal type; this one cannot.
 
-// externalTracker opens a local tracker in a throwaway checkout using the
+// externalCheckout opens a local tracker in a throwaway checkout using the
 // documented on-disk shape, so nothing here depends on an internal package.
-func externalTracker(t *testing.T) *tracker.Tracker {
+func externalCheckout(t *testing.T) (string, *tracker.Tracker) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
@@ -36,7 +36,10 @@ func externalTracker(t *testing.T) *tracker.Tracker {
 	}
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if out, err := exec.Command("git", "-C", root, "init", "--initial-branch=main").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
@@ -57,6 +60,12 @@ func externalTracker(t *testing.T) *tracker.Tracker {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	return root, tr
+}
+
+func externalTracker(t *testing.T) *tracker.Tracker {
+	t.Helper()
+	_, tr := externalCheckout(t)
 	return tr
 }
 

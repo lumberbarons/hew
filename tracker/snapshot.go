@@ -9,11 +9,23 @@ import (
 	"github.com/lumberbarons/hew/internal/model"
 )
 
-// WarningKind identifies a snapshot's completeness notice, so a caller can
-// filter by cause and render its own message without parsing prose.
+// WarningKind identifies a warning's cause, so a caller can filter by kind and
+// render its own message without parsing prose.
 type WarningKind string
 
 const (
+	// WarnMultiPriority reports an issue carrying more than one priority
+	// label; the highest urgency wins. It is a contradiction, so it rides on
+	// a primer's warnings rather than a snapshot query's.
+	WarnMultiPriority WarningKind = "multiple-priority-labels"
+	// WarnMultiType reports more than one type label; the first of
+	// bug|enhancement|task wins. Like the other contradictions, it is
+	// primer-only.
+	WarnMultiType WarningKind = "multiple-type-labels"
+	// WarnInProgressEpic reports an epic carrying the in-progress label.
+	// Epics are containers and are never worked directly, so it is a
+	// primer-only contradiction.
+	WarnInProgressEpic WarningKind = "in-progress-epic"
 	// WarnDependencyCycle reports a blocked-by cycle. A cycle silently
 	// removes all of its members from Ready, so the queue is incomplete.
 	WarnDependencyCycle WarningKind = "dependency-cycle"
@@ -26,7 +38,8 @@ const (
 	WarnBlockersCapped WarningKind = "blockers-truncated"
 )
 
-// Warning is one completeness notice about a snapshot.
+// Warning is one completeness or contradiction notice. A snapshot's query
+// methods keep the completeness kinds; Primer keeps every kind.
 type Warning struct {
 	Kind WarningKind
 	// Issue names the subject; 0 for a cycle, which spans several.
@@ -115,17 +128,32 @@ func resolveStates(states []State) ([]State, []gh.IssueState, error) {
 // are prime's business, not a snapshot's.
 func newSnapshot(issues []model.Issue, states []State) *Snapshot {
 	var warnings []Warning
-	for _, w := range model.Warnings(issues) {
+	for _, w := range warningsFromModel(model.Warnings(issues)) {
 		switch w.Kind {
-		case model.WarnDependencyCycle:
-			warnings = append(warnings, Warning{Kind: WarnDependencyCycle, Cycle: w.Cycle})
-		case model.WarnSubIssuesCapped:
-			warnings = append(warnings, Warning{Kind: WarnSubIssuesCapped, Issue: w.Issue, Total: w.Total, Fetched: w.Fetched})
-		case model.WarnBlockersCapped:
-			warnings = append(warnings, Warning{Kind: WarnBlockersCapped, Issue: w.Issue, Total: w.Total, Fetched: w.Fetched})
+		case WarnDependencyCycle, WarnSubIssuesCapped, WarnBlockersCapped:
+			warnings = append(warnings, w)
 		}
 	}
 	return &Snapshot{issues: issues, warnings: warnings, states: states}
+}
+
+// warningsFromModel maps every warning the domain produces, including the
+// contradictions a snapshot query filters out but a primer reports.
+func warningsFromModel(warnings []model.Warning) []Warning {
+	if len(warnings) == 0 {
+		return nil
+	}
+	out := make([]Warning, len(warnings))
+	for n, w := range warnings {
+		out[n] = Warning{
+			Kind:    WarningKind(w.Kind),
+			Issue:   w.Issue,
+			Cycle:   w.Cycle,
+			Total:   w.Total,
+			Fetched: w.Fetched,
+		}
+	}
+	return out
 }
 
 func get(ctx context.Context, store gh.IssueStore, number int) (Issue, error) {
