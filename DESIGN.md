@@ -632,6 +632,10 @@ an attacker who supplies both satisfies the first two bindings for free.
 Verification is one pass up front, before any write, and `--dry-run` makes it too —
 it reads GitHub but writes nothing, and a dry run that vouched for a mapping the real
 run would reject is worse than no dry run. Failures are refusals, never warnings.
+The `migrate` package's engine owns that pass for the pipeline it runs, so a
+library caller gets the same three bindings; `migrate.Options.BeforeCreate` is
+where the CLI bootstraps labels, ordered after verification so a refused
+checkpoint costs no label write either.
 Keys are escaped into the marker, because they come from the untrusted source file
 and an unescaped `-->` would let one entry mint provenance for another.
 
@@ -826,10 +830,11 @@ command does.
 `tracker.Wrap`, `tracker.WrapAs` and `tracker.WrapWriter` are the module-internal
 seam `internal/cli` uses to delegate over a store it already opened. Their store
 parameter is an internal interface, so an external module cannot call them;
-`tracker.Open`, `tracker.Detect`, `tracker.Init`, `pr.Open` and `migrate.Open`
-are the only constructors in the external contract. The exported-surface check
-records the seams like every other exported symbol, but they are not consumer
-entry points.
+`migrate.Wrap` is the same seam for the migration engine, taking the `Target` and
+`Checkpoint` the command already opened. `tracker.Open`, `tracker.Detect`,
+`tracker.Init`, `pr.Open` and `migrate.Open` are the only constructors in the
+external contract. The exported-surface check records the seams like every other
+exported symbol, but they are not consumer entry points.
 
 ### Operation inventory
 
@@ -873,8 +878,9 @@ contract because a workflow above needs them: `(*tracker.Tracker).Comment`
 (migration posts the source's comments and close reasons) and
 `CreateRequest.Assignees` (it preserves source claims). The migration engine
 writes through a narrow `migrate.Target` interface — create, edit, comment,
-close, dependency edges, read — which `*tracker.Tracker` satisfies and a test
-can fake, so the engine names no internal store. `apply`'s JSONL file format
+close, dependency edges, read — which the CLI adapts over the store it already
+opened (a tracker-backed target lands with `migrate.Open`) and a test can fake,
+so the engine names no internal store. `apply`'s JSONL file format
 stays an adapter input deliberately: a library caller builds
 `[]tracker.PlanEntry` and is not tied to a file schema. `pr`'s and `migrate`'s
 GitHub operations go through the same transport seam as `tracker`'s, so a

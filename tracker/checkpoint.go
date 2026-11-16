@@ -17,9 +17,10 @@ import (
 const CheckpointVersion = 1
 
 // CheckpointState is the on-disk shape of a batch checkpoint shared by
-// `hew apply` and `hew migrate`: which source key became which issue, and
-// which dependency edges were already wired. FileCheckpoint reads and writes
-// it; the CLI's migrate path uses the same struct for the same files.
+// `hew apply` and `hew migrate`: which source key became which issue, which
+// dependency edges were already wired, and which named steps (a posted
+// migration comment) were already taken. FileCheckpoint reads and writes it;
+// the CLI's migrate path uses the same struct for the same files.
 type CheckpointState struct {
 	Version int             `json:"version"`
 	Repo    string          `json:"repo"`
@@ -200,6 +201,23 @@ func (c *MemoryCheckpoint) RecordWired(kind EdgeKind, from, to int) error {
 	return nil
 }
 
+// Recorded reports whether a named step was already recorded. Named steps are
+// the migration engine's non-edge writes, such as a posted comment.
+func (c *MemoryCheckpoint) Recorded(key string) bool {
+	return c.edges[key]
+}
+
+// RecordStep records a named step. The key shares the record space with
+// wired edges but is not one: callers pick a namespace that cannot collide
+// with EdgeKey's "kind:from->to" form.
+func (c *MemoryCheckpoint) RecordStep(key string) error {
+	if c.edges == nil {
+		c.edges = map[string]bool{}
+	}
+	c.edges[key] = true
+	return nil
+}
+
 // Digest is always empty: an in-memory checkpoint has no durable source, so
 // ApplyPlan derives one from the entries.
 func (c *MemoryCheckpoint) Digest() string { return "" }
@@ -243,6 +261,20 @@ func (c *FileCheckpoint) Wired(kind EdgeKind, from, to int) bool {
 
 func (c *FileCheckpoint) RecordWired(kind EdgeKind, from, to int) error {
 	c.state.Edges[EdgeKey(kind, from, to)] = true
+	return SaveCheckpointFile(c.path, c.state)
+}
+
+// Recorded reports whether a named step was already recorded. Named steps are
+// the migration engine's non-edge writes, such as a posted comment.
+func (c *FileCheckpoint) Recorded(key string) bool {
+	return c.state.Edges[key]
+}
+
+// RecordStep records a named step and persists the checkpoint. The key shares
+// the record space with wired edges but is not one: callers pick a namespace
+// that cannot collide with EdgeKey's "kind:from->to" form.
+func (c *FileCheckpoint) RecordStep(key string) error {
+	c.state.Edges[key] = true
 	return SaveCheckpointFile(c.path, c.state)
 }
 

@@ -22,6 +22,15 @@ func TestMemoryCheckpointZeroValue(t *testing.T) {
 	if err := checkpoint.RecordWired(BlockedByEdge, 10, 2); err != nil {
 		t.Fatal(err)
 	}
+	if checkpoint.Recorded("comment:a:0") {
+		t.Error("an empty checkpoint reports a recorded step")
+	}
+	if err := checkpoint.RecordStep("comment:a:0"); err != nil {
+		t.Fatal(err)
+	}
+	if !checkpoint.Recorded("comment:a:0") {
+		t.Error("a recorded step is not recorded")
+	}
 	if n, ok := checkpoint.Created("a"); !ok || n != 10 {
 		t.Errorf("Created = %d, %v", n, ok)
 	}
@@ -49,6 +58,9 @@ func TestFileCheckpointRoundTrip(t *testing.T) {
 	if err := checkpoint.RecordWired(ParentEdge, 11, 10); err != nil {
 		t.Fatal(err)
 	}
+	if err := checkpoint.RecordStep("comment:a:0"); err != nil {
+		t.Fatal(err)
+	}
 
 	reloaded, err := OpenFileCheckpoint(path, "o/r", "sha256:test", "plan")
 	if err != nil {
@@ -59,6 +71,9 @@ func TestFileCheckpointRoundTrip(t *testing.T) {
 	}
 	if !reloaded.Wired(ParentEdge, 11, 10) {
 		t.Error("reloaded checkpoint lost the wired edge")
+	}
+	if !reloaded.Recorded("comment:a:0") {
+		t.Error("reloaded checkpoint lost the recorded step")
 	}
 	records := reloaded.CreatedEntries()
 	if len(records) != 1 || records[0].Key != "a" || records[0].Number != 10 {
@@ -87,6 +102,9 @@ func TestFileCheckpointRoundTrip(t *testing.T) {
 	}
 	if !state.Edges[EdgeKey(ParentEdge, 11, 10)] {
 		t.Errorf("edges = %v, want %q", state.Edges, EdgeKey(ParentEdge, 11, 10))
+	}
+	if !state.Edges["comment:a:0"] {
+		t.Errorf("edges = %v, want the named step recorded beside them", state.Edges)
 	}
 }
 

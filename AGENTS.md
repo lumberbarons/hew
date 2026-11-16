@@ -38,6 +38,7 @@ The layering exists so everything with behavior is testable without hitting GitH
 | `cmd/hew/` | main + urfave/cli v3 flag wiring only — no behavior, excluded from coverage | Adding a command or flag |
 | `internal/cli/` | The CLI adapter, written against the `gh.IssueStore` interface, with `gh.PullRequests` for `pr` alone — see [internal/cli/AGENTS.md](internal/cli/AGENTS.md). Flags, input files, the editor, hooks, rendering and exit mapping live here; workflow decisions delegate to public packages per the operation inventory in DESIGN.md ("Tracker library") | Changing command behavior or guarded flows |
 | `tracker/` | The public in-process API (`github.com/lumberbarons/hew/tracker`) and the tracker half of the contract in DESIGN.md ("Tracker library"): `Open`/`Detect` pick a backend from an explicit worktree and actor; `Snapshot`/`Get` carry reads; `Start`/`Release`/`Close`/`Edit`/`Reopen`/`Block`/`Unblock` carry writes; `ApplyPlan` carries its `Checkpoint` interface (`MemoryCheckpoint`; `FileCheckpoint` for the CLI's state file) and typed plan model. The CLI delegates over a store it already opened (`Wrap`/`WrapAs`/`WrapWriter`), so tracker must not import `internal/render` or `internal/cli`; typed results and errors, never exit codes; experimental until 1.0, with the exported surface diffed in CI | Changing the library API, the apply/checkpoint engine, or moving an operation out of the CLI |
+| `migrate/` | The public source-neutral migration engine (`github.com/lumberbarons/hew/migrate`): callers map their records to `Item`s, supply a `Target` and a `Checkpoint` (tracker's file or memory implementation), and `Run` creates, wires, relinks, comments and closes with provenance verification, checkpointed resume, cycle checks and interruptible throttling. `Result` carries counts and typed warnings; no source parsing, rendering or store type crosses the boundary. The CLI adapts `migrate.Target` over the store it opened; beads and local-to-GitHub join `Open` in #316 | Changing migration resume, provenance checks, wiring or write ordering |
 | `internal/gh/` | Thin API layer: the `IssueStore` and `PullRequests` interfaces (`Client` is their union) and the go-gh-backed implementation of both; auth reuses the `gh` CLI's stored credentials (no auth flow of our own), repo detection comes from the git remote | Changing queries, auth, or API calls |
 | `internal/model/` | Pure domain logic: readiness, label normalization, cycle detection — no I/O, plain unit tests | Changing readiness or label semantics |
 | `internal/render/` | Text and JSON renderers, golden-file tested (`testdata/*.golden`) | Changing output format |
@@ -53,8 +54,9 @@ The layering exists so everything with behavior is testable without hitting GitH
 | `examples/` | Copy-pasteable GitHub Actions recipes (`auto-triage.yml`), documented in README | Changing the auto-triage workflow or its documented guarantees |
 | `evals/` | Separate module (keeps the tokenizer out of the CLI's dependency graph): the token-efficiency harness and its committed fixtures — see [evals/README.md](evals/README.md). A renderer change invalidates the fixtures' hew side; re-capture and re-publish the numbers in DESIGN.md | Changing renderer output, or the published token figures |
 
-The public packages are one API in three parts: `tracker` today, with `pr` and
-`migrate` as their workflows are extracted from `internal/cli`. DESIGN.md's
+The public packages are one API in three parts: `tracker` and the `migrate`
+engine today, with `pr` and migrate's source workflows as they are extracted
+from `internal/cli`. DESIGN.md's
 "Tracker library" is the operation inventory and the boundary: no public package
 imports `internal/cli` or `internal/render`, every public signature names public
 types, and an operation moves out of the adapter only with its tests and its
