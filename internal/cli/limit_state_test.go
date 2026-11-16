@@ -98,6 +98,22 @@ func TestSearchLimitKeepsTheBestMatchesAndWarns(t *testing.T) {
 	}
 }
 
+func TestSearchLimitDoesNotPromiseEverythingWhenTheBackendCapped(t *testing.T) {
+	f := searchFake()
+	f.searchTotal = 50 // the backend found 50 and returned only these three
+	app, _, errOut := newApp(f)
+	if err := app.Search(ctx, SearchOpts{Terms: "retry", Limit: 2}); err != nil {
+		t.Fatal(err)
+	}
+	got := errOut.String()
+	if !strings.Contains(got, "showing 3 of 50 matches; refine the terms") || !strings.Contains(got, "showing 2 of 3 matches") {
+		t.Errorf("stderr = %q, want both the backend-cap and the limit warnings", got)
+	}
+	if strings.Contains(got, "--limit 0") {
+		t.Errorf("stderr = %q: --limit 0 would not show all 50, so it must not be suggested", got)
+	}
+}
+
 func TestSearchLimitZeroAndExactLimitDoNotWarn(t *testing.T) {
 	for _, limit := range []int{0, 3} {
 		app, out, errOut := newApp(searchFake())

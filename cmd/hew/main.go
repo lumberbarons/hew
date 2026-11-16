@@ -320,6 +320,14 @@ func limitFlag(def int) *ucli.IntFlag {
 	}
 }
 
+// searchLimitFlag is limitFlag worded for search, where the backend returns
+// one capped page: 0 lifts --limit, not that cap.
+func searchLimitFlag() *ucli.IntFlag {
+	f := limitFlag(0)
+	f.Usage = "print at most `N` matches (0 for everything the backend returned); truncation warns on stderr"
+	return f
+}
+
 func readyCmd() *ucli.Command {
 	return &ucli.Command{
 		Name:   "ready",
@@ -393,7 +401,7 @@ func searchCmd() *ucli.Command {
 		ArgsUsage: "<terms>",
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{Name: "state", Usage: "narrow to `open` or closed issues (default all)"},
-			limitFlag(0),
+			searchLimitFlag(),
 		},
 		Action: func(ctx context.Context, cmd *ucli.Command) error {
 			app, err := buildApp(cmd)

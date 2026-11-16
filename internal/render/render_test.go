@@ -199,6 +199,17 @@ func TestEpicList(t *testing.T) {
 	checkGolden(t, "epic_list", buf.Bytes())
 }
 
+func TestEpicListMarksClosedEpicsOnly(t *testing.T) {
+	open := model.Issue{Number: 10, Title: "Epic: open one", State: "OPEN", Labels: []string{"P2"}, SubIssuesTotal: 3, SubIssuesCompleted: 1}
+	closed := model.Issue{Number: 11, Title: "Epic: finished", State: "CLOSED", Labels: []string{"P2"}, SubIssuesTotal: 3, SubIssuesCompleted: 3}
+	var buf bytes.Buffer
+	EpicList(&buf, []model.Issue{open, closed}, Style{})
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 || strings.Contains(lines[0], "[closed]") || !strings.HasSuffix(lines[1], "3/3  [closed]") {
+		t.Errorf("EpicList output, want [closed] on the closed epic only:\n%s", buf.String())
+	}
+}
+
 func TestShow(t *testing.T) {
 	i := model.Issue{
 		Number: 42, Title: "Fix the frobnicator", State: "OPEN", CreatedAt: ts(6),

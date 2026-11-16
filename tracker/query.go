@@ -138,8 +138,9 @@ type SearchRequest struct {
 	// trimming. Empty terms are invalid.
 	Terms string
 	// States narrows the search to these states before the backend's cap, so
-	// the cap bounds the matches asked for. Empty means open and closed. An
-	// unknown state is an invalid-input error.
+	// the cap bounds the matches asked for. Empty means open and closed —
+	// unlike SnapshotOptions.States, where empty means open only. An unknown
+	// state is an invalid-input error.
 	States []State
 }
 
