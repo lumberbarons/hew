@@ -519,6 +519,23 @@ if err != nil {
 for _, issue := range snap.Ready() {
 	fmt.Println(issue.Number, issue.Title)
 }
+for _, issue := range snap.List(tracker.ListFilter{Label: "parser"}) {
+	fmt.Println(issue.Number, issue.Title)
+}
+
+// A single issue's view carries its body, comments and advisory text findings.
+detail, err := t.Detail(ctx, 42)
+if err != nil {
+	return err
+}
+fmt.Println(detail.Issue.Number, *detail.Issue.Body, detail.TextFindings)
+
+// The same state the primer renders, including the backend's convention text.
+primer, err := t.Primer(ctx)
+if err != nil {
+	return err
+}
+fmt.Println(primer.ReadyTotal, len(primer.Warnings), primer.Conventions)
 
 // Dependency writes are cycle-checked client-side, exactly as `hew block` is.
 _, err = t.Block(ctx, 42, []int{41}, tracker.BlockOptions{})
@@ -548,13 +565,14 @@ of which worker holds which issue. Every call takes a `context.Context`;
 cancellation is matchable with `errors.Is`, and an interrupted multi-write
 operation reports the part that landed.
 
-Today `tracker` ships backend detection, snapshot and single-issue reads, the
-claim lifecycle (`Start`, `Release`, `Close`), `Block`/`Unblock` and
-`ApplyPlan`, and `ready`, `list`, `show`, `epic status`, `start`, `release`,
-`close`, `block`, `unblock` and `apply` are implemented on it. The rest of the
-contract's inventory — creation and editing, search and triage, primer data,
-initialization, pull requests and migrations — is being extracted from the CLI
-under epic #270; until an operation ships, the CLI is still its only caller.
+Today `tracker` ships backend detection and target metadata, snapshot and
+single-issue reads, the query policy behind `ready`, `list`, `show`,
+`epic status`, `search`, `triage` and `prime` — including the untriaged
+boundary and advisory text findings — the claim lifecycle (`Start`, `Release`,
+`Close`), `Block`/`Unblock` and `ApplyPlan`. The rest of the contract's
+inventory — creation and editing, initialization, pull requests and migrations
+— is being extracted from the CLI under epic #270; until an operation ships,
+the CLI is still its only caller.
 
 **Stability: experimental.** The public packages are experimental until 1.0: the
 API may change in any v0.x minor release. A breaking change ships as a

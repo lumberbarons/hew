@@ -112,13 +112,15 @@ func globalFlags() []ucli.Flag {
 	}
 }
 
-// backendTarget is where a command would read and write. A non-empty tracker
-// means the local backend; otherwise Repo is the GitHub repository. Resolving
-// it touches the filesystem and git only: no store is opened and no client is
-// built, so `hew config` can ask without credentials or side effects.
+// backendTarget is where a command would read and write. A local target
+// carries the tracker directory and its stable id; a GitHub target carries
+// the repository. Resolving it touches the filesystem and git only: no store
+// is opened and no client is built, so `hew config` can ask without
+// credentials or side effects.
 type backendTarget struct {
+	backend string
 	tracker string
-	cfg     local.Config
+	id      string
 	repo    gh.Repo
 }
 
@@ -129,20 +131,25 @@ func (t backendTarget) local() bool { return t.tracker != "" }
 // local selects the local store; a missing `.hew` or a config naming github is
 // GitHub. A `.hew` that looks like a local tracker without a usable config is
 // an error from LocateConfig, never GitHub.
+//
+// The local check runs first and from the filesystem, deliberately: a repo
+// that never opted in must not pay for a git subprocess to learn it is not
+// local. GitHub's own repository detection is the only git read a GitHub
+// command needs.
 func resolveTarget(cmd *ucli.Command) (backendTarget, error) {
 	if cmd.String("repo") != "" {
 		repo, err := resolveGitHubRepo(cmd, true)
-		return backendTarget{repo: repo}, err
+		return backendTarget{backend: local.BackendGitHub, repo: repo}, err
 	}
 	tracker, cfg, isLocal, err := local.LocateConfig("")
 	if err != nil {
 		return backendTarget{}, err
 	}
 	if isLocal {
-		return backendTarget{tracker: tracker, cfg: cfg}, nil
+		return backendTarget{backend: local.BackendLocal, tracker: tracker, id: cfg.ID}, nil
 	}
 	repo, err := resolveGitHubRepo(cmd, true)
-	return backendTarget{repo: repo}, err
+	return backendTarget{backend: local.BackendGitHub, repo: repo}, err
 }
 
 // resolveGitHubRepo is the GitHub-only half of the selection: --repo, or the
@@ -1069,11 +1076,11 @@ func configCmd() *ucli.Command {
 			if err != nil {
 				return err
 			}
-			return newApp(cmd).Config(appcli.ConfigTarget{
-				Repo:    target.repo,
-				Tracker: target.tracker,
-				Local:   target.cfg,
-			})
+			cfg := appcli.ConfigTarget{Backend: target.backend, Path: target.tracker, ID: target.id}
+			if target.backend == local.BackendGitHub {
+				cfg.Repo = target.repo.String()
+			}
+			return newApp(cmd).Config(cfg)
 		},
 	}
 }

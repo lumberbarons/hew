@@ -329,6 +329,35 @@ func SortForList(issues []Issue) {
 	})
 }
 
+// ListFilter narrows a list-shaped read. The zero value keeps every issue.
+type ListFilter struct {
+	// Label keeps issues carrying the label, compared case-insensitively.
+	Label string
+	// Epic keeps issues whose parent is this epic; zero applies no filter.
+	Epic int
+}
+
+// List returns the issues that survive the filter, preserving their order.
+// Untriaged issues are omitted in every state and under every filter: list is
+// a list-shaped read, and triage is the deliberate path that returns the
+// unvetted text. Callers that want list order sort first with SortForList.
+func List(issues []Issue, filter ListFilter) []Issue {
+	out := make([]Issue, 0, len(issues))
+	for _, issue := range issues {
+		if issue.Untriaged() {
+			continue
+		}
+		if filter.Label != "" && !issue.HasLabel(filter.Label) {
+			continue
+		}
+		if filter.Epic > 0 && (issue.Parent == nil || issue.Parent.Number != filter.Epic) {
+			continue
+		}
+		out = append(out, issue)
+	}
+	return out
+}
+
 // Ready returns open, non-epic, unclaimed, triaged issues with zero open
 // blockers, sorted by priority.
 //

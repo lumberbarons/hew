@@ -119,6 +119,53 @@ func TestDetectFallsBackToGitHubWithoutALocalTracker(t *testing.T) {
 	}
 }
 
+func TestDetectReportsRepositoryAndStableLocalID(t *testing.T) {
+	// A local tracker's report includes the id its checkpoints bind to, so a
+	// consumer can tell one checkout's tracker from another's.
+	main, _ := repoWithWorktrees(t)
+	dir := initLocalTracker(t, main)
+	cfg, err := local.ReadConfig(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Detect(main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Backend != BackendLocal || got.Dir != dir || got.MainCheckout != main {
+		t.Errorf("Detect = %+v, want local %s in %s", got, dir, main)
+	}
+	if got.ID != cfg.ID || cfg.ID == "" {
+		t.Errorf("ID = %q, want the config's stable id %q", got.ID, cfg.ID)
+	}
+	if got.Repo != "" {
+		t.Errorf("Repo = %q, want empty for a local tracker", got.Repo)
+	}
+
+	// A GitHub checkout reports the origin remote's owner/name.
+	githubMain, _ := repoWithWorktrees(t)
+	gitRun(t, githubMain, "remote", "add", "origin", "git@github.com:acme/hew.git")
+	got, err = Detect(githubMain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Backend != BackendGitHub || got.Repo != "acme/hew" || got.MainCheckout != githubMain || got.Dir != "" || got.ID != "" {
+		t.Errorf("Detect = %+v, want GitHub acme/hew in %s", got, githubMain)
+	}
+
+	// A remote Detect cannot read as a github.com repository leaves Repo empty
+	// instead of failing backend detection; Open is what must refuse it.
+	other, _ := repoWithWorktrees(t)
+	gitRun(t, other, "remote", "add", "origin", "https://gitlab.com/acme/hew.git")
+	got, err = Detect(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Backend != BackendGitHub || got.Repo != "" {
+		t.Errorf("Detect = %+v, want GitHub with no repository for a non-GitHub remote", got)
+	}
+}
+
 func TestDetectTreatsAMigratedTrackerAsGitHub(t *testing.T) {
 	main, _ := repoWithWorktrees(t)
 	dir := initLocalTracker(t, main)

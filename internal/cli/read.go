@@ -3,10 +3,9 @@ package cli
 import (
 	"bytes"
 	"context"
-	"slices"
+	"errors"
 	"strings"
 
-	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/model"
 	"github.com/lumberbarons/hew/internal/render"
@@ -142,16 +141,7 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 	if err != nil {
 		return err
 	}
-	// Issues arrives in list order, and filtering preserves it.
-	out := slices.DeleteFunc(issuesFromTracker(snapshot.Issues()), func(i model.Issue) bool {
-		if i.Untriaged() {
-			return true
-		}
-		if opts.Label != "" && !i.HasLabel(opts.Label) {
-			return true
-		}
-		return opts.Epic > 0 && (i.Parent == nil || i.Parent.Number != opts.Epic)
-	})
+	out := issuesFromTracker(snapshot.List(tracker.ListFilter{Label: opts.Label, Epic: opts.Epic}))
 	return a.emitListBodies(out, "no issues", render.List, opts.Bodies)
 }
 
@@ -160,21 +150,13 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 // child's blockers — a second two-state fetch, but only when the subject is
 // an epic.
 func (a *App) Show(ctx context.Context, number int) error {
-	t := tracker.Wrap(a.Client)
-	issue, err := t.Get(ctx, number)
+	detail, err := a.readTracker().Detail(ctx, number)
 	if err != nil {
 		return err
 	}
-	subject := issueFromTracker(issue)
-	var children []model.Issue
-	if subject.IsEpic() {
-		snapshot, err := t.Snapshot(ctx, tracker.SnapshotOptions{States: everyTrackerState()})
-		if err != nil {
-			return err
-		}
-		children = issuesFromTracker(snapshot.Children(number))
-		a.warnChildrenBlockersCapped(children, warningsFromTracker(snapshot.Warnings()))
-	}
+	subject := issueFromTracker(detail.Issue)
+	children := issuesFromTracker(detail.Children)
+	a.warnChildrenBlockersCapped(children, warningsFromTracker(detail.Warnings))
 	return a.emitIssue(subject, children)
 }
 
@@ -189,23 +171,22 @@ func (a *App) Search(ctx context.Context, terms string) error {
 	if terms == "" {
 		return usageErr("usage: hew search <terms>")
 	}
-	issues, total, err := a.Client.SearchIssues(ctx, terms)
+	result, err := a.readTracker().Search(ctx, tracker.SearchRequest{Terms: terms})
 	if err != nil {
 		return err
 	}
-	fetched := len(issues)
-	out := slices.DeleteFunc(issues, func(i model.Issue) bool { return i.Untriaged() })
+	out := issuesFromTracker(result.Issues)
 	switch {
-	case len(out) == 0 && fetched > 0 && total > fetched:
+	case len(out) == 0 && result.Fetched > 0 && result.Total > result.Fetched:
 		// The fetch was capped and everything it returned was untriaged —
 		// the unseen matches may be triaged, so say only what is known.
-		a.warnf("no triaged matches in the first %d of %d; refine the terms or hew triage --search", fetched, total)
-	case len(out) == 0 && fetched > 0:
+		a.warnf("no triaged matches in the first %d of %d; refine the terms or hew triage --search", result.Fetched, result.Total)
+	case len(out) == 0 && result.Fetched > 0:
 		// "No matches" would read as "safe to file" when every match was
 		// untriaged; name where they went instead.
 		a.warnf("no triaged matches; hew triage --search covers them")
-	case total > fetched:
-		a.warnf("showing %d of %d matches; refine the terms", len(out), total)
+	case result.Total > result.Fetched:
+		a.warnf("showing %d of %d matches; refine the terms", len(out), result.Total)
 	}
 	return a.emitList(out, "no matches", render.List)
 }
@@ -224,27 +205,21 @@ type TriageOpts struct {
 // untriaged content, the one list-shaped read that emits it: an agent
 // harness deny list keys on this command, so nothing else may.
 func (a *App) Triage(ctx context.Context, opts TriageOpts) error {
-	if opts.Search == "" {
-		issues, err := a.Client.ListIssues(ctx, openStates)
-		if err != nil {
-			return err
-		}
-		untriaged := model.UntriagedIssues(issues)
-		return a.emitTriage(untriaged, "no untriaged issues")
-	}
-	terms := strings.TrimSpace(opts.Search)
-	if terms == "" {
+	if opts.Search != "" && strings.TrimSpace(opts.Search) == "" {
 		return usageErr("usage: hew triage --search <terms>")
 	}
-	issues, total, err := a.Client.SearchIssues(ctx, terms)
+	result, err := a.readTracker().Triage(ctx, tracker.TriageRequest{Search: opts.Search})
 	if err != nil {
 		return err
 	}
-	untriaged := slices.DeleteFunc(issues, func(i model.Issue) bool { return !i.Untriaged() })
-	if total > len(issues) {
-		a.warnf("showing %d of %d matches; refine the terms", len(untriaged), total)
+	if result.Total > result.Fetched {
+		a.warnf("showing %d of %d matches; refine the terms", len(result.Issues), result.Total)
 	}
-	return a.emitTriage(untriaged, "no untriaged matches")
+	empty := "no untriaged issues"
+	if opts.Search != "" {
+		empty = "no untriaged matches"
+	}
+	return a.emitTriage(issuesFromTracker(result.Issues), empty)
 }
 
 // PrimeOpts re-targets the primer's output at a caller with its own
@@ -268,24 +243,21 @@ func (a *App) Prime(ctx context.Context, opts PrimeOpts) error {
 		// the terminal says, and never the --json schema.
 		return usageErr("--hook-format and --json are alternatives")
 	}
-	issues, err := a.Client.ListIssues(ctx, openStates)
+	result, err := a.readTracker().Primer(ctx)
 	if err != nil {
 		return err
 	}
-	ready := model.Ready(issues)
-	inProgress := model.InProgressIssues(issues)
-	epics := model.Epics(issues)
 	d := render.PrimeData{
 		Repo:            a.Repo.String(),
-		Ready:           ready,
-		ReadyTotal:      len(ready),
-		OpenTotal:       len(issues),
-		InProgress:      inProgress,
-		InProgressTotal: len(inProgress),
-		Epics:           epics,
-		EpicsTotal:      len(epics),
-		Warnings:        model.Warnings(issues),
-		Untriaged:       len(model.UntriagedIssues(issues)),
+		Ready:           issuesFromTracker(result.Ready),
+		ReadyTotal:      result.ReadyTotal,
+		OpenTotal:       result.OpenTotal,
+		InProgress:      issuesFromTracker(result.InProgress),
+		InProgressTotal: result.InProgressTotal,
+		Epics:           issuesFromTracker(result.Epics),
+		EpicsTotal:      result.EpicsTotal,
+		Warnings:        warningsFromTracker(result.Warnings),
+		Untriaged:       result.Untriaged,
 	}
 	if len(d.Ready) > primeReadyCap {
 		d.Ready = d.Ready[:primeReadyCap]
@@ -296,22 +268,18 @@ func (a *App) Prime(ctx context.Context, opts PrimeOpts) error {
 	if len(d.Epics) > primeEpicsCap {
 		d.Epics = d.Epics[:primeEpicsCap]
 	}
-	primer := conventions.PrimerStatic
-	if a.Local {
-		primer = conventions.PrimerLocal
-	}
 	if opts.HookFormat == "cursor" {
 		var buf bytes.Buffer
-		render.Prime(&buf, primer, d, render.Style{})
+		render.Prime(&buf, result.Conventions, d, render.Style{})
 		return render.CursorHookJSON(a.Out, buf.String())
 	}
-	return a.emitPrime(primer, d)
+	return a.emitPrime(result.Conventions, d)
 }
 
 // EpicStatus with number <= 0 lists all open epics with progress rollups;
 // with a number it shows that epic's children and the next workable one.
 func (a *App) EpicStatus(ctx context.Context, number int) error {
-	t := tracker.Wrap(a.Client)
+	t := a.readTracker()
 	if number <= 0 {
 		snapshot, err := t.Snapshot(ctx, tracker.SnapshotOptions{})
 		if err != nil {
@@ -319,21 +287,20 @@ func (a *App) EpicStatus(ctx context.Context, number int) error {
 		}
 		return a.emitList(issuesFromTracker(snapshot.Epics()), "no epics", render.EpicList)
 	}
-	// One fetch of both states resolves child titles without N+1 queries.
-	snapshot, err := t.Snapshot(ctx, tracker.SnapshotOptions{States: everyTrackerState()})
+	detail, err := t.Detail(ctx, number)
 	if err != nil {
+		var notFound *tracker.NotFoundError
+		if errors.As(err, &notFound) {
+			return genericErr("issue #%d not found in %s", number, a.Repo)
+		}
 		return err
 	}
-	found, ok := snapshot.Get(number)
-	if !ok {
-		return genericErr("issue #%d not found in %s", number, a.Repo)
-	}
-	epic := issueFromTracker(found)
+	epic := issueFromTracker(detail.Issue)
 	if !epic.IsEpic() {
 		return genericErr("#%d has no sub-issues; not an epic", number)
 	}
-	children := issuesFromTracker(snapshot.Children(number))
-	a.warnChildrenBlockersCapped(children, warningsFromTracker(snapshot.Warnings()))
+	children := issuesFromTracker(detail.Children)
+	a.warnChildrenBlockersCapped(children, warningsFromTracker(detail.Warnings))
 	return a.emitEpicStatus(epic, children)
 }
 
@@ -353,6 +320,16 @@ func (a *App) warnChildrenBlockersCapped(children []model.Issue, warnings []mode
 	}
 }
 
+// readTracker is the library handle the read commands delegate their policy
+// to, over the store the app already opened. Reads never resolve the actor.
+func (a *App) readTracker() *tracker.Tracker {
+	backend := tracker.BackendGitHub
+	if a.Local {
+		backend = tracker.BackendLocal
+	}
+	return tracker.WrapAs(a.Client, backend, "")
+}
+
 // trackerStates maps the CLI's resolved state filter onto the library's
 // states, so `list` asks the backend for exactly what it prints.
 func trackerStates(states []gh.IssueState) []tracker.State {
@@ -366,12 +343,6 @@ func trackerStates(states []gh.IssueState) []tracker.State {
 		}
 	}
 	return out
-}
-
-// everyTrackerState is both states, for a read that must see closed issues
-// too (show on an epic, epic status).
-func everyTrackerState() []tracker.State {
-	return []tracker.State{tracker.StateOpen, tracker.StateClosed}
 }
 
 // issueFromTracker converts the library's flat issue back to the domain shape

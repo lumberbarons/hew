@@ -895,18 +895,20 @@ imports `tracker`, `pr` or `migrate` and never an `internal` path.
 
 | Package | Requests and inputs | Results and values |
 |---|---|---|
-| `tracker` | `Config`, `SnapshotOptions`, `ListFilter`, `SearchRequest`, `TriageRequest`, `Body`, `Sections`, `CreateRequest`, `CreateEpicRequest`, `EditRequest`, `ReopenOptions`, `StartOptions`, `ReleaseOptions`, `CloseOptions`, `BlockOptions`, `InitConfig`, `PlanEntry`, `PlanRef`, `Checkpoint`, `ApplyOptions` | `Target`, `Issue`, `Ref`, `Comment`, `Snapshot`, `IssueDetail`, `SearchResult`, `TriageResult`, `PrimerResult`, `ComposedBody`, `BodyCheck`, `CreateResult`, `EditResult`, `ReopenResult`, `StartResult`, `CloseResult`, `BlockResult`, `UnblockResult`, `InitResult`, `ApplyResult`, `PlannedEntry`, `AppliedEntry`, `CheckpointState`, `CheckpointEntry`, `MemoryCheckpoint`, `FileCheckpoint`, `RateLimit`, `Edge`, `Backend`, `State`, `EdgeKind`, `ReopenStage` |
+| `tracker` | `Config`, `SnapshotOptions`, `ListFilter`, `SearchRequest`, `TriageRequest`, `Body`, `Sections`, `CreateRequest`, `CreateEpicRequest`, `EditRequest`, `ReopenOptions`, `StartOptions`, `ReleaseOptions`, `CloseOptions`, `BlockOptions`, `InitConfig`, `PlanEntry`, `PlanRef`, `Checkpoint`, `ApplyOptions` | `Target`, `Issue`, `Ref`, `Comment`, `TextFinding`, `Snapshot`, `IssueDetail`, `SearchResult`, `TriageResult`, `PrimerResult`, `ComposedBody`, `BodyCheck`, `CreateResult`, `EditResult`, `ReopenResult`, `StartResult`, `CloseResult`, `BlockResult`, `UnblockResult`, `InitResult`, `ApplyResult`, `PlannedEntry`, `AppliedEntry`, `CheckpointState`, `CheckpointEntry`, `MemoryCheckpoint`, `FileCheckpoint`, `RateLimit`, `Edge`, `Backend`, `State`, `EdgeKind`, `ReopenStage` |
 | `pr` | `Config`, `CreateRequest`, `AmendRequest`, `Sections`, `Body`, `BodyEdit` | `Client`, `CreateResult`, `AmendResult`, `ComposedBody`, `BodyCheck` |
 | `migrate` | `Config`, `BeadsRequest`, `LocalRequest`, `RunRequest`, `Item`, `Options`, `Target` | `Migrator`, `Result`, `PlannedItem` |
 
 `IssueDetail` carries the issue, an epic's children, the next workable child
-(`Next`), advisory findings and snapshot warnings, so `show` and `epic status`
-assemble them the same way. `SearchResult` and `TriageResult` carry the matches
-plus `Total` and `Fetched`. `PrimerResult` carries the live sections and counts,
-the warnings and the backend's static convention text, so the CLI renders a
-primer without owning any of its policy. `Target` is the read-only backend
-report — `Backend`, `Repo`, `Dir`, `MainCheckout`, and the local tracker's stable
-`ID` — and `RateLimit` is the GitHub client's last observed budget.
+(`Next`), source-attributed `TextFinding` values and snapshot warnings, so
+`show` and `epic status` assemble them the same way. `SearchResult` and
+`TriageResult` carry the matches plus `Total` and `Fetched`; `TriageResult`
+also carries the advisory `TextFinding` values for the untriaged text it
+returns. `PrimerResult` carries the live sections and counts, the warnings and
+the backend's static convention text, so the CLI renders a primer without
+owning any of its policy. `Target` is the read-only backend report — `Backend`,
+`Repo`, `Dir`, `MainCheckout`, and the local tracker's stable `ID` — and
+`RateLimit` is the GitHub client's last observed budget.
 
 `InitResult` reports the backend initialization ran against, the local tracker's
 directory, the convention labels the run created and the notices it would have
@@ -941,13 +943,16 @@ read.
 ### Warnings and findings
 
 A warning is a typed value on the result, never a line printed by a library call
-and never an error. A finding is advisory input about text being written; it
-never blocks the write and never rewrites the author's words. Both carry a
-`Kind`, so a consumer decides whether to surface, log or ignore them.
+and never an error. A finding is advisory input about text — written by a
+caller, or read from an issue — and never blocks a write or rewrites the
+author's words. Warnings carry a `Kind`; advisory `TextFinding` values carry
+the independent flags the scan tests, so a consumer can filter on the
+dimension it cares about.
 
 | Package | Type | Kinds |
 |---|---|---|
-| `tracker` | `Warning` + `WarningKind` | `WarnDependencyCycle`, `WarnBlockersCapped`, `WarnSubIssuesCapped` |
+| `tracker` | `Warning` + `WarningKind` | `WarnMultiPriority`, `WarnMultiType`, `WarnInProgressEpic` (primer contradictions), `WarnDependencyCycle`, `WarnBlockersCapped`, `WarnSubIssuesCapped` |
+| `tracker` | `TextFinding` | Source-attributed advisory character findings, flagged independently: zero-width, bidi controls, Unicode tags, confusable characters |
 | `tracker` | `Finding` + `FindingKind` | `FindingUnmarkedCode` (prose that looks like code and should be in a backtick span) |
 | `pr` | `Warning` + `WarningKind` | `WarnBranchPrefix`, `WarnUnclaimed`, `WarnUnrelatedSet`, `WarnPrimaryTitle`, `WarnMissingTesting`, `WarnMissingRisk` |
 | `migrate` | `Warning` + `WarningKind` | `WarnEdgeDropped`, `WarnWriteFailed`, `WarnBodyEdited`, `WarnAlreadyClosed` |

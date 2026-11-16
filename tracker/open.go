@@ -92,9 +92,11 @@ func Open(ctx context.Context, cfg Config) (*Tracker, error) {
 }
 
 // WrapAs makes a Tracker around an already-open store, as actor: the seam
-// hew's own CLI uses for writes, where it opens the store once for every
-// command and already knows which backend it opened. External callers use
-// Open, which also resolves the worktree and the backend.
+// hew's own CLI uses for writes and for the reads it delegates to Tracker,
+// where it opens the store once for every command and already knows which
+// backend it opened. External callers use Open, which also resolves the
+// worktree and the backend. A read never resolves the actor, so it may be
+// empty here.
 //
 // An empty actor defers to the store's Viewer, read when an operation first
 // needs the identity rather than at WrapAs. That is what keeps the CLI's
@@ -163,6 +165,14 @@ func (c Config) githubRepo(target Target) (gh.Repo, error) {
 			return gh.Repo{}, &InvalidInputError{Field: "repo", Reason: `must be "owner/name"`}
 		}
 		return gh.Repo{Owner: owner, Name: name}, nil
+	}
+	// Detect already read the origin remote for its report; reuse it rather
+	// than asking git twice.
+	if target.Repo != "" {
+		owner, name, ok := strings.Cut(target.Repo, "/")
+		if ok && owner != "" && name != "" {
+			return gh.Repo{Owner: owner, Name: name}, nil
+		}
 	}
 	if target.MainCheckout == "" {
 		return gh.Repo{}, &InvalidInputError{Field: "repo", Reason: "must be owner/name when the worktree is not a git checkout"}
