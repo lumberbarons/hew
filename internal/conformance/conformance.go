@@ -437,7 +437,7 @@ func search(t *testing.T, s gh.IssueStore) {
 	must(t, s.CloseIssue(ctx, closed.Number, gh.CloseCompleted))
 	create(t, s, "Unrelated")
 
-	found, total, err := s.SearchIssues(ctx, "retry")
+	found, total, err := s.SearchIssues(ctx, "retry", nil)
 	must(t, err)
 	if len(found) == 0 {
 		t.Fatal("search retry found nothing")
@@ -453,7 +453,18 @@ func search(t *testing.T, s gh.IssueStore) {
 		t.Errorf("search retry = %v (total %d), want %v (total 3)", got, total, want)
 	}
 
-	none, total, err := s.SearchIssues(ctx, "zzzz-not-there")
+	onlyClosed, total, err := s.SearchIssues(ctx, "retry", []gh.IssueState{gh.StateClosed})
+	must(t, err)
+	if len(onlyClosed) != 1 || onlyClosed[0].Number != closed.Number || total != 1 {
+		t.Errorf("closed-only search = %d results (total %d), want #%d alone", len(onlyClosed), total, closed.Number)
+	}
+	onlyOpen, total, err := s.SearchIssues(ctx, "retry", []gh.IssueState{gh.StateOpen})
+	must(t, err)
+	if len(onlyOpen) != 2 || total != 2 {
+		t.Errorf("open-only search = %d results (total %d), want the two open matches", len(onlyOpen), total)
+	}
+
+	none, total, err := s.SearchIssues(ctx, "zzzz-not-there", nil)
 	must(t, err)
 	if len(none) != 0 || total != 0 {
 		t.Errorf("search for nothing = %d results, total %d", len(none), total)

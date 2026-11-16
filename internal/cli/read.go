@@ -51,11 +51,32 @@ type ReadyOpts struct {
 	Limit int
 }
 
+// limitIssues is the one implementation of --limit for ready, list and
+// search: 0 keeps everything, a positive N keeps the first N and says so on
+// stderr, a negative N is a usage error. Truncation is never silent — a
+// capped list read as complete reads as a smaller backlog. what names the
+// items in the warning ("ready issues", "issues", "matches").
+func (a *App) limitIssues(issues []model.Issue, limit int, what string) []model.Issue {
+	if limit > 0 && len(issues) > limit {
+		a.warnf("showing %d of %d %s; --limit 0 for all", limit, len(issues), what)
+		return issues[:limit]
+	}
+	return issues
+}
+
+// checkLimit rejects a negative --limit before any fetch.
+func checkLimit(limit int) error {
+	if limit < 0 {
+		return usageErr("--limit must be 0 or greater")
+	}
+	return nil
+}
+
 // Ready lists open, non-epic, unclaimed issues with zero open blockers.
 // No results is exit 0: an empty queue is an answer, not an error.
 func (a *App) Ready(ctx context.Context, opts ReadyOpts) error {
-	if opts.Limit < 0 {
-		return usageErr("--limit must be 0 or greater")
+	if err := checkLimit(opts.Limit); err != nil {
+		return err
 	}
 	snapshot, err := tracker.Wrap(a.Client).Snapshot(ctx, tracker.SnapshotOptions{})
 	if err != nil {
@@ -69,11 +90,7 @@ func (a *App) Ready(ctx context.Context, opts ReadyOpts) error {
 			a.warnf("%s", render.FormatWarning(w))
 		}
 	}
-	ready := issuesFromTracker(snapshot.Ready())
-	if opts.Limit > 0 && len(ready) > opts.Limit {
-		a.warnf("showing %d of %d ready issues; --limit 0 for all", opts.Limit, len(ready))
-		ready = ready[:opts.Limit]
-	}
+	ready := a.limitIssues(issuesFromTracker(snapshot.Ready()), opts.Limit, "ready issues")
 	return a.emitList(ready, "no ready work", render.List)
 }
 
@@ -93,6 +110,9 @@ type ListOpts struct {
 	// dedup in one call (untriaged issues stay behind `hew triage`). JSON-only:
 	// text output has no place for bodies.
 	Bodies bool
+	// Limit caps how many issues are printed; 0, the default, prints all.
+	// The cap applies after sorting, so it keeps the top N of list order.
+	Limit int
 }
 
 // listStates resolves the requested state filter to the states to fetch, so
@@ -131,6 +151,9 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 	if opts.Bodies && !a.JSON {
 		return usageErr("--bodies requires --json")
 	}
+	if err := checkLimit(opts.Limit); err != nil {
+		return err
+	}
 	states, err := listStates(opts)
 	if err != nil {
 		return err
@@ -141,7 +164,7 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 	if err != nil {
 		return err
 	}
-	out := issuesFromTracker(snapshot.List(tracker.ListFilter{Label: opts.Label, Epic: opts.Epic}))
+	out := a.limitIssues(issuesFromTracker(snapshot.List(tracker.ListFilter{Label: opts.Label, Epic: opts.Epic})), opts.Limit, "issues")
 	return a.emitListBodies(out, "no issues", render.List, opts.Bodies)
 }
 
@@ -160,18 +183,50 @@ func (a *App) Show(ctx context.Context, number int) error {
 	return a.emitIssue(subject, children)
 }
 
+// SearchOpts shapes a search.
+type SearchOpts struct {
+	Terms string
+	// State is "open", "closed", or "all"; empty means all, because the
+	// point of search is finding "already fixed" as well as "already filed".
+	State string
+	// Limit caps how many matches are printed; 0, the default, prints all
+	// that came back.
+	Limit int
+}
+
+// searchStates resolves --state for search. Unlike list, the default spans
+// both states, and all is the same as naming neither.
+func searchStates(state string) ([]tracker.State, error) {
+	switch state {
+	case "", stateAll:
+		return nil, nil
+	case stateOpen:
+		return []tracker.State{tracker.StateOpen}, nil
+	case stateClosed:
+		return []tracker.State{tracker.StateClosed}, nil
+	}
+	return nil, usageErr("--state must be %s, %s, or %s", stateOpen, stateClosed, stateAll)
+}
+
 // Search runs a repo-scoped text search over open and closed issues — the
 // dedupe step before filing discovered work, where "already fixed" answers
 // the question as well as "already filed". Output keeps the API's
 // best-match order rather than the list sort: relevance is the point.
 // Untriaged matches are omitted (their text is unvetted input); the other
 // half of dedup, over the untriaged queue, is `hew triage --search`.
-func (a *App) Search(ctx context.Context, terms string) error {
-	terms = strings.TrimSpace(terms)
+func (a *App) Search(ctx context.Context, opts SearchOpts) error {
+	terms := strings.TrimSpace(opts.Terms)
 	if terms == "" {
 		return usageErr("usage: hew search <terms>")
 	}
-	result, err := a.readTracker().Search(ctx, tracker.SearchRequest{Terms: terms})
+	if err := checkLimit(opts.Limit); err != nil {
+		return err
+	}
+	states, err := searchStates(opts.State)
+	if err != nil {
+		return err
+	}
+	result, err := a.readTracker().Search(ctx, tracker.SearchRequest{Terms: terms, States: states})
 	if err != nil {
 		return err
 	}
@@ -188,7 +243,7 @@ func (a *App) Search(ctx context.Context, terms string) error {
 	case result.Total > result.Fetched:
 		a.warnf("showing %d of %d matches; refine the terms", len(out), result.Total)
 	}
-	return a.emitList(out, "no matches", render.List)
+	return a.emitList(a.limitIssues(out, opts.Limit, "matches"), "no matches", render.List)
 }
 
 // TriageOpts retargets triage at the dedup case.
@@ -276,12 +331,31 @@ func (a *App) Prime(ctx context.Context, opts PrimeOpts) error {
 	return a.emitPrime(result.Conventions, d)
 }
 
-// EpicStatus with number <= 0 lists all open epics with progress rollups;
-// with a number it shows that epic's children and the next workable one.
-func (a *App) EpicStatus(ctx context.Context, number int) error {
+// EpicStatusOpts selects what epic status shows.
+type EpicStatusOpts struct {
+	// Number, when positive, shows that epic's children instead of the rollup.
+	Number int
+	// State is "open", "closed", or "all" and selects which epics the rollup
+	// lists; empty means open. It has no meaning for one epic's children,
+	// which always show every state so progress reads as done and left.
+	State string
+}
+
+// EpicStatus with no number lists the epics in the requested state — open by
+// default — with progress rollups; with a number it shows that epic's
+// children and the next workable one.
+func (a *App) EpicStatus(ctx context.Context, opts EpicStatusOpts) error {
 	t := a.readTracker()
+	number := opts.Number
+	if number > 0 && opts.State != "" {
+		return usageErr("--state selects which epics the rollup lists; it does not apply to one epic's children")
+	}
 	if number <= 0 {
-		snapshot, err := t.Snapshot(ctx, tracker.SnapshotOptions{})
+		states, err := listStates(ListOpts{State: opts.State})
+		if err != nil {
+			return err
+		}
+		snapshot, err := t.Snapshot(ctx, tracker.SnapshotOptions{States: trackerStates(states)})
 		if err != nil {
 			return err
 		}

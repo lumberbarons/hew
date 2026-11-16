@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -559,7 +560,7 @@ func (g *GitHub) GetIssue(ctx context.Context, number int) (model.Issue, error) 
 	return resp.Repository.Issue.toModel(), nil
 }
 
-func (g *GitHub) SearchIssues(ctx context.Context, terms string) ([]model.Issue, int, error) {
+func (g *GitHub) SearchIssues(ctx context.Context, terms string, states []IssueState) ([]model.Issue, int, error) {
 	query := fmt.Sprintf(`
 	query($q: String!) {
 		search(type: ISSUE, query: $q, first: %d) {
@@ -577,7 +578,7 @@ func (g *GitHub) SearchIssues(ctx context.Context, terms string) ([]model.Issue,
 	// The repo scope and is:issue ride in the search string itself — the
 	// search API has no structured equivalents. User terms follow, so
 	// qualifiers like label:bug pass through.
-	q := fmt.Sprintf("repo:%s/%s is:issue %s", g.repo.Owner, g.repo.Name, terms)
+	q := fmt.Sprintf("repo:%s/%s is:issue%s %s", g.repo.Owner, g.repo.Name, searchStateQualifier(states), terms)
 	if err := g.gqlDo(ctx, query, map[string]any{"q": q}, &resp); err != nil {
 		return nil, 0, err
 	}
@@ -591,6 +592,20 @@ func (g *GitHub) SearchIssues(ctx context.Context, terms string) ([]model.Issue,
 		out = append(out, n.toModel())
 	}
 	return out, resp.Search.IssueCount, nil
+}
+
+// searchStateQualifier is the is: qualifier that narrows a search to one
+// state. Both states, or none named, add nothing: search spans open and closed
+// by default.
+func searchStateQualifier(states []IssueState) string {
+	hasOpen, hasClosed := slices.Contains(states, StateOpen), slices.Contains(states, StateClosed)
+	switch {
+	case hasOpen && !hasClosed:
+		return " is:open"
+	case hasClosed && !hasOpen:
+		return " is:closed"
+	}
+	return ""
 }
 
 // notFoundError classifies a GraphQL NOT_FOUND error by the field it points

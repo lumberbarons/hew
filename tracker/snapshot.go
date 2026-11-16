@@ -243,10 +243,11 @@ func (s *Snapshot) Claimed() []Issue {
 	return issuesFromModel(out)
 }
 
-// Epics returns open issues that have sub-issues or carry the epic label,
-// sorted by priority.
+// Epics returns the issues that have sub-issues or carry the epic label,
+// sorted by priority. It spans the states the snapshot fetched, so the zero
+// SnapshotOptions yields open epics and a closed fetch adds the finished ones.
 func (s *Snapshot) Epics() []Issue {
-	return issuesFromModel(model.Epics(s.issues))
+	return issuesFromModel(model.EpicsOf(s.issues))
 }
 
 // Children returns an epic's children, oldest first, from parent backlinks

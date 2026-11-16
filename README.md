@@ -164,12 +164,14 @@ hew prime                      # session-start context for agents
 hew ready [--limit N]          # open, non-epic, triaged, zero open blockers; P0→P4
                                   # capped at 30 by default (0 for all); truncation warns
 hew list [--label X] [--epic N] [--state open|closed|all]
+            [--limit N]          # prints all by default; truncation warns, like ready
             [--bodies]           # with --json: body on every line, dedup in one call;
                                    # untriaged issues are omitted — hew triage holds them
                                    # (--closed still works, deprecated: use --state closed)
 hew show <n>                   # body, deps, parent, children, recent comments
-hew search <terms>             # text search over vetted issues, open+closed, best-match
-                                   # order — check for an existing issue before filing one
+hew search <terms> [--state open|closed] [--limit N]
+                               # text search over vetted issues, open+closed by default,
+                                   # best-match order — check for an existing issue before filing one
 hew create --type bug|enhancement|task --title "..."
               [--where X] [--problem|--goal "..."] [--fix|--approach "..."]
               [--done-when "..."]...   # section flags compose the body template
@@ -222,7 +224,8 @@ hew block <n> --on <m> [--on <m> ...] [--closed]
 hew unblock <n> --from <m> [--from <m> ...] [--closed]
 hew epic create --title "..." [--children N,N]
                    [--goal "..." --done-when "..." | --body-file F | --edit]
-hew epic status [<n>]                    # rollup per open epic; with <n>, that epic's
+hew epic status [<n>] [--state open|closed|all]
+                                         # rollup per open epic (--state picks which); with <n>, that epic's
                                          # children plus "next:" — the next workable
                                          # child (open, unblocked, in child order);
                                          # also reachable as: hew epic list

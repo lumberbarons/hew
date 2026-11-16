@@ -65,7 +65,7 @@ func (d *data) view(number int) (model.Issue, error) {
 // case-insensitively, in the title, body or labels, across both states.
 // Issues whose title carries all the terms come first. Qualifiers such as
 // label:bug are GitHub syntax and are matched as literal text here.
-func (s *Store) SearchIssues(ctx context.Context, terms string) ([]model.Issue, int, error) {
+func (s *Store) SearchIssues(ctx context.Context, terms string, states []gh.IssueState) ([]model.Issue, int, error) {
 	words := strings.Fields(strings.ToLower(terms))
 	if len(words) == 0 {
 		return nil, 0, nil
@@ -76,6 +76,9 @@ func (s *Store) SearchIssues(ctx context.Context, terms string) ([]model.Issue, 
 	}
 	var inTitle, elsewhere []model.Issue
 	for _, i := range d.build() {
+		if len(states) > 0 && !slices.Contains(states, gh.IssueState(i.State)) {
+			continue
+		}
 		title := strings.ToLower(i.Title)
 		switch {
 		case containsAll(title, words):

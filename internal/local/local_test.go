@@ -956,7 +956,7 @@ func TestSearchRequiresEveryTermAndRanksTitleMatchesFirst(t *testing.T) {
 	mustCreate(t, s, "Stale only", "no other word")
 	byLabel := mustCreate(t, s, "Labelled", "", "cache-stale")
 
-	got, total, err := s.SearchIssues(ctx, "CACHE  stale")
+	got, total, err := s.SearchIssues(ctx, "CACHE  stale", nil)
 	must(t, err)
 	var numbers []int
 	for _, i := range got {
@@ -970,13 +970,33 @@ func TestSearchRequiresEveryTermAndRanksTitleMatchesFirst(t *testing.T) {
 		t.Errorf("total = %d, want 3", total)
 	}
 
-	got, _, err = s.SearchIssues(ctx, "cache-stale")
+	got, _, err = s.SearchIssues(ctx, "cache-stale", nil)
 	must(t, err)
 	if len(got) != 1 || got[0].Number != byLabel {
 		t.Errorf("label search = %+v, want #%d", got, byLabel)
 	}
-	if none, total, _ := s.SearchIssues(ctx, "   "); len(none) != 0 || total != 0 {
+	if none, total, _ := s.SearchIssues(ctx, "   ", nil); len(none) != 0 || total != 0 {
 		t.Errorf("blank search returned %d results, total %d", len(none), total)
+	}
+}
+
+func TestSearchStatesNarrowBeforeTheCap(t *testing.T) {
+	s := newStore(t)
+	for i := range searchCap + 3 {
+		n := mustCreate(t, s, fmt.Sprintf("widget %d", i), "")
+		must(t, s.CloseIssue(ctx, n, gh.CloseCompleted))
+	}
+	open := mustCreate(t, s, "widget still open", "")
+
+	got, total, err := s.SearchIssues(ctx, "widget", []gh.IssueState{gh.StateOpen})
+	must(t, err)
+	if len(got) != 1 || got[0].Number != open || total != 1 {
+		t.Errorf("open search = %d results (total %d), want #%d alone — closed matches must not crowd it out", len(got), total, open)
+	}
+	got, total, err = s.SearchIssues(ctx, "widget", []gh.IssueState{gh.StateClosed})
+	must(t, err)
+	if len(got) != searchCap || total != searchCap+3 {
+		t.Errorf("closed search = %d results (total %d), want %d of %d", len(got), total, searchCap, searchCap+3)
 	}
 }
 
@@ -985,7 +1005,7 @@ func TestSearchCapsResultsButReportsTheTrueTotal(t *testing.T) {
 	for i := range searchCap + 5 {
 		mustCreate(t, s, fmt.Sprintf("widget %d", i), "")
 	}
-	got, total, err := s.SearchIssues(ctx, "widget")
+	got, total, err := s.SearchIssues(ctx, "widget", nil)
 	must(t, err)
 	if len(got) != searchCap || total != searchCap+5 {
 		t.Errorf("got %d results, total %d; want %d of %d", len(got), total, searchCap, searchCap+5)
@@ -1161,7 +1181,7 @@ func TestOperationsReportAMissingIssuesFile(t *testing.T) {
 	if _, err := s.GetIssue(ctx, 1); err == nil {
 		t.Error("get succeeded with no file")
 	}
-	if _, _, err := s.SearchIssues(ctx, "x"); err == nil {
+	if _, _, err := s.SearchIssues(ctx, "x", nil); err == nil {
 		t.Error("search succeeded with no file")
 	}
 	if _, err := s.ListLabels(ctx); err == nil {

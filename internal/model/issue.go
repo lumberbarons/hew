@@ -401,9 +401,19 @@ func InProgressIssues(issues []Issue) []Issue {
 
 // Epics returns open issues that have sub-issues, sorted by priority.
 func Epics(issues []Issue) []Issue {
+	return epics(issues, true)
+}
+
+// EpicsOf is Epics over whatever states the caller fetched: a closed epic is
+// listed when the issues include it.
+func EpicsOf(issues []Issue) []Issue {
+	return epics(issues, false)
+}
+
+func epics(issues []Issue, openOnly bool) []Issue {
 	var out []Issue
 	for _, i := range issues {
-		if i.IsOpen() && i.IsEpic() {
+		if i.IsEpic() && (i.IsOpen() || !openOnly) {
 			out = append(out, i)
 		}
 	}

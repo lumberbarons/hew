@@ -1200,7 +1200,7 @@ func TestEpicStatusAll(t *testing.T) {
 	done.Parent = &model.Ref{Number: 10, State: "OPEN"}
 	f := newFake(epicIssue, child, done)
 	app, out, _ := newApp(f)
-	if err := app.EpicStatus(ctx, 0); err != nil {
+	if err := app.EpicStatus(ctx, EpicStatusOpts{Number: 0}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "#10 P2  Epic: big  1/2") {
@@ -1218,7 +1218,7 @@ func TestEpicStatusOne(t *testing.T) {
 	done.Parent = &model.Ref{Number: 10, State: "OPEN"}
 	f := newFake(epicIssue, child, done)
 	app, out, _ := newApp(f)
-	if err := app.EpicStatus(ctx, 10); err != nil {
+	if err := app.EpicStatus(ctx, EpicStatusOpts{Number: 10}); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
@@ -1241,7 +1241,7 @@ func TestEpicStatusNextSkipsBlockedHead(t *testing.T) {
 	free.Parent = &model.Ref{Number: 10, State: "OPEN"}
 	f := newFake(epicIssue, head, free)
 	app, out, _ := newApp(f)
-	if err := app.EpicStatus(ctx, 10); err != nil {
+	if err := app.EpicStatus(ctx, EpicStatusOpts{Number: 10}); err != nil {
 		t.Fatal(err)
 	}
 	if got := out.String(); !strings.Contains(got, "next: #12") {
@@ -1259,7 +1259,7 @@ func TestEpicStatusNextAnnotatesClaim(t *testing.T) {
 	claimed.Assignees = []string{"lumberbarons"}
 	f := newFake(epicIssue, claimed)
 	app, out, _ := newApp(f)
-	if err := app.EpicStatus(ctx, 10); err != nil {
+	if err := app.EpicStatus(ctx, EpicStatusOpts{Number: 10}); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
@@ -1281,7 +1281,7 @@ func TestEpicStatusNextWarnsOnCappedBlockers(t *testing.T) {
 	child.BlockedByTotal = 5
 	f := newFake(epicIssue, child)
 	app, _, errOut := newApp(f)
-	if err := app.EpicStatus(ctx, 10); err != nil {
+	if err := app.EpicStatus(ctx, EpicStatusOpts{Number: 10}); err != nil {
 		t.Fatal(err)
 	}
 	if got := errOut.String(); !strings.Contains(got, "next may be wrong") {
@@ -1302,7 +1302,7 @@ func TestEpicStatusUsesBacklinksNotCappedSubIssues(t *testing.T) {
 	missing.Parent = &model.Ref{Number: 10, State: "OPEN"}
 	f := newFake(epicIssue, child, missing)
 	app, out, _ := newApp(f)
-	if err := app.EpicStatus(ctx, 10); err != nil {
+	if err := app.EpicStatus(ctx, EpicStatusOpts{Number: 10}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "#12") {
@@ -1313,11 +1313,11 @@ func TestEpicStatusUsesBacklinksNotCappedSubIssues(t *testing.T) {
 func TestEpicStatusNotAnEpic(t *testing.T) {
 	f := newFake(issue(1, "Plain", "P2", "bug"))
 	app, _, _ := newApp(f)
-	err := app.EpicStatus(ctx, 1)
+	err := app.EpicStatus(ctx, EpicStatusOpts{Number: 1})
 	if err == nil || !strings.Contains(err.Error(), "not an epic") {
 		t.Errorf("err = %v", err)
 	}
-	if err := app.EpicStatus(ctx, 99); err == nil || !strings.Contains(err.Error(), "not found") {
+	if err := app.EpicStatus(ctx, EpicStatusOpts{Number: 99}); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("missing-issue err = %v", err)
 	}
 }
@@ -1325,7 +1325,7 @@ func TestEpicStatusNotAnEpic(t *testing.T) {
 func TestEpicStatusNoEpics(t *testing.T) {
 	f := newFake(issue(1, "Plain", "P2", "bug"))
 	app, out, _ := newApp(f)
-	if err := app.EpicStatus(ctx, 0); err != nil {
+	if err := app.EpicStatus(ctx, EpicStatusOpts{Number: 0}); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != "no epics\n" {
@@ -1341,7 +1341,7 @@ func TestEpicStatusOneJSON(t *testing.T) {
 	f := newFake(epicIssue, child)
 	app, out, _ := newApp(f)
 	app.JSON = true
-	if err := app.EpicStatus(ctx, 10); err != nil {
+	if err := app.EpicStatus(ctx, EpicStatusOpts{Number: 10}); err != nil {
 		t.Fatal(err)
 	}
 	var got struct {

@@ -111,8 +111,10 @@ type IssueStore interface {
 	// depend on a more specific order. Results are capped (see searchCap);
 	// total is the backend's full match count, or len(issues) when it has
 	// no server-side count, so a caller warns about truncation only when
-	// total exceeds what came back.
-	SearchIssues(ctx context.Context, terms string) (issues []model.Issue, total int, err error)
+	// total exceeds what came back. states narrows the search before the
+	// cap is applied — filtering afterwards would let the other state's
+	// matches crowd out the ones asked for; empty means both.
+	SearchIssues(ctx context.Context, terms string, states []IssueState) (issues []model.Issue, total int, err error)
 	CreateIssue(ctx context.Context, title, body string, labels []string) (model.Issue, error)
 	EditTitle(ctx context.Context, number int, title string) error
 	EditBody(ctx context.Context, number int, body string) error

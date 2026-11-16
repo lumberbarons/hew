@@ -180,7 +180,7 @@ func (f *fakeClient) GetIssue(ctx context.Context, number int) (model.Issue, err
 
 // SearchIssues fakes best-match search as a case-insensitive substring
 // match over title and body, both states.
-func (f *fakeClient) SearchIssues(ctx context.Context, terms string) ([]model.Issue, int, error) {
+func (f *fakeClient) SearchIssues(ctx context.Context, terms string, states []gh.IssueState) ([]model.Issue, int, error) {
 	if err := f.record("SearchIssues " + terms); err != nil {
 		return nil, 0, err
 	}
@@ -188,6 +188,9 @@ func (f *fakeClient) SearchIssues(ctx context.Context, terms string) ([]model.Is
 	needle := strings.ToLower(terms)
 	var out []model.Issue
 	for _, i := range f.issues {
+		if len(states) > 0 && !slices.Contains(states, gh.IssueState(i.State)) {
+			continue
+		}
 		if strings.Contains(strings.ToLower(i.Title+" "+i.Body), needle) {
 			out = append(out, *i)
 		}

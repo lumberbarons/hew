@@ -162,7 +162,7 @@ func TestOtherReadsDoNotAnnotateUnicode(t *testing.T) {
 			{"ready", func() error { return app.Ready(ctx, ReadyOpts{}) }},
 			{"prime", func() error { return app.Prime(ctx, PrimeOpts{}) }},
 			{"list", func() error { return app.List(ctx, ListOpts{}) }},
-			{"search", func() error { return app.Search(ctx, "report") }},
+			{"search", func() error { return app.Search(ctx, SearchOpts{Terms: "report"}) }},
 		} {
 			out.Reset()
 			stderr.Reset()
