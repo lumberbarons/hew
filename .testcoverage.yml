@@ -1,6 +1,10 @@
-# Coverage gate: statement coverage on internal/ and tracker/; cmd/ is wiring
+# Coverage gate: statement coverage on every package but cmd/, which is wiring
 # and excluded so the bar bites where behavior lives.
-profile: coverage.out
+# Two profiles, merged by go-test-coverage: the root module's own tests, and the
+# consumer/ module's scenarios measured against the root packages (-coverpkg),
+# which are the only tests of much of pr and migrate. See the test job in
+# .github/workflows/ci.yml.
+profile: coverage.out,coverage-consumer.out
 
 threshold:
   total: 90

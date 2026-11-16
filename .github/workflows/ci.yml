@@ -39,6 +39,16 @@ jobs:
         with:
           node-version: '24'
       - run: go test -race -coverprofile=coverage.out ./...
+      # The consumer scenarios are the only tests of much of `pr` and
+      # `migrate` (#317 moved their external tests out of the root module),
+      # and the root run never executes them. -coverpkg attributes their
+      # statements to the root module's packages, and the gate merges this
+      # profile with the root one (see .testcoverage.yml). The `consumer` job
+      # below still runs the scenarios for pass/fail; this run exists only to
+      # measure them.
+      - name: consumer coverage
+        run: go test -race -coverpkg=github.com/lumberbarons/hew/... -coverprofile=../coverage-consumer.out ./...
+        working-directory: consumer
       - name: coverage gate
         uses: vladopajic/go-test-coverage@f94bcf0d6b9fa5fb8b783830b22648f6c17475e2 # v2.19.0
         with:
