@@ -38,9 +38,13 @@ import (
 // DirName is the store directory, created at the root of the main checkout.
 const DirName = ".hew"
 
+// IssuesFileName is the tracker's issue file inside its directory. Init's
+// notice for a recreated file names it, and so may a caller reporting on it.
+const IssuesFileName = "issues.jsonl"
+
 const (
 	configFile = "config.json"
-	issuesFile = "issues.jsonl"
+	issuesFile = IssuesFileName
 	lockFile   = "lock"
 	// ignoreFile makes the directory ignore itself, so a local tracker never
 	// shows up in git status and the repo's own .gitignore stays untouched.
@@ -175,6 +179,13 @@ func missingIssuesError(path string) error {
 // RecreatedIssuesNotice is what init says after recreating a lost issues.jsonl.
 func RecreatedIssuesNotice(path string) string {
 	return fmt.Sprintf("%s %s; recreated it empty with a new tracker id, so resume checkpoints for `apply` and `migrate` start over. If you have a backup, restore it over the new file", path, issuesLost)
+}
+
+// UntrackedNotice is what init says when it creates a tracker: nothing outside
+// .hew records that the repo is local, so a deleted .hew is indistinguishable
+// from an opt-in that never happened.
+func UntrackedNotice(dir string) string {
+	return fmt.Sprintf("%s is untracked and is the only marker that this repo is local; if it is deleted (for example by `git clean -fdx` at the main checkout), hew falls back to the git remote's GitHub issues, if there is one", dir)
 }
 
 // newID returns a fresh tracker identity: random bytes, hex, so it names one

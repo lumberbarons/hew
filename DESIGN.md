@@ -897,18 +897,27 @@ imports `tracker`, `pr` or `migrate` and never an `internal` path.
 
 | Package | Requests and inputs | Results and values |
 |---|---|---|
-| `tracker` | `Config`, `SnapshotOptions`, `ListFilter`, `SearchRequest`, `TriageRequest`, `Body`, `Sections`, `CreateRequest`, `CreateEpicRequest`, `EditRequest`, `ReopenOptions`, `StartOptions`, `ReleaseOptions`, `CloseOptions`, `BlockOptions`, `InitConfig`, `PlanEntry`, `PlanRef`, `Checkpoint`, `ApplyOptions` | `Target`, `Issue`, `Ref`, `Comment`, `Snapshot`, `IssueDetail`, `SearchResult`, `TriageResult`, `PrimerResult`, `ComposedBody`, `BodyCheck`, `CreateResult`, `EditResult`, `ReopenResult`, `StartResult`, `CloseResult`, `BlockResult`, `UnblockResult`, `InitResult`, `ApplyResult`, `PlannedEntry`, `AppliedEntry`, `CheckpointState`, `CheckpointEntry`, `MemoryCheckpoint`, `FileCheckpoint`, `RateLimit`, `Edge`, `Backend`, `State`, `EdgeKind`, `ReopenStage` |
+| `tracker` | `Config`, `SnapshotOptions`, `ListFilter`, `SearchRequest`, `TriageRequest`, `Body`, `Sections`, `CreateRequest`, `CreateEpicRequest`, `EditRequest`, `ReopenOptions`, `StartOptions`, `ReleaseOptions`, `CloseOptions`, `BlockOptions`, `InitConfig`, `PlanEntry`, `PlanRef`, `Checkpoint`, `ApplyOptions` | `Target`, `Issue`, `Ref`, `Comment`, `TextFinding`, `Snapshot`, `IssueDetail`, `SearchResult`, `TriageResult`, `PrimerResult`, `ComposedBody`, `BodyCheck`, `CreateResult`, `EditResult`, `ReopenResult`, `StartResult`, `CloseResult`, `BlockResult`, `UnblockResult`, `InitResult`, `ApplyResult`, `PlannedEntry`, `AppliedEntry`, `CheckpointState`, `CheckpointEntry`, `MemoryCheckpoint`, `FileCheckpoint`, `RateLimit`, `Edge`, `Backend`, `State`, `EdgeKind`, `ReopenStage` |
 | `pr` | `Config`, `CreateRequest`, `AmendRequest`, `Sections`, `Body`, `BodyEdit` | `Client`, `CreateResult`, `AmendResult`, `ComposedBody`, `BodyCheck` |
 | `migrate` | `Config`, `BeadsRequest`, `LocalRequest`, `RunRequest`, `Item`, `Options`, `Target` | `Migrator`, `Result`, `PlannedItem` |
 
 `IssueDetail` carries the issue, an epic's children, the next workable child
-(`Next`), advisory findings and snapshot warnings, so `show` and `epic status`
-assemble them the same way. `SearchResult` and `TriageResult` carry the matches
-plus `Total` and `Fetched`. `PrimerResult` carries the live sections and counts,
-the warnings and the backend's static convention text, so the CLI renders a
-primer without owning any of its policy. `Target` is the read-only backend
-report — `Backend`, `Repo`, `Dir`, `MainCheckout`, and the local tracker's stable
-`ID` — and `RateLimit` is the GitHub client's last observed budget.
+(`Next`), source-attributed `TextFinding` values and snapshot warnings, so
+`show` and `epic status` assemble them the same way. `SearchResult` and
+`TriageResult` carry the matches plus `Total` and `Fetched`; `TriageResult`
+also carries the advisory `TextFinding` values for the untriaged text it
+returns. `PrimerResult` carries the live sections and counts, the warnings and
+the backend's static convention text, so the CLI renders a primer without
+owning any of its policy. `Target` is the read-only backend report — `Backend`,
+`Repo`, `Dir`, `MainCheckout`, and the local tracker's stable `ID` — and
+`RateLimit` is the GitHub client's last observed budget.
+
+`InitResult` reports the backend initialization ran against, the local tracker's
+directory, the convention labels the run created and the notices it would have
+printed; the notices are data because the library never writes to stdout or
+stderr. Initializing a repo whose tracker belongs to another backend is refused
+with `InitializedElsewhereError` rather than creating a second tracker no command
+would read, so a migrated repo's archive is never made live again.
 
 `pr.Config` takes the same worktree, repository, backend pin, actor, notice and
 transport inputs as `tracker.Config`; `pr.Open` opens the tracker it reads and
@@ -936,13 +945,16 @@ read.
 ### Warnings and findings
 
 A warning is a typed value on the result, never a line printed by a library call
-and never an error. A finding is advisory input about text being written; it
-never blocks the write and never rewrites the author's words. Both carry a
-`Kind`, so a consumer decides whether to surface, log or ignore them.
+and never an error. A finding is advisory input about text — written by a
+caller, or read from an issue — and never blocks a write or rewrites the
+author's words. Warnings carry a `Kind`; advisory `TextFinding` values carry
+the independent flags the scan tests, so a consumer can filter on the
+dimension it cares about.
 
 | Package | Type | Kinds |
 |---|---|---|
-| `tracker` | `Warning` + `WarningKind` | `WarnDependencyCycle`, `WarnBlockersCapped`, `WarnSubIssuesCapped` |
+| `tracker` | `Warning` + `WarningKind` | `WarnMultiPriority`, `WarnMultiType`, `WarnInProgressEpic` (primer contradictions), `WarnDependencyCycle`, `WarnBlockersCapped`, `WarnSubIssuesCapped` |
+| `tracker` | `TextFinding` | Source-attributed advisory character findings, flagged independently: zero-width, bidi controls, Unicode tags, confusable characters |
 | `tracker` | `Finding` + `FindingKind` | `FindingUnmarkedCode` (prose that looks like code and should be in a backtick span) |
 | `pr` | `Warning` + `WarningKind` | `WarnBranchPrefix`, `WarnUnclaimed`, `WarnUnrelatedSet`, `WarnNoSectionDefaults`, `WarnPrimaryTitle`, `WarnMissingTesting`, `WarnMissingRisk` |
 | `migrate` | `Warning` + `WarningKind` | `WarnEdgeDropped`, `WarnWriteFailed`, `WarnBodyEdited`, `WarnAlreadyClosed` |
@@ -978,7 +990,8 @@ that the CLI cannot map is a bug in the mapping, not a reason to widen the table
 `BlockedError`, `CycleError`, `UnverifiableCycleError`, `NotOpenError`,
 `EpicError`, `UntriagedError`, `NotClaimedError`, `NotOwnerError`,
 `OpenChildrenError`, `PartialWriteError`, `PartialReleaseError`,
-`PartialCloseError`, `LockTimeoutError`, `MigratedError`. A workflow in another
+`PartialCloseError`, `LockTimeoutError`, `MigratedError`,
+`InitializedElsewhereError`. A workflow in another
 package that adds a refusal names its own type and wraps the tracker cause
 rather than inventing a second auth or not-found error:
 
@@ -1017,14 +1030,13 @@ checkpoint and a run, so callers run one migration at a time per migrator.
   advisory `.hew/migrating` marker; a writer that waits reports it and then fails
   with `LockTimeoutError` rather than proceeding.
 - **GitHub backend.** One `Open` builds one client shared by every operation on
-  it. Until #279 ships, the guarantees in this bullet are the target and not yet
-  true: the node-ID cache is an unsynchronized map, so a GitHub-backed `Tracker`
-  must not be shared across goroutines, and there is no token refresh, secondary
-  rate-limit retry, `RateLimit` or `Config.Transport` yet. Once it ships, the
-  client is safe for concurrent use: the node-ID cache is synchronized,
+  it. The client is safe for concurrent use: the node-ID cache is synchronized,
   `Viewer` is cached, an expired token is refreshed or rebuilt on an auth error,
   and a 403/429 secondary limit is retried with `Retry-After` backoff up to the
   caller's deadline; the observed budget is available as `tracker.RateLimit`.
+  `Config.Transport` replaces the HTTP transport the client sends through, so a
+  consumer's tests run `Open` and `Init` with neither the network nor a `gh`
+  process.
   GitHub offers no transaction across calls: a claim is check-then-act, `Start`
   re-reads the issue afterwards, and two workers racing the same issue can both
   observe success; with a shared login the tracker cannot even tell them apart.

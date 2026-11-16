@@ -858,8 +858,9 @@ func TestSetRejectsAnExplicitlyEmptyTitle(t *testing.T) {
 	}
 }
 
-// TestBlankTitlesAreRefusedWhoeverCalls: the check lives in validateTitle, so
-// a caller that never sets TitleSet, and create, are covered too.
+// TestBlankTitlesAreRefusedWhoeverCalls: the check lives in tracker's title
+// validation, so a caller that never sets TitleSet, and create, are covered
+// too.
 func TestBlankTitlesAreRefusedWhoeverCalls(t *testing.T) {
 	f := newFake(issue(1, "Work", "P2", "bug"))
 	app, _, _ := newApp(f)
@@ -2132,6 +2133,51 @@ func assertNoIssues(t *testing.T, store gh.IssueStore) {
 	}
 }
 
+// TestCreateReferenceFailuresNameTheFlag keeps the adapter's half of the
+// create contract: the library reports which number it could not resolve, and
+// the command says which flag carried it.
+func TestCreateReferenceFailuresNameTheFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts CreateOpts
+		flag string
+	}{
+		{"parent", CreateOpts{Title: "T", Type: "bug", Parent: 99}, "--parent:"},
+		{"discovered-from", CreateOpts{Title: "T", Type: "bug", DiscoveredFrom: 99}, "--discovered-from:"},
+		{"blocked-by", CreateOpts{Title: "T", Type: "bug", BlockedBy: []int{99}}, "--blocked-by:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, _, _ := newApp(newFake())
+			err := app.Create(ctx, tc.opts)
+			if err == nil || !strings.Contains(err.Error(), tc.flag) {
+				t.Errorf("err = %v, want it to name %s", err, tc.flag)
+			}
+			if got := ExitCode(err); got != ExitGeneric {
+				t.Errorf("exit code = %d, want %d", got, ExitGeneric)
+			}
+		})
+	}
+}
+
+// TestCreateDefaultTitleRefusalKeepsItsWording: the rule moved into the
+// library, but the command's message for a missing title is part of what it
+// has always said.
+func TestCreateDefaultTitleRefusalKeepsItsWording(t *testing.T) {
+	app, _, _ := newApp(newFake())
+	usageError(t, app.Create(ctx, CreateOpts{Type: "bug"}), "--title is required")
+}
+
+func TestEpicCreateMissingChildNamesTheFlag(t *testing.T) {
+	app, _, _ := newApp(newFake())
+	err := app.EpicCreate(ctx, EpicCreateOpts{Title: "Big", Children: []int{99}})
+	if err == nil || !strings.Contains(err.Error(), "--children:") {
+		t.Errorf("err = %v, want it to name --children", err)
+	}
+	if got := ExitCode(err); got != ExitGeneric {
+		t.Errorf("exit code = %d, want %d", got, ExitGeneric)
+	}
+}
+
 func TestInit(t *testing.T) {
 	f := newFake()
 	app, out, _ := newApp(f)
@@ -2187,6 +2233,37 @@ func TestInitJSON(t *testing.T) {
 	}
 	if got.Backend != "github" || got.Path != "" {
 		t.Errorf("JSON = %+v; want the github backend with no local path", got)
+	}
+}
+
+// init delegates the label bootstrap to tracker.Init, which types an unusable
+// credential; the command still has to exit 4 so agent loops can tell it apart
+// from a failed write.
+func TestInitMapsALibraryAuthFailureToExitAuth(t *testing.T) {
+	f := newFake()
+	f.failOn["ListLabels"] = &gh.AuthError{Err: errors.New("bad token")}
+	app, out, _ := newApp(f)
+	err := app.Init(ctx)
+	if got := ExitCode(err); got != ExitAuth {
+		t.Errorf("exit = %d (%v), want %d", got, err, ExitAuth)
+	}
+	if out.Len() != 0 {
+		t.Errorf("output = %q; want nothing on a refused init", out.String())
+	}
+}
+
+// A label that cannot be created names that label and the backend cause, and
+// nothing claims success: the next run resumes where this one stopped.
+func TestInitNamesTheLabelWhoseCreationFailed(t *testing.T) {
+	f := newFake()
+	f.failOn["CreateLabel"] = errors.New("boom")
+	app, out, _ := newApp(f)
+	err := app.Init(ctx)
+	if err == nil || !strings.Contains(err.Error(), conventions.Labels[0].Name) || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("err = %v, want the label and the cause", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("output = %q; want no snippet after a failed bootstrap", out.String())
 	}
 }
 

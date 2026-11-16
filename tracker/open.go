@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/cli/go-gh/v2/pkg/repository"
 
 	"github.com/lumberbarons/hew/internal/gh"
@@ -39,9 +40,11 @@ type Config struct {
 	// Notice receives lock-wait and migration notices. Nil discards them; the
 	// tracker never writes to stderr.
 	Notice io.Writer
-	// Transport carries every GitHub API request. Nil means the default HTTP
-	// client; an in-process consumer's tests supply an httptest server's
-	// transport to answer GitHub without the network or a `gh` process.
+	// Transport carries every GitHub API request, overriding the HTTP transport
+	// the GitHub client sends through. Nil uses go-gh's default — the process's
+	// network and gh's stored credentials; an in-process consumer's tests supply
+	// an httptest server's transport to answer GitHub without either. A local
+	// tracker ignores it.
 	Transport http.RoundTripper
 }
 
@@ -91,9 +94,11 @@ func Open(ctx context.Context, cfg Config) (*Tracker, error) {
 }
 
 // WrapAs makes a Tracker around an already-open store, as actor: the seam
-// hew's own CLI uses for writes, where it opens the store once for every
-// command and already knows which backend it opened. External callers use
-// Open, which also resolves the worktree and the backend.
+// hew's own CLI uses for writes and for the reads it delegates to Tracker,
+// where it opens the store once for every command and already knows which
+// backend it opened. External callers use Open, which also resolves the
+// worktree and the backend. A read never resolves the actor, so it may be
+// empty here.
 //
 // An empty actor defers to the store's Viewer, read when an operation first
 // needs the identity rather than at WrapAs. That is what keeps the CLI's
@@ -147,9 +152,10 @@ func openGitHub(ctx context.Context, cfg Config, target Target) (*Tracker, error
 }
 
 // newGitHub builds the GitHub client. Tests replace it to avoid credentials
-// and the network.
+// and the network; a caller's own transport (Config.Transport) is passed
+// through to go-gh, which keeps credential resolution unchanged.
 var newGitHub = func(repo gh.Repo, transport http.RoundTripper) (gh.IssueStore, error) {
-	return gh.NewWithTransport(repo, transport)
+	return gh.NewWithOptions(repo, api.ClientOptions{Transport: transport})
 }
 
 // githubRepo resolves the GitHub repository from the explicit spec, or from
@@ -161,6 +167,14 @@ func (c Config) githubRepo(target Target) (gh.Repo, error) {
 			return gh.Repo{}, &InvalidInputError{Field: "repo", Reason: `must be "owner/name"`}
 		}
 		return gh.Repo{Owner: owner, Name: name}, nil
+	}
+	// Detect already read the origin remote for its report; reuse it rather
+	// than asking git twice.
+	if target.Repo != "" {
+		owner, name, ok := strings.Cut(target.Repo, "/")
+		if ok && owner != "" && name != "" {
+			return gh.Repo{Owner: owner, Name: name}, nil
+		}
 	}
 	if target.MainCheckout == "" {
 		return gh.Repo{}, &InvalidInputError{Field: "repo", Reason: "must be owner/name when the worktree is not a git checkout"}
