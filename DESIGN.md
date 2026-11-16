@@ -1015,7 +1015,11 @@ checkpoint and a run, so callers run one migration at a time per migrator.
   advisory `.hew/migrating` marker; a writer that waits reports it and then fails
   with `LockTimeoutError` rather than proceeding.
 - **GitHub backend.** One `Open` builds one client shared by every operation on
-  it. The client is safe for concurrent use: the node-ID cache is synchronized,
+  it. Until #279 ships, the guarantees in this bullet are the target and not yet
+  true: the node-ID cache is an unsynchronized map, so a GitHub-backed `Tracker`
+  must not be shared across goroutines, and there is no token refresh, secondary
+  rate-limit retry, `RateLimit` or `Config.Transport` yet. Once it ships, the
+  client is safe for concurrent use: the node-ID cache is synchronized,
   `Viewer` is cached, an expired token is refreshed or rebuilt on an auth error,
   and a 403/429 secondary limit is retried with `Retry-After` backoff up to the
   caller's deadline; the observed budget is available as `tracker.RateLimit`.
@@ -1080,7 +1084,7 @@ checkpoint and a run, so callers run one migration at a time per migrator.
   own; the CLI's `--repo` selects a repository, never a credential. A missing or
   expired credential is `AuthError`, which the CLI maps to exit 4. The local
   backend needs no `gh`, credentials or network. `Config.Transport`
-  (`http.RoundTripper`) is the test seam: a consumer's tests serve GitHub
+  (`http.RoundTripper`, not yet on `tracker.Config`) is the test seam: a consumer's tests serve GitHub
   responses from an `httptest` transport with no network and no `gh` process,
   and the CLI leaves it nil. github.com is the only host in the contract; an
   enterprise host would be a new field and a new guarantee, not a hidden
