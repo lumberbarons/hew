@@ -261,7 +261,13 @@ func rateLimitWait(err error, attempt int, base time.Duration) (time.Duration, b
 	default:
 		return 0, false
 	}
-	if wait, ok := parseRetryAfter(httpErr.Headers.Get("Retry-After")); ok {
+	if wait, ok := retryAfterHint(httpErr.Headers.Get("Retry-After")); ok {
+		// A limit that will not clear within maxRetryWait cannot be waited
+		// out: sleeping a capped slice of it and re-sending is refused again,
+		// at the cost of blocking the caller for every attempt.
+		if wait > maxRetryWait {
+			return 0, false
+		}
 		return wait, true
 	}
 	return min(base<<attempt, maxRetryWait), true
@@ -283,15 +289,22 @@ func secondaryRateLimited(e *api.HTTPError) bool {
 // delta-seconds or as an HTTP date. Absent or unparseable means no hint, and
 // the caller falls back to exponential backoff.
 func parseRetryAfter(v string) (time.Duration, bool) {
+	wait, ok := retryAfterHint(v)
+	return min(wait, maxRetryWait), ok
+}
+
+// retryAfterHint is parseRetryAfter without the cap, so a caller can tell a
+// wait it can take from one it cannot.
+func retryAfterHint(v string) (time.Duration, bool) {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return 0, false
 	}
 	if secs, err := strconv.Atoi(v); err == nil {
-		return min(time.Duration(max(secs, 0))*time.Second, maxRetryWait), true
+		return time.Duration(max(secs, 0)) * time.Second, true
 	}
 	if at, err := http.ParseTime(v); err == nil {
-		return min(max(time.Until(at), 0), maxRetryWait), true
+		return max(time.Until(at), 0), true
 	}
 	return 0, false
 }

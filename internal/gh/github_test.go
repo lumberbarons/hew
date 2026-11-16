@@ -1024,6 +1024,40 @@ func TestRateLimitedRequestBacksOffExponentially(t *testing.T) {
 	}
 }
 
+// A Retry-After longer than the client will wait cannot be ridden out:
+// sleeping a capped slice of it and re-sending is refused again. The refusal
+// surfaces at once instead of blocking the caller for every attempt.
+func TestRateLimitedRequestBeyondMaxWaitIsNotRetried(t *testing.T) {
+	f := newFakeServer(t)
+	var mu sync.Mutex
+	attempts := 0
+	f.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		attempts++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "3600")
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, `{"message":"You have exceeded a secondary rate limit"}`)
+	})
+	c := f.client(t)
+	var waits []time.Duration
+	c.sleep = func(ctx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return nil
+	}
+
+	if _, err := c.Viewer(context.Background()); err == nil {
+		t.Fatal("Viewer() succeeded against a rate limit that outlasts the retry window")
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1 (no retry into a refusal that cannot clear)", attempts)
+	}
+	if len(waits) != 0 {
+		t.Errorf("waits = %v, want none", waits)
+	}
+}
+
 // A 403 that carries no rate-limit signal is a permission failure. Retrying it
 // would only delay the error a reviewer needs to see.
 func TestForbiddenWithoutRateLimitSignalIsNotRetried(t *testing.T) {
