@@ -108,6 +108,13 @@ func (t *Tracker) ApplyPlan(ctx context.Context, entries []PlanEntry, opts Apply
 	if err := t.verifyPlanCheckpoint(ctx, checkpoint, entries, digest); err != nil {
 		return ApplyResult{}, err
 	}
+	// The write path's title and area rules live here so a caller that builds
+	// entries in code cannot bypass them; pending entries only, after the
+	// checkpoint is verified, so a resume never re-gates what it already made.
+	entries, err := validatePendingPlanFields(entries, checkpoint)
+	if err != nil {
+		return ApplyResult{}, err
+	}
 	if err := t.requirePlanRefs(ctx, entries, checkpoint); err != nil {
 		return ApplyResult{}, err
 	}
