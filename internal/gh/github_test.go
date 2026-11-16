@@ -873,6 +873,47 @@ func TestClientSafeForConcurrentUse(t *testing.T) {
 	}
 }
 
+// A credential refresh replaces both API clients while other goroutines are
+// mid-request. Each request must hold the client it started with; the race
+// detector is the assertion for the pointer swap.
+func TestCredentialRefreshIsSafeAlongsideRequests(t *testing.T) {
+	f := newFakeServer(t)
+	f.graphql["issues(states:"] = fmt.Sprintf(
+		`{"data":{"repository":{"issues":{"pageInfo":{"hasNextPage":false},"nodes":[%s]}}}}`, issueJSON(1, ""))
+	f.rest["POST /repos/o/r/issues/5/comments"] = restResponse{201, `{}`}
+	c := f.client(t)
+
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	errs := make(chan error, 32)
+	for i := 0; i < 8; i++ {
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			if err := c.refreshCredentials(); err != nil {
+				errs <- err
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if _, err := c.ListIssues(ctx, []IssueState{StateOpen}); err != nil {
+				errs <- err
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if err := c.Comment(ctx, 5, "a note"); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("call alongside a refresh failed: %v", err)
+	}
+}
+
 // go-gh resolves the token once, at construction. A client that outlives its
 // token has to rebuild from freshly resolved credentials rather than reuse the
 // dead one, or every later command fails until the process restarts.
@@ -1058,6 +1099,39 @@ func TestRateLimitedRequestBeyondMaxWaitIsNotRetried(t *testing.T) {
 	}
 }
 
+// A REST call is re-sent with its payload intact: the request body is a
+// stream the first attempt consumes, so each attempt needs its own reader.
+func TestRateLimitedRESTRequestResendsBody(t *testing.T) {
+	f := newFakeServer(t)
+	var mu sync.Mutex
+	var bodies []string
+	f.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(b))
+		n := len(bodies)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if n == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"message":"You have exceeded a secondary rate limit"}`)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{}`)
+	})
+	c := f.client(t)
+	c.sleep = func(ctx context.Context, d time.Duration) error { return nil }
+
+	if err := c.Comment(context.Background(), 5, "a note"); err != nil {
+		t.Fatalf("Comment() = %v, want the retry to succeed", err)
+	}
+	want := `{"body":"a note"}`
+	if len(bodies) != 2 || bodies[0] != want || bodies[1] != want {
+		t.Errorf("request bodies = %q, want the payload %s sent twice", bodies, want)
+	}
+}
+
 // A 403 that carries no rate-limit signal is a permission failure. Retrying it
 // would only delay the error a reviewer needs to see.
 func TestForbiddenWithoutRateLimitSignalIsNotRetried(t *testing.T) {
@@ -1240,12 +1314,15 @@ func TestSleepContextStopsOnCancellation(t *testing.T) {
 // refusal to retry, not the permission failure a bare 403 is.
 func TestForbiddenRateLimitIsRetried(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		header map[string]string
+		name    string
+		header  map[string]string
+		message string
 	}{
-		{"retry-after", map[string]string{"Retry-After": "2"}},
-		{"exhausted budget", map[string]string{"X-RateLimit-Remaining": "0"}},
-		{"message", nil},
+		// The header cases carry a message with no rate-limit wording, so the
+		// header is the only signal that can make the 403 retryable.
+		{"retry-after", map[string]string{"Retry-After": "2"}, "Forbidden"},
+		{"exhausted budget", map[string]string{"X-RateLimit-Remaining": "0"}, "Forbidden"},
+		{"message", nil, "You have exceeded a secondary rate limit"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFakeServer(t)
@@ -1262,7 +1339,7 @@ func TestForbiddenRateLimitIsRetried(t *testing.T) {
 						w.Header().Set(k, v)
 					}
 					w.WriteHeader(http.StatusForbidden)
-					fmt.Fprint(w, `{"message":"You have exceeded a secondary rate limit"}`)
+					fmt.Fprintf(w, `{"message":%q}`, tc.message)
 					return
 				}
 				fmt.Fprint(w, `{"data":{"viewer":{"login":"lumberbarons"}}}`)
