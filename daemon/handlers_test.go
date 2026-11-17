@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lumberbarons/hew/daemon"
 	"github.com/lumberbarons/hew/pr"
+	"github.com/lumberbarons/hew/tracker"
 )
 
 // rawCall sends body verbatim, so a test can send what a client should not.
@@ -72,7 +74,7 @@ func TestBadIssueNumbersAreRefusedOnEveryNumberedRoute(t *testing.T) {
 		{"DELETE", "/api/issues/1/blockers/{n}"},
 	}
 	for _, r := range routes {
-		for _, bad := range []string{"abc", "0", "-3"} {
+		for _, bad := range []string{"abc", "0", "-3", "12abc", "1x", "+5", "007", "1.5"} {
 			status, res := e.rawCall(r.method, fill(r.path, bad), `{}`)
 			if status != 400 || res["error"] != "invalid_input" {
 				t.Errorf("%s %s (n=%s) = %d %v, want 400 invalid_input", r.method, r.path, bad, status, res)
@@ -465,5 +467,88 @@ func TestPullRequestErrorsAreClassified(t *testing.T) {
 	stub.err = errors.New("boom")
 	if status, _ := e.call("POST", "/api/pr", "", map[string]any{}); status != 500 {
 		t.Errorf("unclassified failure = %d, want 500", status)
+	}
+}
+
+func TestAnActorTooLongToUseIsRefusedNotReplaced(t *testing.T) {
+	e := newEnv(t, false)
+	e.create("Claimable", nil)
+
+	// Ignoring the header would act as the daemon's own identity, so a claim
+	// meant for someone else would be recorded under the wrong name.
+	long := strings.Repeat("a", 101)
+	status, res := e.call("POST", "/api/issues/1/start", long, map[string]any{})
+	if status != 400 || res["error"] != "invalid_input" || res["fields"].(map[string]any)["field"] != "X-Hew-Actor" {
+		t.Fatalf("start as a 101-byte actor = %d %v, want 400 naming the header", status, res)
+	}
+	_, d := e.call("GET", "/api/issues/1", "", nil)
+	if as := d["issue"].(map[string]any)["assignees"].([]any); len(as) != 0 {
+		t.Errorf("a refused request still claimed the issue for %v", as)
+	}
+
+	boundary := strings.Repeat("a", 100)
+	if status, res = e.call("POST", "/api/issues/1/start", boundary, map[string]any{}); status != 200 || res["claimant"] != boundary {
+		t.Errorf("start as a 100-byte actor = %d %v, want it accepted as that actor", status, res)
+	}
+}
+
+func TestEpicDryRunGivesTheSameAdviceAsAnIssue(t *testing.T) {
+	e := newEnv(t, false)
+	body := map[string]any{"goal": "Edit internal/cli/pr.go", "doneWhen": []string{"x"}}
+	for path, payload := range map[string]map[string]any{
+		"/api/epics?dryRun=1":  {"title": "Big", "body": body},
+		"/api/issues?dryRun=1": {"title": "Small", "type": "task", "body": body},
+	} {
+		status, res := e.call("POST", path, "", payload)
+		findings, _ := res["findings"].([]any)
+		if status != 200 || len(findings) != 1 {
+			t.Errorf("POST %s = %d %v, want the unmarked-path advice", path, status, res)
+		}
+	}
+}
+
+func TestAnOversizedBodyIs413(t *testing.T) {
+	e := newEnv(t, false)
+	huge := `{"title":"` + strings.Repeat("a", 2<<20) + `"}`
+	status, res := e.rawCall("POST", "/api/issues", huge)
+	if status != http.StatusRequestEntityTooLarge || res["error"] != "too_large" {
+		t.Errorf("a 2 MiB body = %d %v, want 413 too_large", status, res)
+	}
+}
+
+func TestResolveTargetFollowsTheBackendBeingServed(t *testing.T) {
+	_, local := checkout(t, false)
+	if local.Backend != tracker.BackendLocal || local.ID == "" {
+		t.Fatalf("setup: local target = %+v", local)
+	}
+	root := local.MainCheckout
+
+	got, err := daemon.ResolveTarget(root, "")
+	if err != nil || got.Backend != tracker.BackendLocal || got.ID != local.ID {
+		t.Errorf("without --repo = %+v, %v; want the local tracker", got, err)
+	}
+	// --repo serves GitHub, so describing the checkout's local tracker would
+	// report a directory and id the daemon is not using.
+	got, err = daemon.ResolveTarget(root, "o/r")
+	if err != nil || got.Backend != tracker.BackendGitHub || got.Repo != "o/r" || got.Dir != "" || got.ID != "" {
+		t.Errorf("with --repo = %+v, %v; want GitHub o/r with no local dir or id", got, err)
+	}
+	if _, err = daemon.ResolveTarget("", "o/r"); err == nil {
+		t.Error("an empty directory is still an error under --repo")
+	}
+}
+
+func TestValidateOptionsRefusesContradictoryFlags(t *testing.T) {
+	if err := daemon.ValidateOptions("127.0.0.1:7777", "", true); err != nil {
+		t.Errorf("--init-local alone: %v", err)
+	}
+	if err := daemon.ValidateOptions("127.0.0.1:7777", "o/r", false); err != nil {
+		t.Errorf("--repo alone: %v", err)
+	}
+	if err := daemon.ValidateOptions("127.0.0.1:7777", "o/r", true); err == nil {
+		t.Error("--repo with --init-local was accepted")
+	}
+	if err := daemon.ValidateOptions("0.0.0.0:7777", "", false); err == nil {
+		t.Error("a non-loopback address was accepted")
 	}
 }

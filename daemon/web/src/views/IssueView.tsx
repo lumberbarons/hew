@@ -64,7 +64,7 @@ function IssueBody({ d, reload }: { d: Detail; reload: () => void }) {
       {findings}
       <div className="card prows">
         {open && <Work d={d} reload={reload} claimed={claimed} />}
-        <Closer d={d} reload={reload} open={open} />
+        <Closer key={open ? 'close' : 'reopen'} d={d} reload={reload} open={open} />
         <Dependencies d={d} reload={reload} />
       </div>
       <EditPanel key={`${i.title}|${i.priority}|${i.type}`} d={d} reload={reload} open={open} />
@@ -214,13 +214,14 @@ function Dependencies({ d, reload }: { d: Detail; reload: () => void }) {
       toast('Enter the number of the issue that blocks this one.', 'bad');
       return;
     }
-    if (
-      await act(
-        () => api('POST', `/api/issues/${n}/blockers`, { blockers: [m] }),
-        `Blocked on ${num(m)}`,
-      )
-    )
+    const added = await act(
+      () => api('POST', `/api/issues/${n}/blockers`, { blockers: [m] }),
+      `Blocked on ${num(m)}`,
+    );
+    if (added) {
+      setBlocker('');
       reload();
+    }
   };
 
   return (

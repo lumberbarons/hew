@@ -129,3 +129,15 @@ test('the daemon refuses a cross-site write', async ({ request }) => {
   });
   expect(res.status()).toBe(403);
 });
+
+test('clicking through the actor box does not discard a half-written issue', async ({ page }) => {
+  await page.goto('/#/new');
+  await page.getByLabel('Title').fill('A draft I have not sent');
+  await page.getByLabel('Goal').fill('Still typing this');
+
+  await page.getByLabel('Acting as').click();
+  await page.getByLabel('Title').click();
+
+  await expect(page.getByLabel('Title')).toHaveValue('A draft I have not sent');
+  await expect(page.getByLabel('Goal')).toHaveValue('Still typing this');
+});

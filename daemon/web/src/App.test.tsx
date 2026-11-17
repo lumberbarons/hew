@@ -153,4 +153,48 @@ describe('App', () => {
     mount();
     expect(await screen.findByText('offline')).toBeInTheDocument();
   });
+
+  it('keeps a half-written issue when the actor box is clicked and left unchanged', async () => {
+    const { calls } = mockApi(routes);
+    window.location.hash = '#/new';
+    const { user } = mount();
+    const title = await screen.findByLabelText('Title');
+    await user.type(title, 'A long draft I have not sent');
+
+    await user.click(screen.getByLabelText('Acting as'));
+    await user.tab(); // leaves the box without editing it
+    await user.click(document.body);
+
+    expect(screen.getByLabelText('Title')).toHaveValue('A long draft I have not sent');
+    expect(calls.filter((c) => c.path === '/api/config')).toHaveLength(1);
+  });
+
+  it('still remounts when the actor really changes', async () => {
+    mockApi({ ...routes, 'GET /api/primer': fx.primer });
+    window.location.hash = '#/new';
+    const { user } = mount();
+    await user.type(await screen.findByLabelText('Title'), 'draft');
+    const who = screen.getByLabelText('Acting as');
+    await user.clear(who);
+    await user.type(who, 'alice{Enter}');
+    expect(await screen.findByLabelText('Title')).toHaveValue('');
+  });
+
+  it('shows a page that failed to render as a message and keeps the navigation', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const broken = { ...fx.board.ready[0]!, areas: undefined };
+    mockApi({
+      'GET /api/config': fx.config,
+      'GET /api/board': { ...fx.board, ready: [broken] },
+      'GET /api/primer': fx.primer,
+    });
+    mount();
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Primer' })).toBeInTheDocument();
+
+    // Moving to another page clears the error.
+    await goto('#/primer');
+    expect(await screen.findByRole('heading', { name: 'Primer' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
 });

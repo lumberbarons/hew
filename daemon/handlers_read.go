@@ -1,7 +1,7 @@
 package daemon
 
 import (
-	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -21,23 +21,21 @@ type configOut struct {
 	PullRequests  bool `json:"pullRequests"`
 }
 
-func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
-	tr := s.acting(r)
-	writeJSON(w, http.StatusOK, configOut{
-		Backend: string(tr.Backend()), Repo: tr.Repo(), Identity: tr.Identity(),
+func (s *Server) config(q *request[none]) (reply, error) {
+	return ok(configOut{
+		Backend: string(q.tr.Backend()), Repo: q.tr.Repo(), Identity: q.tr.Identity(),
 		Dir: s.target.Dir, MainCheckout: s.target.MainCheckout, ID: s.target.ID,
-		ActorEditable: tr.Backend() == tracker.BackendLocal,
+		ActorEditable: q.tr.Backend() == tracker.BackendLocal,
 		PullRequests:  s.prc != nil,
-	})
+	}), nil
 }
 
-func (s *Server) handlePrimer(w http.ResponseWriter, r *http.Request) {
-	p, err := s.tr.Primer(r.Context())
+func (s *Server) primer(q *request[none]) (reply, error) {
+	p, err := q.tr.Primer(q.ctx)
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	writeJSON(w, http.StatusOK, primerFrom(p))
+	return ok(primerFrom(p)), nil
 }
 
 type boardOut struct {
@@ -49,14 +47,13 @@ type boardOut struct {
 	Warnings  []warningOut    `json:"warnings"`
 }
 
-// handleBoard is the landing view: one snapshot sliced into the sections
-// `hew list` orders. Untriaged issues appear only as a count, never as text;
-// Triage is the one read that returns them.
-func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
-	snap, err := s.tr.Snapshot(r.Context(), tracker.SnapshotOptions{})
+// board is the landing view: one snapshot sliced into the sections `hew list`
+// orders. Untriaged issues appear only as a count, never as text; triage is
+// the one read that returns them.
+func (s *Server) board(q *request[none]) (reply, error) {
+	snap, err := q.tr.Snapshot(q.ctx, tracker.SnapshotOptions{})
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
 	untriaged := 0
 	for _, i := range snap.Issues() {
@@ -64,24 +61,27 @@ func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
 			untriaged++
 		}
 	}
-	writeJSON(w, http.StatusOK, boardOut{
+	return ok(boardOut{
 		Ready: lean(snap.Ready()), Claimed: lean(snap.Claimed()),
 		Blocked: lean(snap.Blocked()), Epics: lean(snap.Epics()),
 		Untriaged: untriaged, Warnings: warningsOut(snap.Warnings()),
-	})
+	}), nil
 }
 
-func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
-	snap, err := s.tr.Snapshot(r.Context(), tracker.SnapshotOptions{})
+// limited applies ?limit=N, ignoring a missing, malformed or non-positive one.
+func limited(issues []tracker.Issue, query url.Values) []tracker.Issue {
+	if lim, err := strconv.Atoi(query.Get("limit")); err == nil && lim > 0 && lim < len(issues) {
+		return issues[:lim]
+	}
+	return issues
+}
+
+func (s *Server) ready(q *request[none]) (reply, error) {
+	snap, err := q.tr.Snapshot(q.ctx, tracker.SnapshotOptions{})
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	ready := snap.Ready()
-	if lim, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && lim > 0 && lim < len(ready) {
-		ready = ready[:lim]
-	}
-	writeJSON(w, http.StatusOK, lean(ready))
+	return ok(lean(limited(snap.Ready(), q.query))), nil
 }
 
 // states parses ?state=open|closed|all. The snapshot default (open only) and
@@ -101,73 +101,54 @@ func states(q string, fallback []tracker.State) ([]tracker.State, error) {
 	return nil, &tracker.InvalidInputError{Field: "state", Reason: "must be open, closed or all"}
 }
 
-func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	st, err := states(q.Get("state"), nil)
+func (s *Server) list(q *request[none]) (reply, error) {
+	st, err := states(q.query.Get("state"), nil)
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	filter := tracker.ListFilter{Label: q.Get("label")}
-	if e := q.Get("epic"); e != "" {
+	filter := tracker.ListFilter{Label: q.query.Get("label")}
+	if e := q.query.Get("epic"); e != "" {
 		if filter.Epic, err = strconv.Atoi(e); err != nil || filter.Epic <= 0 {
-			writeErr(w, &tracker.InvalidInputError{Field: "epic", Reason: "must be a positive issue number"})
-			return
+			return reply{}, &tracker.InvalidInputError{Field: "epic", Reason: "must be a positive issue number"}
 		}
 	}
-	snap, err := s.tr.Snapshot(r.Context(), tracker.SnapshotOptions{States: st})
+	snap, err := q.tr.Snapshot(q.ctx, tracker.SnapshotOptions{States: st})
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	issues := snap.List(filter)
-	if lim, err := strconv.Atoi(q.Get("limit")); err == nil && lim > 0 && lim < len(issues) {
-		issues = issues[:lim]
-	}
-	writeJSON(w, http.StatusOK, lean(issues))
+	return ok(lean(limited(snap.List(filter), q.query))), nil
 }
 
-func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
-	n, err := number(r, "n")
+func (s *Server) detail(q *request[none]) (reply, error) {
+	d, err := q.tr.Detail(q.ctx, q.n)
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	d, err := s.tr.Detail(r.Context(), n)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, detailFrom(d))
+	return ok(detailFrom(d)), nil
 }
 
-func (s *Server) handleEpics(w http.ResponseWriter, r *http.Request) {
-	st, err := states(r.URL.Query().Get("state"), nil)
+func (s *Server) epics(q *request[none]) (reply, error) {
+	st, err := states(q.query.Get("state"), nil)
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	snap, err := s.tr.Snapshot(r.Context(), tracker.SnapshotOptions{States: st})
+	snap, err := q.tr.Snapshot(q.ctx, tracker.SnapshotOptions{States: st})
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	writeJSON(w, http.StatusOK, lean(snap.Epics()))
+	return ok(lean(snap.Epics())), nil
 }
 
-func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	st, err := states(q.Get("state"), nil)
+func (s *Server) search(q *request[none]) (reply, error) {
+	st, err := states(q.query.Get("state"), nil)
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	res, err := s.tr.Search(r.Context(), tracker.SearchRequest{Terms: strings.TrimSpace(q.Get("q")), States: st})
+	res, err := q.tr.Search(q.ctx, tracker.SearchRequest{Terms: strings.TrimSpace(q.query.Get("q")), States: st})
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	writeJSON(w, http.StatusOK, listOut{Issues: lean(res.Issues), Total: res.Total, Fetched: res.Fetched})
+	return ok(listOut{Issues: lean(res.Issues), Total: res.Total, Fetched: res.Fetched}), nil
 }
 
 type triageOut struct {
@@ -175,16 +156,15 @@ type triageOut struct {
 	TextFindings []textFindingOut `json:"textFindings"`
 }
 
-// handleTriage is the one route that returns untriaged text. The UI says so
-// before it calls it, as the CLI's primer does.
-func (s *Server) handleTriage(w http.ResponseWriter, r *http.Request) {
-	res, err := s.tr.Triage(r.Context(), tracker.TriageRequest{Search: strings.TrimSpace(r.URL.Query().Get("q"))})
+// triage is the one route that returns untriaged text. The UI says so before
+// it calls it, as the CLI's primer does.
+func (s *Server) triage(q *request[none]) (reply, error) {
+	res, err := q.tr.Triage(q.ctx, tracker.TriageRequest{Search: strings.TrimSpace(q.query.Get("q"))})
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	writeJSON(w, http.StatusOK, triageOut{
+	return ok(triageOut{
 		listOut:      listOut{Issues: lean(res.Issues), Total: res.Total, Fetched: res.Fetched},
 		TextFindings: textFindingsOut(res.TextFindings),
-	})
+	}), nil
 }

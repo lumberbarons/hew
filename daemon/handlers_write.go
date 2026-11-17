@@ -1,7 +1,7 @@
 package daemon
 
 import (
-	"net/http"
+	"encoding/json"
 
 	"github.com/lumberbarons/hew/pr"
 	"github.com/lumberbarons/hew/tracker"
@@ -24,71 +24,56 @@ type epicIn struct {
 	Body     bodyIn `json:"body"`
 }
 
-// dryRun reports whether the caller asked to validate without writing.
-func dryRun(r *http.Request) bool { return r.URL.Query().Get("dryRun") == "1" }
-
 type checkOut struct {
 	OK       bool         `json:"ok"`
 	Findings []findingOut `json:"findings"`
 }
 
-func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
-	var in createIn
-	if err := decode(r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
-	tr := s.acting(r)
+func (s *Server) create(q *request[createIn]) (reply, error) {
+	in := q.in
 	req := tracker.CreateRequest{
 		Title: in.Title, Type: in.Type, Priority: in.Priority, Areas: in.Areas,
 		Body: in.Body.body(in.DiscoveredFrom), Parent: in.Parent,
 		BlockedBy: in.BlockedBy, DiscoveredFrom: in.DiscoveredFrom,
 	}
-	if dryRun(r) {
+	if q.dry {
 		// CheckCreate runs the whole write path's validation, references
 		// included, and writes nothing: the form's live validation.
-		if err := tr.CheckCreate(r.Context(), req); err != nil {
-			writeErr(w, err)
-			return
+		if err := q.tr.CheckCreate(q.ctx, req); err != nil {
+			return reply{}, err
 		}
-		composed, err := tracker.ComposeBody(req.Body)
-		if err != nil {
-			writeErr(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, checkOut{OK: true, Findings: findingsOut(composed.Findings)})
-		return
+		return dryRunResult(req.Body)
 	}
-	res, err := tr.Create(r.Context(), req)
+	res, err := q.tr.Create(q.ctx, req)
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	writeJSON(w, http.StatusCreated, createFrom(res))
+	return created(createFrom(res)), nil
 }
 
-func (s *Server) handleCreateEpic(w http.ResponseWriter, r *http.Request) {
-	var in epicIn
-	if err := decode(r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
-	tr := s.acting(r)
-	req := tracker.CreateEpicRequest{Title: in.Title, Children: in.Children, Body: in.Body.body(0)}
-	if dryRun(r) {
-		if err := tr.CheckCreateEpic(r.Context(), req); err != nil {
-			writeErr(w, err)
-			return
+func (s *Server) createEpic(q *request[epicIn]) (reply, error) {
+	req := tracker.CreateEpicRequest{Title: q.in.Title, Children: q.in.Children, Body: q.in.Body.body(0)}
+	if q.dry {
+		if err := q.tr.CheckCreateEpic(q.ctx, req); err != nil {
+			return reply{}, err
 		}
-		writeJSON(w, http.StatusOK, checkOut{OK: true, Findings: []findingOut{}})
-		return
+		return dryRunResult(req.Body)
 	}
-	res, err := tr.CreateEpic(r.Context(), req)
+	res, err := q.tr.CreateEpic(q.ctx, req)
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	writeJSON(w, http.StatusCreated, createFrom(res))
+	return created(createFrom(res)), nil
+}
+
+// dryRunResult is the answer to a valid dry run: the advice the body would
+// draw, the same for an issue as for an epic.
+func dryRunResult(body tracker.Body) (reply, error) {
+	composed, err := tracker.ComposeBody(body)
+	if err != nil {
+		return reply{}, err
+	}
+	return ok(checkOut{OK: true, Findings: findingsOut(composed.Findings)}), nil
 }
 
 type editIn struct {
@@ -103,193 +88,120 @@ type editIn struct {
 	AllowClosed bool     `json:"allowClosed"`
 }
 
-func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request) {
-	n, err := number(r, "n")
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	var in editIn
-	if err := decode(r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
-	res, err := s.acting(r).Edit(r.Context(), tracker.EditRequest{
-		Issue: n, Priority: in.Priority, Type: in.Type, Title: in.Title, Body: in.Body,
+func (s *Server) edit(q *request[editIn]) (reply, error) {
+	in := q.in
+	res, err := q.tr.Edit(q.ctx, tracker.EditRequest{
+		Issue: q.n, Priority: in.Priority, Type: in.Type, Title: in.Title, Body: in.Body,
 		AddAreas: in.AddAreas, RemoveAreas: in.RemoveAreas, Parent: in.Parent,
 		NoParent: in.NoParent, AllowClosed: in.AllowClosed,
 	})
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"applied": orEmpty(res.Applied), "parentNoop": res.ParentNoop})
+	return ok(map[string]any{"applied": orEmpty(res.Applied), "parentNoop": res.ParentNoop}), nil
 }
 
-func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
-	n, err := number(r, "n")
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	var in struct {
-		Priority string `json:"priority"`
-		Force    bool   `json:"force"`
-	}
-	if err := decode(r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
-	res, err := s.acting(r).Start(r.Context(), n, tracker.StartOptions{Priority: in.Priority, Force: in.Force})
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"issue": res.Issue, "claimant": res.Claimant})
+type startIn struct {
+	Priority string `json:"priority"`
+	Force    bool   `json:"force"`
 }
 
-func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request) {
-	n, err := number(r, "n")
+func (s *Server) start(q *request[startIn]) (reply, error) {
+	res, err := q.tr.Start(q.ctx, q.n, tracker.StartOptions{Priority: q.in.Priority, Force: q.in.Force})
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	var in struct {
-		Force bool `json:"force"`
-	}
-	if err := decode(r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
-	if err := s.acting(r).Release(r.Context(), n, tracker.ReleaseOptions{Force: in.Force}); err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"released": true})
+	return ok(map[string]any{"issue": res.Issue, "claimant": res.Claimant}), nil
 }
 
-func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
-	n, err := number(r, "n")
-	if err != nil {
-		writeErr(w, err)
-		return
+type releaseIn struct {
+	Force bool `json:"force"`
+}
+
+func (s *Server) release(q *request[releaseIn]) (reply, error) {
+	if err := q.tr.Release(q.ctx, q.n, tracker.ReleaseOptions{Force: q.in.Force}); err != nil {
+		return reply{}, err
 	}
-	var in struct {
-		Reason      string `json:"reason"`
-		Completed   bool   `json:"completed"`
-		DuplicateOf int    `json:"duplicateOf"`
-		Force       bool   `json:"force"`
-	}
-	if err := decode(r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
-	res, err := s.acting(r).Close(r.Context(), n, tracker.CloseOptions{
+	return ok(map[string]any{"released": true}), nil
+}
+
+type closeIn struct {
+	Reason      string `json:"reason"`
+	Completed   bool   `json:"completed"`
+	DuplicateOf int    `json:"duplicateOf"`
+	Force       bool   `json:"force"`
+}
+
+func (s *Server) closeIssue(q *request[closeIn]) (reply, error) {
+	in := q.in
+	res, err := q.tr.Close(q.ctx, q.n, tracker.CloseOptions{
 		Reason: in.Reason, Completed: in.Completed, DuplicateOf: in.DuplicateOf, Force: in.Force,
 	})
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"stateReason": res.StateReason})
+	return ok(map[string]any{"stateReason": res.StateReason}), nil
 }
 
-func (s *Server) handleReopen(w http.ResponseWriter, r *http.Request) {
-	n, err := number(r, "n")
+type reopenIn struct {
+	Reason string `json:"reason"`
+}
+
+func (s *Server) reopen(q *request[reopenIn]) (reply, error) {
+	res, err := q.tr.Reopen(q.ctx, q.n, tracker.ReopenOptions{Reason: q.in.Reason})
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	var in struct {
-		Reason string `json:"reason"`
-	}
-	if err := decode(r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
-	res, err := s.acting(r).Reopen(r.Context(), n, tracker.ReopenOptions{Reason: in.Reason})
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	return ok(map[string]any{
 		"reopened": res.Reopened, "releasedLabel": res.ReleasedLabel,
 		"releasedAssignees": orEmpty(res.ReleasedAssignees),
-	})
+	}), nil
 }
 
-func (s *Server) handleBlock(w http.ResponseWriter, r *http.Request) {
-	n, err := number(r, "n")
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	var in struct {
-		Blockers    []int `json:"blockers"`
-		AllowClosed bool  `json:"allowClosed"`
-	}
-	if err := decode(r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
-	res, err := s.acting(r).Block(r.Context(), n, in.Blockers, tracker.BlockOptions{AllowClosed: in.AllowClosed})
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"added": orEmpty(res.Added), "existing": orEmpty(res.Existing)})
+type blockIn struct {
+	Blockers    []int `json:"blockers"`
+	AllowClosed bool  `json:"allowClosed"`
 }
 
-func (s *Server) handleUnblock(w http.ResponseWriter, r *http.Request) {
-	n, err := number(r, "n")
+func (s *Server) block(q *request[blockIn]) (reply, error) {
+	res, err := q.tr.Block(q.ctx, q.n, q.in.Blockers, tracker.BlockOptions{AllowClosed: q.in.AllowClosed})
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	m, err := number(r, "m")
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	res, err := s.acting(r).Unblock(r.Context(), n, []int{m}, tracker.BlockOptions{AllowClosed: r.URL.Query().Get("allowClosed") == "1"})
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"removed": orEmpty(res.Removed), "missing": orEmpty(res.Missing)})
+	return ok(map[string]any{"added": orEmpty(res.Added), "existing": orEmpty(res.Existing)}), nil
 }
 
-func (s *Server) handleCompose(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Body           bodyIn `json:"body"`
-		DiscoveredFrom int    `json:"discoveredFrom"`
-	}
-	if err := decode(r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
-	res, err := tracker.ComposeBody(in.Body.body(in.DiscoveredFrom))
+func (s *Server) unblock(q *request[none]) (reply, error) {
+	res, err := q.tr.Unblock(q.ctx, q.n, []int{q.m}, tracker.BlockOptions{AllowClosed: q.query.Get("allowClosed") == "1"})
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"body": res.Body, "findings": findingsOut(res.Findings)})
+	return ok(map[string]any{"removed": orEmpty(res.Removed), "missing": orEmpty(res.Missing)}), nil
 }
 
-func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Text string `json:"text"`
-	}
-	if err := decode(r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
-	res, err := tracker.CheckBody(in.Text)
+type composeIn struct {
+	Body           bodyIn `json:"body"`
+	DiscoveredFrom int    `json:"discoveredFrom"`
+}
+
+func (s *Server) compose(q *request[composeIn]) (reply, error) {
+	res, err := tracker.ComposeBody(q.in.Body.body(q.in.DiscoveredFrom))
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	writeJSON(w, http.StatusOK, checkOut{OK: true, Findings: findingsOut(res.Findings)})
+	return ok(map[string]any{"body": res.Body, "findings": findingsOut(res.Findings)}), nil
+}
+
+type checkIn struct {
+	Text string `json:"text"`
+}
+
+func (s *Server) check(q *request[checkIn]) (reply, error) {
+	res, err := tracker.CheckBody(q.in.Text)
+	if err != nil {
+		return reply{}, err
+	}
+	return ok(checkOut{OK: true, Findings: findingsOut(res.Findings)}), nil
 }
 
 type planRefIn struct {
@@ -310,17 +222,11 @@ type planEntryIn struct {
 	DiscoveredFrom int         `json:"discoveredFrom"`
 }
 
-// handleApply batch-creates issues from a JSON plan. Each request gets its
-// own in-memory checkpoint: MemoryCheckpoint has no lock, so sharing one
-// across requests would race, and a resume across HTTP calls is out of scope.
-func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Entries []planEntryIn `json:"entries"`
-	}
-	if err := decode(r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
+type applyIn struct {
+	Entries []planEntryIn `json:"entries"`
+}
+
+func (in applyIn) plan() []tracker.PlanEntry {
 	entries := make([]tracker.PlanEntry, 0, len(in.Entries))
 	for i, e := range in.Entries {
 		pe := tracker.PlanEntry{
@@ -341,26 +247,53 @@ func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 		}
 		entries = append(entries, pe)
 	}
+	return entries
+}
+
+// apply batch-creates issues from a JSON plan. A dry run writes nothing and
+// needs no memory. A real run uses the plan's remembered checkpoint, so a
+// retry after a failure resumes instead of repeating its first entries; a
+// plan that finishes cleanly is forgotten, so sending it again is a new plan.
+func (s *Server) apply(q *request[applyIn]) (reply, error) {
+	entries := q.in.plan()
 	if err := tracker.ValidatePlan(entries); err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	res, err := s.acting(r).ApplyPlan(r.Context(), entries, tracker.ApplyOptions{
-		DryRun: dryRun(r), Checkpoint: tracker.NewMemoryCheckpoint(),
-	})
+
+	opts := tracker.ApplyOptions{DryRun: q.dry, Checkpoint: tracker.NewMemoryCheckpoint()}
+	var digest string
+	var run *applyRun
+	if !q.dry {
+		raw, err := json.Marshal(q.in)
+		if err != nil {
+			return reply{}, err
+		}
+		digest = tracker.FileDigest(raw)
+		run = s.applies.get(digest)
+		run.mu.Lock()
+		defer run.mu.Unlock()
+		opts.Checkpoint = run.cp
+	}
+
+	res, err := q.tr.ApplyPlan(q.ctx, entries, opts)
 	if err != nil {
-		writeErr(w, err)
-		return
+		if run != nil {
+			err = &applyError{err: err, created: run.created()}
+		}
+		return reply{}, err
+	}
+	if run != nil && res.Unwired == 0 {
+		s.applies.forget(digest)
 	}
 	// A dry run has no mapping, and a nil map would marshal as null.
 	mapping := res.Mapping
 	if mapping == nil {
 		mapping = map[string]int{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	return ok(map[string]any{
 		"dryRun": res.DryRun, "created": res.Created, "wired": res.Wired, "unwired": res.Unwired,
 		"warnings": orEmpty(res.Warnings), "mapping": mapping, "wouldCreate": orEmpty(res.WouldCreate),
-	})
+	}), nil
 }
 
 type prIn struct {
@@ -375,52 +308,42 @@ type prIn struct {
 	Base    string `json:"base"`
 }
 
-func (s *Server) handlePRCreate(w http.ResponseWriter, r *http.Request) {
+func (s *Server) prCreate(q *request[prIn]) (reply, error) {
 	if s.prc == nil {
-		writeErr(w, &pr.NoPullRequestsError{})
-		return
+		return reply{}, &pr.NoPullRequestsError{}
 	}
-	var in prIn
-	if err := decode(r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
-	res, err := s.prc.Create(r.Context(), pr.CreateRequest{
+	in := q.in
+	res, err := s.prc.Create(q.ctx, pr.CreateRequest{
 		For: in.For, Title: in.Title, Ready: in.Ready, Base: in.Base,
 		Body: pr.Body{Sections: pr.Sections{What: in.What, Why: in.Why, Testing: in.Testing, Risk: in.Risk}, Text: in.Text},
 	})
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	writeJSON(w, http.StatusCreated, prFrom(res))
+	return created(prFrom(res)), nil
 }
 
-func (s *Server) handlePRAmend(w http.ResponseWriter, r *http.Request) {
+type amendIn struct {
+	For     []int   `json:"for"`
+	Title   *string `json:"title"`
+	What    *string `json:"what"`
+	Why     *string `json:"why"`
+	Testing *string `json:"testing"`
+	Risk    *string `json:"risk"`
+	Text    *string `json:"text"`
+}
+
+func (s *Server) prAmend(q *request[amendIn]) (reply, error) {
 	if s.prc == nil {
-		writeErr(w, &pr.NoPullRequestsError{})
-		return
+		return reply{}, &pr.NoPullRequestsError{}
 	}
-	var in struct {
-		For     []int   `json:"for"`
-		Title   *string `json:"title"`
-		What    *string `json:"what"`
-		Why     *string `json:"why"`
-		Testing *string `json:"testing"`
-		Risk    *string `json:"risk"`
-		Text    *string `json:"text"`
-	}
-	if err := decode(r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
-	res, err := s.prc.Amend(r.Context(), pr.AmendRequest{
+	in := q.in
+	res, err := s.prc.Amend(q.ctx, pr.AmendRequest{
 		For: in.For, Title: in.Title,
 		Edit: pr.BodyEdit{What: in.What, Why: in.Why, Testing: in.Testing, Risk: in.Risk, Text: in.Text},
 	})
 	if err != nil {
-		writeErr(w, err)
-		return
+		return reply{}, err
 	}
-	writeJSON(w, http.StatusOK, prFrom(res))
+	return ok(prFrom(res)), nil
 }

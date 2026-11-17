@@ -122,21 +122,27 @@ func TestEnsureLocalTrackerStartsOneOnlyWhereNoneExists(t *testing.T) {
 	ctx := context.Background()
 
 	empty := bareCheckout(t, "")
-	if err := daemon.EnsureLocalTracker(ctx, empty); err != nil {
+	notices, err := daemon.EnsureLocalTracker(ctx, empty)
+	if err != nil {
 		t.Fatalf("empty checkout: %v", err)
+	}
+	// The library's data-loss warning must reach the caller: `.hew` is
+	// untracked, so `git clean -fdx` deletes the only copy of the tracker.
+	if len(notices) == 0 || !strings.Contains(strings.Join(notices, "\n"), "git clean") {
+		t.Errorf("notices = %q, want the untracked-tracker warning", notices)
 	}
 	if target, err := tracker.Detect(empty); err != nil || target.Backend != tracker.BackendLocal {
 		t.Fatalf("after ensure: %+v, %v; want a local tracker", target, err)
 	}
-	// Running again is a no-op, not an error.
-	if err := daemon.EnsureLocalTracker(ctx, empty); err != nil {
-		t.Errorf("second ensure: %v", err)
+	// Running again is a no-op, not an error, and has nothing to warn about.
+	if notices, err := daemon.EnsureLocalTracker(ctx, empty); err != nil || len(notices) != 0 {
+		t.Errorf("second ensure = %q, %v; want no notices and no error", notices, err)
 	}
 
 	// A checkout whose issues are on GitHub must not gain a local tracker,
 	// which would redirect every later hew command there to an empty one.
 	hosted := bareCheckout(t, "git@github.com:o/r.git")
-	err := daemon.EnsureLocalTracker(ctx, hosted)
+	_, err = daemon.EnsureLocalTracker(ctx, hosted)
 	if err == nil || !strings.Contains(err.Error(), "o/r") {
 		t.Fatalf("GitHub checkout: err = %v, want a refusal naming o/r", err)
 	}
@@ -144,7 +150,7 @@ func TestEnsureLocalTrackerStartsOneOnlyWhereNoneExists(t *testing.T) {
 		t.Error("a refused ensure still created a local tracker")
 	}
 
-	if err := daemon.EnsureLocalTracker(ctx, ""); err == nil {
+	if _, err := daemon.EnsureLocalTracker(ctx, ""); err == nil {
 		t.Error("empty directory: want an error")
 	}
 }

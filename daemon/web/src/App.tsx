@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, explain, setActingAs, storeActor, storedActor } from './api';
+import { ErrorBoundary } from './ErrorBoundary';
 import { navHref, useRoute } from './router';
 import { useToast } from './toast';
 import type { Config } from './types';
@@ -28,6 +29,8 @@ export function App() {
   const [settled, setSettled] = useState(false);
   // Changing the actor remounts the view, which refetches as the new actor.
   const [actorVersion, setActorVersion] = useState(0);
+  // Who requests act as; empty means the tracker's own identity.
+  const [actor, setActor] = useState(storedActor);
 
   useEffect(() => {
     api<Config>('GET', '/api/config').then(
@@ -43,9 +46,14 @@ export function App() {
     );
   }, [toast]);
 
+  // Leaving the box without changing it must not remount the view, or a
+  // half-written issue on the New page is thrown away by a stray click.
   const commitActor = (value: string) => {
-    storeActor(value.trim());
-    setActingAs(value);
+    const next = value.trim();
+    if (next === (actor || config?.identity)) return;
+    storeActor(next);
+    setActingAs(next);
+    setActor(next);
     setActorVersion((v) => v + 1);
   };
 
@@ -70,7 +78,7 @@ export function App() {
               <input
                 type="text"
                 aria-label="Acting as"
-                defaultValue={storedActor() || config.identity}
+                defaultValue={actor || config.identity}
                 onBlur={(e) => commitActor(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') e.currentTarget.blur();
@@ -82,7 +90,15 @@ export function App() {
           )}
         </span>
       </header>
-      <main>{settled && <View key={`${actorVersion}`} route={route} />}</main>
+      <main>
+        {settled && (
+          // Keyed by page and actor, so leaving a page that failed to render
+          // clears the error instead of keeping it on screen.
+          <ErrorBoundary key={`${actorVersion}:${JSON.stringify(route)}`}>
+            <View route={route} />
+          </ErrorBoundary>
+        )}
+      </main>
     </>
   );
 }

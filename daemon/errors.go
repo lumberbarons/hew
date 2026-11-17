@@ -30,6 +30,7 @@ func classify(err error) (int, problem) {
 	}
 
 	var (
+		tooLarge     *http.MaxBytesError
 		claimed      *tracker.ClaimedError
 		blocked      *tracker.BlockedError
 		invalid      *tracker.InvalidInputError
@@ -66,6 +67,8 @@ func classify(err error) (int, problem) {
 		return set(499, "canceled", nil)
 	case errors.Is(err, context.DeadlineExceeded):
 		return set(http.StatusGatewayTimeout, "timeout", nil)
+	case errors.As(err, &tooLarge):
+		return set(http.StatusRequestEntityTooLarge, "too_large", map[string]any{"limit": tooLarge.Limit})
 	case errors.As(err, &claimed):
 		// The CLI's exit 5 (yours: resume) versus exit 3 (theirs: pick next).
 		kind := "claimed_by_other"
@@ -156,9 +159,19 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// writeErr sends the problem a library error classifies to.
+// writeErr sends the problem a library error classifies to. A failed apply
+// also says what it created before failing.
 func writeErr(w http.ResponseWriter, err error) {
 	status, p := classify(err)
+	var failed *applyError
+	if errors.As(err, &failed) {
+		fields := map[string]any{}
+		for k, v := range p.Fields {
+			fields[k] = v
+		}
+		fields["created"] = failed.created
+		p.Fields = fields
+	}
 	writeJSON(w, status, p)
 }
 

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/lumberbarons/hew/daemon"
@@ -32,31 +33,33 @@ func run() error {
 	initLocal := flag.Bool("init-local", false, "start a local tracker in --dir if it has none (refused where issues live on GitHub)")
 	flag.Parse()
 
-	if err := daemon.ValidateAddr(*addr); err != nil {
+	if err := daemon.ValidateOptions(*addr, *repo, *initLocal); err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// SIGTERM is what kill, docker stop and systemd send. Handling it as well
+	// as Ctrl-C lets an in-flight multi-step write (an issue and then its
+	// edges) finish before the process exits.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	if *initLocal {
-		if err := daemon.EnsureLocalTracker(ctx, *dir); err != nil {
+		notices, err := daemon.EnsureLocalTracker(ctx, *dir)
+		if err != nil {
 			return err
+		}
+		for _, n := range notices {
+			fmt.Fprintln(os.Stderr, "hew-daemon:", n)
 		}
 	}
 
-	cfg := tracker.Config{Worktree: *dir, Repo: *repo}
-	if *repo != "" {
-		cfg.Backend = tracker.BackendGitHub
-	}
+	cfg := tracker.Config{Worktree: *dir, Repo: *repo, Notice: os.Stderr}
 	// Detect once and pin the backend for the life of the process, as the
 	// library's long-lived-process guidance asks.
-	target, err := tracker.Detect(*dir)
+	target, err := daemon.ResolveTarget(*dir, *repo)
 	if err != nil {
 		return err
 	}
-	if cfg.Backend == "" {
-		cfg.Backend = target.Backend
-	}
+	cfg.Backend = target.Backend
 	tr, err := tracker.Open(ctx, cfg)
 	if err != nil {
 		return err

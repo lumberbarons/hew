@@ -32,6 +32,8 @@ export function Apply() {
   const toast = useToast();
   const [text, setText] = useState(SAMPLE);
   const [result, setResult] = useState<{ dry: boolean; value: ApplyResult } | null>(null);
+  // A second click while a plan runs would send the plan again.
+  const [busy, setBusy] = useState(false);
 
   const run = async (dry: boolean) => {
     let plan: unknown;
@@ -41,9 +43,11 @@ export function Apply() {
       toast(`Not valid JSON: ${(e as Error).message}`, 'bad');
       return;
     }
+    setBusy(true);
     const value = await act(() =>
       api<ApplyResult>('POST', `/api/apply${dry ? '?dryRun=1' : ''}`, plan),
     );
+    setBusy(false);
     if (value) setResult({ dry, value });
   };
 
@@ -66,8 +70,10 @@ export function Apply() {
           </Field>
         </div>
         <div className="form-foot">
-          <button onClick={() => void run(true)}>Dry run</button>
-          <button className="primary" onClick={() => void run(false)}>
+          <button disabled={busy} onClick={() => void run(true)}>
+            Dry run
+          </button>
+          <button className="primary" disabled={busy} onClick={() => void run(false)}>
             Apply
           </button>
         </div>

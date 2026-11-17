@@ -10,10 +10,7 @@ package daemon
 import (
 	"context"
 	"embed"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -45,6 +42,8 @@ type Server struct {
 	prc    PullRequests // nil when the backend has no pull requests
 	target tracker.Target
 	ui     fs.FS // nil means the embedded build
+
+	applies applyRuns // unfinished apply plans, so a retry resumes
 }
 
 // New wires a Server. prc must be a nil interface, not a nil *pr.Client, when
@@ -69,6 +68,35 @@ func ValidateAddr(addr string) error {
 	return fmt.Errorf("refusing to listen on %q: the daemon has no auth and only serves loopback", addr)
 }
 
+// ResolveTarget reports where the issues live for a worktree. --repo forces
+// GitHub, so the target it names is GitHub's, not whatever local tracker the
+// directory also holds; reporting the local one would describe a tracker the
+// daemon is not serving.
+func ResolveTarget(dir, repo string) (tracker.Target, error) {
+	target, err := tracker.Detect(dir)
+	if err != nil {
+		return tracker.Target{}, err
+	}
+	if repo != "" {
+		return tracker.Target{Backend: tracker.BackendGitHub, Repo: repo}, nil
+	}
+	return target, nil
+}
+
+// ValidateOptions refuses a combination of start-up options that cannot mean
+// anything: starting a local tracker while serving GitHub would redirect the
+// hew CLI in that checkout to the new, empty tracker (hew init --local refuses
+// --repo for the same reason).
+func ValidateOptions(addr, repo string, initLocal bool) error {
+	if err := ValidateAddr(addr); err != nil {
+		return err
+	}
+	if initLocal && repo != "" {
+		return fmt.Errorf("--init-local and --repo conflict: one starts a local tracker, the other serves GitHub")
+	}
+	return nil
+}
+
 // WithUI serves ui instead of the embedded build. It is for tests, and for
 // pointing the daemon at a UI built elsewhere.
 func (s *Server) WithUI(ui fs.FS) *Server {
@@ -76,35 +104,43 @@ func (s *Server) WithUI(ui fs.FS) *Server {
 	return s
 }
 
+// WithCheckpoints sets how the checkpoint of a new apply plan is made. The
+// default is in memory, which survives retries within this process; a test
+// injects one that fails, to prove a failed apply resumes.
+func (s *Server) WithCheckpoints(newCheckpoint func() tracker.Checkpoint) *Server {
+	s.applies.newCheckpoint = newCheckpoint
+	return s
+}
+
 // Handler returns the full route table behind the loopback guard.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /api/config", s.handleConfig)
-	mux.HandleFunc("GET /api/primer", s.handlePrimer)
-	mux.HandleFunc("GET /api/board", s.handleBoard)
-	mux.HandleFunc("GET /api/ready", s.handleReady)
-	mux.HandleFunc("GET /api/issues", s.handleList)
-	mux.HandleFunc("GET /api/issues/{n}", s.handleDetail)
-	mux.HandleFunc("GET /api/epics", s.handleEpics)
-	mux.HandleFunc("GET /api/epics/{n}", s.handleDetail)
-	mux.HandleFunc("GET /api/search", s.handleSearch)
-	mux.HandleFunc("GET /api/triage", s.handleTriage)
+	mux.HandleFunc("GET /api/config", route(s, s.config))
+	mux.HandleFunc("GET /api/primer", route(s, s.primer))
+	mux.HandleFunc("GET /api/board", route(s, s.board))
+	mux.HandleFunc("GET /api/ready", route(s, s.ready))
+	mux.HandleFunc("GET /api/issues", route(s, s.list))
+	mux.HandleFunc("GET /api/issues/{n}", route(s, s.detail))
+	mux.HandleFunc("GET /api/epics", route(s, s.epics))
+	mux.HandleFunc("GET /api/epics/{n}", route(s, s.detail))
+	mux.HandleFunc("GET /api/search", route(s, s.search))
+	mux.HandleFunc("GET /api/triage", route(s, s.triage))
 
-	mux.HandleFunc("POST /api/issues", s.handleCreate)
-	mux.HandleFunc("POST /api/epics", s.handleCreateEpic)
-	mux.HandleFunc("PATCH /api/issues/{n}", s.handleEdit)
-	mux.HandleFunc("POST /api/issues/{n}/start", s.handleStart)
-	mux.HandleFunc("POST /api/issues/{n}/release", s.handleRelease)
-	mux.HandleFunc("POST /api/issues/{n}/close", s.handleClose)
-	mux.HandleFunc("POST /api/issues/{n}/reopen", s.handleReopen)
-	mux.HandleFunc("POST /api/issues/{n}/blockers", s.handleBlock)
-	mux.HandleFunc("DELETE /api/issues/{n}/blockers/{m}", s.handleUnblock)
-	mux.HandleFunc("POST /api/body/compose", s.handleCompose)
-	mux.HandleFunc("POST /api/body/check", s.handleCheck)
-	mux.HandleFunc("POST /api/apply", s.handleApply)
-	mux.HandleFunc("POST /api/pr", s.handlePRCreate)
-	mux.HandleFunc("PATCH /api/pr", s.handlePRAmend)
+	mux.HandleFunc("POST /api/issues", route(s, s.create))
+	mux.HandleFunc("POST /api/epics", route(s, s.createEpic))
+	mux.HandleFunc("PATCH /api/issues/{n}", route(s, s.edit))
+	mux.HandleFunc("POST /api/issues/{n}/start", route(s, s.start))
+	mux.HandleFunc("POST /api/issues/{n}/release", route(s, s.release))
+	mux.HandleFunc("POST /api/issues/{n}/close", route(s, s.closeIssue))
+	mux.HandleFunc("POST /api/issues/{n}/reopen", route(s, s.reopen))
+	mux.HandleFunc("POST /api/issues/{n}/blockers", route(s, s.block))
+	mux.HandleFunc("DELETE /api/issues/{n}/blockers/{m}", route(s, s.unblock))
+	mux.HandleFunc("POST /api/body/compose", route(s, s.compose))
+	mux.HandleFunc("POST /api/body/check", route(s, s.check))
+	mux.HandleFunc("POST /api/apply", route(s, s.apply))
+	mux.HandleFunc("POST /api/pr", route(s, s.prCreate))
+	mux.HandleFunc("PATCH /api/pr", route(s, s.prAmend))
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusNotFound, problem{Kind: "no_route", Message: "no such endpoint"})
@@ -160,36 +196,6 @@ func loopbackHost(hostport string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// acting returns the tracker a request acts as. On a local tracker the
-// X-Hew-Actor header names the worker; on GitHub As is a documented no-op and
-// every request acts as the authenticated login.
-func (s *Server) acting(r *http.Request) *tracker.Tracker {
-	if actor := strings.TrimSpace(r.Header.Get("X-Hew-Actor")); actor != "" && len(actor) <= 100 {
-		return s.tr.As(actor)
-	}
-	return s.tr
-}
-
-// decode reads a JSON request body, refusing unknown fields so a typo in a
-// client is an error rather than a silently ignored option.
-func decode(r *http.Request, v any) error {
-	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil && !errors.Is(err, io.EOF) { // empty body = zero value
-		return &tracker.InvalidInputError{Field: "body", Reason: err.Error()}
-	}
-	return nil
-}
-
-// number parses a path-value issue number.
-func number(r *http.Request, name string) (int, error) {
-	var n int
-	if _, err := fmt.Sscanf(r.PathValue(name), "%d", &n); err != nil || n <= 0 {
-		return 0, &tracker.InvalidInputError{Field: name, Reason: "must be a positive issue number"}
-	}
-	return n, nil
-}
-
 // uiHandler serves the built UI. The assets are embedded and change with the
 // binary, so a browser must never reuse a stale script or stylesheet from a
 // previous build. When the UI has not been built it says so, rather than
@@ -228,17 +234,25 @@ const notBuilt = `<!doctype html><meta charset="utf-8"><title>hew</title>
 // the daemon can be pointed at an empty checkout. It refuses a checkout whose
 // issues live on GitHub: starting a local tracker beside it would switch every
 // later hew command in that checkout to the new, empty one.
-func EnsureLocalTracker(ctx context.Context, dir string) error {
+//
+// The returned notices are the library's warnings from initialising, which the
+// caller must show: the first is that .hew is untracked, so `git clean -fdx`
+// deletes the only copy of the tracker. There are none when a tracker already
+// existed.
+func EnsureLocalTracker(ctx context.Context, dir string) (notices []string, err error) {
 	target, err := tracker.Detect(dir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if target.Backend == tracker.BackendLocal {
-		return nil
+		return nil, nil
 	}
 	if target.Repo != "" {
-		return fmt.Errorf("%s tracks its issues on GitHub (%s); refusing to start a local tracker beside them", dir, target.Repo)
+		return nil, fmt.Errorf("%s tracks its issues on GitHub (%s); refusing to start a local tracker beside them", dir, target.Repo)
 	}
-	_, err = tracker.Init(ctx, tracker.InitConfig{Worktree: dir, Backend: tracker.BackendLocal})
-	return err
+	res, err := tracker.Init(ctx, tracker.InitConfig{Worktree: dir, Backend: tracker.BackendLocal})
+	if err != nil {
+		return nil, err
+	}
+	return res.Notices, nil
 }

@@ -1,5 +1,5 @@
 import { fireEvent, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { fx } from '../test/fixtures';
 import { mockApi, status } from '../test/mockApi';
 import { renderView } from '../test/render';
@@ -51,5 +51,21 @@ describe('Apply', () => {
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     expect(await screen.findByText('entries: dangling reference')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Result' })).toBeNull();
+  });
+
+  it('cannot be sent twice while a plan is running', async () => {
+    let finish: (r: Response) => void = () => {};
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>((resolve) => (finish = resolve))),
+    );
+    const { user } = renderView(<Apply />);
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Dry run' })).toBeDisabled();
+
+    finish(new Response(JSON.stringify(fx.apply)));
+    expect(await screen.findByRole('heading', { name: /Result/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
   });
 });

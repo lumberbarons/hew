@@ -158,6 +158,23 @@ describe('IssueView', () => {
       expect(await screen.findByText('reason: is required')).toBeInTheDocument();
     });
 
+    it('starts the reopen form empty rather than reusing the closing reason', async () => {
+      const closed = withIssue(fx.claimed, { state: 'closed', inProgress: false, assignees: [] });
+      const open = withIssue(fx.claimed, { inProgress: false, assignees: [] });
+      let loads = 0;
+      mockApi({
+        'GET /api/issues/2': () => (loads++ === 0 ? open : closed),
+        'POST /api/issues/2/close': { stateReason: 'completed' },
+      });
+      const { user } = renderView(<IssueView n={2} />);
+      await user.type(await screen.findByLabelText('Reason'), 'fixed upstream');
+      await user.click(screen.getByLabelText('Completed'));
+      await user.click(screen.getByRole('button', { name: 'Close issue' }));
+
+      expect(await screen.findByRole('button', { name: 'Reopen issue' })).toBeInTheDocument();
+      expect(screen.getByLabelText('Reason')).toHaveValue('');
+    });
+
     it('reopens a closed issue and offers no work on it', async () => {
       const closed = withIssue(fx.claimed, { state: 'closed', inProgress: false, assignees: [] });
       const { calls } = mockApi({
@@ -204,6 +221,19 @@ describe('IssueView', () => {
       await user.click(screen.getByRole('button', { name: 'Add blocker' }));
       expect(await screen.findByText('Blocked on #1')).toBeInTheDocument();
       expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ blockers: [1] });
+    });
+
+    it('empties the blocker box once the blocker is added', async () => {
+      mockApi({
+        ...reads(fx.claimed),
+        'POST /api/issues/2/blockers': { added: [1], existing: [] },
+      });
+      const { user } = renderView(<IssueView n={2} />);
+      const box = await screen.findByLabelText('Blocked by issue number');
+      await user.type(box, '#1');
+      await user.click(screen.getByRole('button', { name: 'Add blocker' }));
+      await screen.findByText('Blocked on #1');
+      expect(box).toHaveValue('');
     });
 
     it('does not call the daemon for something that is not an issue number', async () => {
