@@ -261,15 +261,16 @@ func (s *Server) apply(q *request[applyIn]) (reply, error) {
 	}
 
 	opts := tracker.ApplyOptions{DryRun: q.dry, Checkpoint: tracker.NewMemoryCheckpoint()}
-	var digest string
 	var run *applyRun
+	finished := false
 	if !q.dry {
 		raw, err := json.Marshal(q.in)
 		if err != nil {
 			return reply{}, err
 		}
-		digest = tracker.FileDigest(raw)
-		run = s.applies.get(digest)
+		key := applyKey(raw, q.tr.Identity())
+		run = s.applies.acquire(key)
+		defer func() { s.applies.release(key, run, finished) }()
 		run.mu.Lock()
 		defer run.mu.Unlock()
 		opts.Checkpoint = run.cp
@@ -282,9 +283,7 @@ func (s *Server) apply(q *request[applyIn]) (reply, error) {
 		}
 		return reply{}, err
 	}
-	if run != nil && res.Unwired == 0 {
-		s.applies.forget(digest)
-	}
+	finished = res.Unwired == 0
 	// A dry run has no mapping, and a nil map would marshal as null.
 	mapping := res.Mapping
 	if mapping == nil {

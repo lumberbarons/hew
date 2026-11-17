@@ -15,15 +15,17 @@ const keepDist = () => ({
 });
 
 // `npm run dev` proxies the API to a running daemon. The daemon refuses a
-// request whose Origin is not its own Host (its CSRF guard), so the proxy
-// presents the daemon's own origin.
+// request whose Origin is not its own Host (its CSRF guard), so the proxy must
+// send both as the daemon's own: changeOrigin rewrites Host to the target, and
+// the Origin header is set to match. Setting only Origin leaves Host as the dev
+// server's, and every request is refused.
 const daemon = process.env.HEW_DAEMON ?? 'http://127.0.0.1:7777';
 
 export default defineConfig({
   plugins: [react(), keepDist()],
   build: { outDir: '../dist', emptyOutDir: true },
   server: {
-    proxy: { '/api': { target: daemon, headers: { Origin: daemon } } },
+    proxy: { '/api': { target: daemon, changeOrigin: true, headers: { Origin: daemon } } },
   },
   test: {
     environment: 'jsdom',

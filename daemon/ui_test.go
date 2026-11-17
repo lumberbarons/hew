@@ -154,3 +154,19 @@ func TestEnsureLocalTrackerStartsOneOnlyWhereNoneExists(t *testing.T) {
 		t.Error("empty directory: want an error")
 	}
 }
+
+// TestAUIBuiltAfterStartupIsServed: a UI directory handed to WithUI can be
+// built while the daemon runs, and should start being served without a restart.
+func TestAUIBuiltAfterStartupIsServed(t *testing.T) {
+	ui := fstest.MapFS{".gitkeep": {}}
+	url := serveUI(t, &ui)
+	if resp, _ := get(t, url+"/"); resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("before the build: GET / = %d, want 503", resp.StatusCode)
+	}
+
+	ui["index.html"] = &fstest.MapFile{Data: []byte("<!doctype html><title>hew</title>")}
+	resp, body := get(t, url+"/")
+	if resp.StatusCode != 200 || !strings.Contains(body, "<title>hew</title>") {
+		t.Errorf("after the build: GET / = %d %q, want the UI", resp.StatusCode, body)
+	}
+}

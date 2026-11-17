@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lumberbarons/hew/tracker"
 )
@@ -20,6 +21,12 @@ const maxActorBytes = 100
 
 // maxBodyBytes bounds a request body.
 const maxBodyBytes = 1 << 20
+
+// writeTimeout bounds a write that has been cut loose from its client. A
+// write is several backend calls (an issue, then its edges); abandoning it
+// when the browser goes away leaves the issue without them, so it runs to the
+// end, but not forever if the backend hangs.
+const writeTimeout = 5 * time.Minute
 
 // none is the input of a route that reads no body.
 type none = struct{}
@@ -45,17 +52,40 @@ type reply struct {
 func ok(v any) reply      { return reply{http.StatusOK, v} }
 func created(v any) reply { return reply{http.StatusCreated, v} }
 
+// routeOption declares something a route supports.
+type routeOption func(*routeConfig)
+
+type routeConfig struct{ dryRun bool }
+
+// dryRunnable marks a route that can validate a request and write nothing.
+// ?dryRun=1 is refused everywhere else: a route that ignored it would perform
+// the real write for a client that asked only to check.
+func dryRunnable(c *routeConfig) { c.dryRun = true }
+
 // route adapts a behaviour to an http.HandlerFunc. It owns the steps every
 // route repeated: parse the path numbers, resolve who the request acts as,
 // decode the body, and turn a returned error into its classified response.
 // Anything cross-cutting (logging, timeouts, body-limit mapping) goes here,
 // once.
-func route[In any](s *Server, fn func(*request[In]) (reply, error)) http.HandlerFunc {
+func route[In any](s *Server, fn func(*request[In]) (reply, error), opts ...routeOption) http.HandlerFunc {
+	var cfg routeConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		req := &request[In]{ctx: r.Context(), query: r.URL.Query()}
-		req.dry = req.query.Get("dryRun") == "1"
+		ctx := r.Context()
+		if r.Method != http.MethodGet {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+			defer cancel()
+		}
+		req := &request[In]{ctx: ctx, query: r.URL.Query()}
 
 		var err error
+		if req.dry, err = dryRunFlag(req.query, cfg.dryRun); err != nil {
+			writeErr(w, err)
+			return
+		}
 		if req.n, err = pathNumber(r, "n"); err != nil {
 			writeErr(w, err)
 			return
@@ -81,6 +111,22 @@ func route[In any](s *Server, fn func(*request[In]) (reply, error)) http.Handler
 		}
 		writeJSON(w, res.status, res.body)
 	}
+}
+
+// dryRunFlag reads ?dryRun. Absent is false. Present, it must be exactly 1 and
+// the route must support it; anything else is refused rather than guessed at.
+func dryRunFlag(query url.Values, supported bool) (bool, error) {
+	values, present := query["dryRun"]
+	if !present {
+		return false, nil
+	}
+	if !supported {
+		return false, &tracker.InvalidInputError{Field: "dryRun", Reason: "is not supported by this route"}
+	}
+	if len(values) != 1 || values[0] != "1" {
+		return false, &tracker.InvalidInputError{Field: "dryRun", Reason: "must be 1"}
+	}
+	return true, nil
 }
 
 // acting returns the tracker a request acts as. On a local tracker the

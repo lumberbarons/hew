@@ -4,7 +4,7 @@ import { Markdown } from '../Markdown';
 import { api } from '../api';
 import { useAct, useToast } from '../toast';
 import type { Detail } from '../types';
-import { Chip, Field, num, prioClass, Section } from '../ui';
+import { Chip, Field, num, prioClass, Section, TextFindings } from '../ui';
 import { useLoad } from '../useLoad';
 
 const PRIORITIES = ['P0', 'P1', 'P2', 'P3', 'P4'];
@@ -29,14 +29,6 @@ function IssueBody({ d, reload }: { d: Detail; reload: () => void }) {
   const n = i.number;
   const open = i.state === 'open';
   const claimed = i.inProgress || i.assignees.length > 0;
-  const findings = d.textFindings.map((f, idx) => (
-    <div key={idx} className="note warn">
-      Unusual characters in {f.source}:{' '}
-      {(['zeroWidth', 'bidiControl', 'unicodeTags', 'confusable'] as const)
-        .filter((k) => f[k])
-        .join(', ')}
-    </div>
-  ));
 
   return (
     <>
@@ -61,7 +53,7 @@ function IssueBody({ d, reload }: { d: Detail; reload: () => void }) {
           </span>
         )}
       </div>
-      {findings}
+      <TextFindings findings={d.textFindings} />
       <div className="card prows">
         {open && <Work d={d} reload={reload} claimed={claimed} />}
         <Closer key={open ? 'close' : 'reopen'} d={d} reload={reload} open={open} />
@@ -268,15 +260,18 @@ function EditPanel({ d, reload, open }: { d: Detail; reload: () => void; open: b
   const act = useAct();
   const i = d.issue;
   const [title, setTitle] = useState(i.title);
-  const [priority, setPriority] = useState(i.priority ?? 'P2');
-  const [type, setType] = useState(i.type ?? 'task');
+  // An issue with no priority or type shows them as not set; choosing nothing
+  // leaves them that way. Defaulting to P2 or task here would assign them on
+  // the first save of an unrelated edit.
+  const [priority, setPriority] = useState(i.priority ?? '');
+  const [type, setType] = useState(i.type ?? '');
   const [area, setArea] = useState('');
 
   const save = async () => {
     const req: Record<string, unknown> = { allowClosed: !open };
     if (title !== i.title) req.title = title;
-    if (priority !== i.priority) req.priority = priority;
-    if (type !== i.type) req.type = type;
+    if (priority && priority !== i.priority) req.priority = priority;
+    if (type && type !== i.type) req.type = type;
     if (area.trim()) req.addAreas = [area.trim()];
     if (await act(() => api('PATCH', `/api/issues/${i.number}`, req), 'Saved')) reload();
   };
@@ -290,6 +285,7 @@ function EditPanel({ d, reload, open }: { d: Detail; reload: () => void; open: b
       <div className="grid-3">
         <Field label="Priority">
           <select value={priority} onChange={(e) => setPriority(e.target.value)}>
+            {!i.priority && <option value="">Not set</option>}
             {PRIORITIES.map((p) => (
               <option key={p}>{p}</option>
             ))}
@@ -297,6 +293,7 @@ function EditPanel({ d, reload, open }: { d: Detail; reload: () => void; open: b
         </Field>
         <Field label="Type">
           <select value={type} onChange={(e) => setType(e.target.value)}>
+            {!i.type && <option value="">Not set</option>}
             {TYPES.map((t) => (
               <option key={t}>{t}</option>
             ))}

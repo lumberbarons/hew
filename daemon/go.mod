@@ -1,6 +1,8 @@
-// The daemon module is a scratch proof that the public tracker, pr and migrate
-// packages are enough to build a long-running server. It deliberately cannot
-// import internal/*. Not part of CI, coverage or releases.
+// The daemon module is hew-daemon: a REST API and web UI over a tracker, built
+// only on the public tracker and pr packages, so it can name nothing internal.
+// It is a separate module like consumer/ and is gated by its own CI job and
+// coverage floor, but is not part of the root module's build or releases. Its
+// go directive must match the root's.
 module github.com/lumberbarons/hew/daemon
 
 go 1.26.11

@@ -1,5 +1,5 @@
 import { cloneElement, useId, type ReactElement, type ReactNode } from 'react';
-import type { Issue, Warning } from './types';
+import type { Issue, TextFinding, Warning } from './types';
 
 export const num = (n: number) => `#${n}`;
 
@@ -125,5 +125,31 @@ export function PageHead({ title, sub }: { title: string; sub?: string }) {
       <h1>{title}</h1>
       {sub && <span className="sub">{sub}</span>}
     </div>
+  );
+}
+
+const FINDING_KINDS = ['zeroWidth', 'bidiControl', 'unicodeTags', 'confusable'] as const;
+
+/**
+ * Notes about invisible or look-alike characters in issue text, which can hide
+ * instructions from the person reading it. withIssue names the issue, for a
+ * list where the finding is not on the page it describes.
+ */
+export function TextFindings({
+  findings,
+  withIssue,
+}: {
+  findings: TextFinding[];
+  withIssue?: boolean;
+}) {
+  return (
+    <>
+      {findings.map((f, idx) => (
+        <div key={idx} className="note warn">
+          {withIssue && `${num(f.issue)}: `}Unusual characters in {f.source}:{' '}
+          {FINDING_KINDS.filter((k) => f[k]).join(', ')}
+        </div>
+      ))}
+    </>
   );
 }

@@ -55,6 +55,30 @@ describe('Triage', () => {
     expect(await screen.findByRole('link', { name: 'raw unvetted report' })).toBeInTheDocument();
   });
 
+  it('shows the hidden-character findings the endpoint reports, naming the issue', async () => {
+    const finding = {
+      issue: 5,
+      source: 'body',
+      comment: 0,
+      zeroWidth: true,
+      bidiControl: true,
+      unicodeTags: false,
+      confusable: false,
+    };
+    mockApi({ 'GET /api/triage': { ...fx.triage, textFindings: [finding] } });
+    renderView(<Triage />);
+    expect(
+      await screen.findByText('#5: Unusual characters in body: zeroWidth, bidiControl'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows no findings note when there are none', async () => {
+    mockApi({ 'GET /api/triage': fx.triage });
+    renderView(<Triage />);
+    await screen.findByRole('link', { name: 'raw unvetted report' });
+    expect(screen.queryByText(/Unusual characters/)).toBeNull();
+  });
+
   it('says when there is nothing to triage', async () => {
     mockApi({ 'GET /api/triage': { ...fx.triage, issues: [] } });
     renderView(<Triage />);

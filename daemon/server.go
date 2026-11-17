@@ -73,14 +73,13 @@ func ValidateAddr(addr string) error {
 // directory also holds; reporting the local one would describe a tracker the
 // daemon is not serving.
 func ResolveTarget(dir, repo string) (tracker.Target, error) {
-	target, err := tracker.Detect(dir)
-	if err != nil {
-		return tracker.Target{}, err
-	}
 	if repo != "" {
+		// Forcing GitHub is how a checkout whose local tracker is damaged or
+		// unwanted is served anyway, so detection, which would fail on it, is
+		// not consulted. tracker.Open checks the directory itself.
 		return tracker.Target{Backend: tracker.BackendGitHub, Repo: repo}, nil
 	}
-	return target, nil
+	return tracker.Detect(dir)
 }
 
 // ValidateOptions refuses a combination of start-up options that cannot mean
@@ -127,8 +126,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/search", route(s, s.search))
 	mux.HandleFunc("GET /api/triage", route(s, s.triage))
 
-	mux.HandleFunc("POST /api/issues", route(s, s.create))
-	mux.HandleFunc("POST /api/epics", route(s, s.createEpic))
+	mux.HandleFunc("POST /api/issues", route(s, s.create, dryRunnable))
+	mux.HandleFunc("POST /api/epics", route(s, s.createEpic, dryRunnable))
 	mux.HandleFunc("PATCH /api/issues/{n}", route(s, s.edit))
 	mux.HandleFunc("POST /api/issues/{n}/start", route(s, s.start))
 	mux.HandleFunc("POST /api/issues/{n}/release", route(s, s.release))
@@ -138,7 +137,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/issues/{n}/blockers/{m}", route(s, s.unblock))
 	mux.HandleFunc("POST /api/body/compose", route(s, s.compose))
 	mux.HandleFunc("POST /api/body/check", route(s, s.check))
-	mux.HandleFunc("POST /api/apply", route(s, s.apply))
+	mux.HandleFunc("POST /api/apply", route(s, s.apply, dryRunnable))
 	mux.HandleFunc("POST /api/pr", route(s, s.prCreate))
 	mux.HandleFunc("PATCH /api/pr", route(s, s.prAmend))
 
@@ -210,10 +209,11 @@ func (s *Server) uiHandler() http.Handler {
 		ui = sub
 	}
 	static := http.FileServerFS(ui)
-	_, missing := fs.Stat(ui, "index.html")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
-		if missing != nil && r.URL.Path == "/" {
+		// Checked per request, not once: a UI directory handed to WithUI can
+		// be built while the daemon runs, and should then start being served.
+		if _, err := fs.Stat(ui, "index.html"); err != nil && r.URL.Path == "/" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte(notBuilt))

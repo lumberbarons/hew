@@ -87,15 +87,6 @@ func run() error {
 		Handler:           daemon.New(tr, prs, target).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	go func() {
-		<-ctx.Done()
-		shutdown, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutdown)
-	}()
 	fmt.Printf("hew-daemon: %s tracker %s — http://%s\n", tr.Backend(), tr.Repo(), ln.Addr())
-	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
-		return err
-	}
-	return nil
+	return daemon.Serve(ctx, srv, ln, 10*time.Second)
 }

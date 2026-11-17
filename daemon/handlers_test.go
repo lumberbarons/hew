@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -533,8 +535,29 @@ func TestResolveTargetFollowsTheBackendBeingServed(t *testing.T) {
 	if err != nil || got.Backend != tracker.BackendGitHub || got.Repo != "o/r" || got.Dir != "" || got.ID != "" {
 		t.Errorf("with --repo = %+v, %v; want GitHub o/r with no local dir or id", got, err)
 	}
-	if _, err = daemon.ResolveTarget("", "o/r"); err == nil {
-		t.Error("an empty directory is still an error under --repo")
+}
+
+// TestResolveTargetDoesNotNeedDetectionWhenGitHubIsForced: forcing GitHub is
+// how a checkout with a damaged local config is served anyway, so a Detect
+// failure must not stop it starting.
+func TestResolveTargetDoesNotNeedDetectionWhenGitHubIsForced(t *testing.T) {
+	root := bareCheckout(t, "")
+	if err := os.MkdirAll(filepath.Join(root, ".hew"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".hew", "config.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tracker.Detect(root); err == nil {
+		t.Fatal("setup: Detect should fail on a damaged config")
+	}
+
+	if _, err := daemon.ResolveTarget(root, ""); err == nil {
+		t.Error("without --repo a damaged config should still be reported")
+	}
+	got, err := daemon.ResolveTarget(root, "o/r")
+	if err != nil || got.Backend != tracker.BackendGitHub || got.Repo != "o/r" {
+		t.Errorf("with --repo = %+v, %v; want GitHub o/r despite the damaged config", got, err)
 	}
 }
 
@@ -550,5 +573,43 @@ func TestValidateOptionsRefusesContradictoryFlags(t *testing.T) {
 	}
 	if err := daemon.ValidateOptions("0.0.0.0:7777", "", false); err == nil {
 		t.Error("a non-loopback address was accepted")
+	}
+}
+
+// TestDryRunIsRefusedWhereItWouldBeIgnored: a client that adds ?dryRun=1 to
+// check a close must not get the close.
+func TestDryRunIsRefusedWhereItWouldBeIgnored(t *testing.T) {
+	e := newEnv(t, false)
+	e.create("Open and staying open", nil)
+
+	for _, tc := range []struct{ method, path string }{
+		{"POST", "/api/issues/1/close?dryRun=1"},
+		{"PATCH", "/api/issues/1?dryRun=1"},
+		{"POST", "/api/issues/1/start?dryRun=1"},
+		{"POST", "/api/issues/1/blockers?dryRun=1"},
+		{"GET", "/api/board?dryRun=1"},
+	} {
+		status, res := e.call(tc.method, tc.path, "", map[string]any{"reason": "x"})
+		if status != 400 || res["error"] != "invalid_input" {
+			t.Errorf("%s %s = %d %v, want 400 invalid_input", tc.method, tc.path, status, res)
+		}
+	}
+	_, d := e.call("GET", "/api/issues/1", "", nil)
+	if d["issue"].(map[string]any)["state"] != "open" || len(d["issue"].(map[string]any)["assignees"].([]any)) != 0 {
+		t.Errorf("a refused dry run still changed the issue: %v", d["issue"])
+	}
+
+	// A flag that is not exactly 1 on a route that does support it is refused,
+	// not read as false, which would write for real.
+	before := len(titles(e))
+	body := map[string]any{"title": "Nope", "type": "task", "body": map[string]any{"goal": "g"}}
+	if status, _ := e.call("POST", "/api/issues?dryRun=true", "", body); status != 400 {
+		t.Errorf("dryRun=true = %d, want 400", status)
+	}
+	if after := len(titles(e)); after != before {
+		t.Errorf("dryRun=true created an issue (%d -> %d)", before, after)
+	}
+	if status, _ := e.call("POST", "/api/issues?dryRun=1", "", body); status != 200 {
+		t.Errorf("dryRun=1 on create = %d, want 200", status)
 	}
 }

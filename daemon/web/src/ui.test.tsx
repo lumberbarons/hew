@@ -1,7 +1,17 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { fx } from './test/fixtures';
-import { Chip, Field, IssueRow, PageHead, Section, Warnings, num, prioClass } from './ui';
+import {
+  Chip,
+  Field,
+  IssueRow,
+  PageHead,
+  Section,
+  TextFindings,
+  Warnings,
+  num,
+  prioClass,
+} from './ui';
 import type { Issue } from './types';
 
 const issue = (over: Partial<Issue> = {}): Issue => ({ ...fx.board.ready[0]!, ...over });
@@ -148,5 +158,34 @@ describe('small pieces', () => {
     expect(screen.getByText('mine')).toHaveClass('chip', 'claim');
     expect(screen.getByRole('heading', { name: 'Board' })).toBeInTheDocument();
     expect(screen.getByText('all of it')).toBeInTheDocument();
+  });
+});
+
+describe('TextFindings', () => {
+  const finding = {
+    issue: 7,
+    source: 'title',
+    comment: 0,
+    zeroWidth: false,
+    bidiControl: false,
+    unicodeTags: true,
+    confusable: true,
+  };
+
+  it('lists which kinds of unusual character were found, and where', () => {
+    render(<TextFindings findings={[finding]} />);
+    expect(
+      screen.getByText('Unusual characters in title: unicodeTags, confusable'),
+    ).toBeInTheDocument();
+  });
+
+  it('can name the issue, for a list of them', () => {
+    render(<TextFindings findings={[finding]} withIssue />);
+    expect(screen.getByText(/^#7: Unusual characters in title/)).toBeInTheDocument();
+  });
+
+  it('renders nothing for no findings', () => {
+    const { container } = render(<TextFindings findings={[]} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });

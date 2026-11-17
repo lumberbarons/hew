@@ -315,11 +315,50 @@ describe('IssueView', () => {
       );
     });
 
-    it('starts from sensible values for an untriaged issue', async () => {
+    it('shows an unset priority and type as not set, rather than inventing them', async () => {
       mockApi(reads(withIssue(fx.blocked, { priority: null, type: null, untriaged: true })));
       renderView(<IssueView n={3} />);
       await userEventOpen();
-      expect(screen.getByLabelText('Type')).toHaveValue('task');
+      expect(screen.getByLabelText('Priority', { selector: 'details select' })).toHaveValue('');
+      expect(screen.getByLabelText('Type')).toHaveValue('');
+      expect(screen.getAllByRole('option', { name: 'Not set' })).toHaveLength(2);
+    });
+
+    // An issue with no priority or type is untriaged on purpose: saving a new
+    // title must not triage it as P2 and task behind the person's back.
+    it('does not assign a priority or type while fixing something else', async () => {
+      const d = withIssue(fx.blocked, { priority: null, type: null, untriaged: true });
+      const { calls } = mockApi({ ...reads(d), 'PATCH /api/issues/3': {} });
+      const { user } = renderView(<IssueView n={3} />);
+      await user.click(await screen.findByText('Edit details'));
+      const title = screen.getByLabelText('Title');
+      await user.clear(title);
+      await user.type(title, 'A better title');
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() =>
+        expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({
+          allowClosed: false,
+          title: 'A better title',
+        }),
+      );
+    });
+
+    it('still lets the person choose a priority for an issue that has none', async () => {
+      const d = withIssue(fx.blocked, { priority: null, type: null, untriaged: true });
+      const { calls } = mockApi({ ...reads(d), 'PATCH /api/issues/3': {} });
+      const { user } = renderView(<IssueView n={3} />);
+      await user.click(await screen.findByText('Edit details'));
+      await user.selectOptions(
+        screen.getByLabelText('Priority', { selector: 'details select' }),
+        'P1',
+      );
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() =>
+        expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({
+          allowClosed: false,
+          priority: 'P1',
+        }),
+      );
     });
   });
 
