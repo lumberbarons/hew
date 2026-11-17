@@ -58,7 +58,7 @@ daemon-build: web ## Build dist/hewd with the web UI embedded
 	cd daemon && go build -o ../dist/hewd ./cmd/hewd
 
 daemon-run: daemon-build ## Build and serve this checkout at http://127.0.0.1:7777
-	dist/hewd --dir $(CURDIR) $(HEWD_ARGS)
+	dist/hewd --dir "$(CURDIR)" $(HEWD_ARGS)
 
 ci: ## Run everything CI blocks on (web-e2e needs a browser, so it runs there)
 	$(MAKE) lint fmt test vuln evals consumer daemon web
