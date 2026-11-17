@@ -580,7 +580,7 @@ against a real local tracker and an isolated GitHub transport; an operation
 that needs an internal type fails to build there instead of passing its own
 unit tests.
 
-[`daemon/`](daemon/) is a second, heavier consumer: `hew-daemon` serves a local
+[`daemon/`](daemon/) is a second, heavier consumer: `hewd` serves a local
 tracker over a REST API and a React web UI, built from the same public packages.
 It has no authentication and listens on loopback only, so it is for one person
 on one machine. See [`daemon/README.md`](daemon/README.md).

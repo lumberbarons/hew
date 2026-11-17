@@ -1,4 +1,4 @@
-// The daemon module is hew-daemon: a REST API and web UI over a tracker, built
+// The daemon module builds hewd: a REST API and web UI over a tracker, built
 // only on the public tracker and pr packages, so it can name nothing internal.
 // It is a separate module like consumer/ and is gated by its own CI job and
 // coverage floor, but is not part of the root module's build or releases. Its

@@ -1,4 +1,4 @@
-# hew-daemon
+# hewd
 
 A local server for the everyday hew workflow: a REST API and a browser UI over a
 tracker, built only on the public `tracker` and `pr` packages. It is the long-running
@@ -9,12 +9,16 @@ The Go side is a separate module (`replace github.com/lumberbarons/hew => ../`, 
 TypeScript in `web/`, built into `dist/` and embedded in the binary.
 
 ```sh
-make daemon-build                      # builds the UI, then dist/hew-daemon
-dist/hew-daemon --dir /path/to/a/hew/checkout
+make daemon-run                        # build, then serve this checkout (:7777)
+
+make daemon-build                      # builds the UI, then dist/hewd
+dist/hewd --dir /path/to/a/hew/checkout
 # http://127.0.0.1:7777
 
-dist/hew-daemon --dir /tmp/scratch --init-local   # start a local tracker in an empty git checkout
+dist/hewd --dir /tmp/scratch --init-local   # start a local tracker in an empty git checkout
 ```
+
+`make daemon-run HEWD_ARGS="--addr 127.0.0.1:8080"` passes flags through.
 
 `--init-local` refuses a checkout whose issues live on GitHub, since a local tracker
 beside them would redirect every later `hew` command there to an empty one.

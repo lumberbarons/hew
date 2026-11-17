@@ -1,4 +1,4 @@
-// Command hew-daemon serves a hew tracker over REST plus a small web UI.
+// Command hewd serves a hew tracker over REST plus a small web UI.
 // It is a scratch proof of the public library: no auth, loopback only.
 package main
 
@@ -21,7 +21,7 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "hew-daemon:", err)
+		fmt.Fprintln(os.Stderr, "hewd:", err)
 		os.Exit(1)
 	}
 }
@@ -48,7 +48,7 @@ func run() error {
 			return err
 		}
 		for _, n := range notices {
-			fmt.Fprintln(os.Stderr, "hew-daemon:", n)
+			fmt.Fprintln(os.Stderr, "hewd:", n)
 		}
 	}
 
@@ -87,6 +87,6 @@ func run() error {
 		Handler:           daemon.New(tr, prs, target).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	fmt.Printf("hew-daemon: %s tracker %s — http://%s\n", tr.Backend(), tr.Repo(), ln.Addr())
+	fmt.Printf("hewd: %s tracker %s — http://%s\n", tr.Backend(), tr.Repo(), ln.Addr())
 	return daemon.Serve(ctx, srv, ln, 10*time.Second)
 }
