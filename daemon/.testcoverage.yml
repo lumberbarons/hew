@@ -1,0 +1,12 @@
+# Coverage gate for the daemon module, at the same floor as the root module.
+# cmd/ is flag wiring and is excluded for the same reason it is there. The
+# profile path is relative to the repository root, where the action runs; see
+# the daemon job in .github/workflows/ci.yml.
+profile: daemon/coverage-daemon.out
+
+threshold:
+  total: 90
+
+exclude:
+  paths:
+    - ^cmd/

@@ -1,0 +1,19 @@
+{
+  "created": 0,
+  "dryRun": true,
+  "mapping": {},
+  "unwired": 0,
+  "warnings": [],
+  "wired": 0,
+  "wouldCreate": [
+    {
+      "areas": [],
+      "blockedBy": [],
+      "key": "a",
+      "parent": null,
+      "priority": "P2",
+      "title": "First",
+      "type": "task"
+    }
+  ]
+}

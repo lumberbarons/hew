@@ -205,6 +205,76 @@ jobs:
       - run: go test -race ./...
         working-directory: consumer
 
+  # daemon/ is a long-running consumer of the same public packages: a REST API
+  # and web UI over a tracker. Like consumer/ it is a separate module that
+  # cannot name internal/*, and like evals/ it is outside the root job's
+  # ./..., the coverage gate and goreleaser, so it needs its own gates,
+  # including its own coverage floor.
+  daemon:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # The module replaces hew with the checkout, so its go.mod and go.sum
+      # must agree with the root's requirements.
+      - name: module is tidy
+        run: go mod tidy -diff
+        working-directory: daemon
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          working-directory: daemon
+      # Same reason as the lint job: the action never checks formatting, and
+      # the root job's formatting step does not reach a nested module.
+      - name: formatting
+        run: golangci-lint fmt --diff
+        working-directory: daemon
+      - run: go test -race -coverprofile=coverage-daemon.out ./...
+        working-directory: daemon
+      # The same floor and action as the root module's gate. The action runs
+      # from the repository root, so the config's profile path is relative to
+      # it and source-dir points at the module whose import path to strip.
+      - name: coverage gate
+        uses: vladopajic/go-test-coverage@f94bcf0d6b9fa5fb8b783830b22648f6c17475e2 # v2.19.0
+        with:
+          config: ./daemon/.testcoverage.yml
+          source-dir: ./daemon
+
+  # The daemon's web UI (daemon/web) is Vite, React and TypeScript, so it has
+  # its own gates: types, lint, format, unit tests held to the same 90% floor
+  # as the Go code, and a production build. The end-to-end specs then drive
+  # that build in a real browser against the real daemon binary, with a
+  # throwaway local tracker, which is the check that the two ends still agree.
+  # The unit tests render from fixtures the Go tests generate and verify
+  # (daemon/web/src/fixtures), so a changed response shape fails one side or
+  # the other instead of shipping.
+  daemon-ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: daemon/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: daemon/web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format
+      - name: unit tests and coverage floor
+        run: npm run test:coverage
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: end-to-end
+        run: npm run e2e
+
   # evals/ is its own module, so the root job's ./... never reaches it.
   evals:
     runs-on: ubuntu-latest

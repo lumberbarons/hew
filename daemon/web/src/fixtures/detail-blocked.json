@@ -1,0 +1,31 @@
+{
+  "children": [],
+  "issue": {
+    "areas": [],
+    "assignees": [],
+    "blockedBy": [
+      1
+    ],
+    "blockedByTotal": 1,
+    "body": "### Goal\n\nMake it so\n\n### Approach\n\nCarefully\n\n### Done when\n\n- [ ] It works\n- [ ] Docs updated",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "epic": false,
+    "inProgress": false,
+    "number": 3,
+    "openBlockers": [
+      1
+    ],
+    "parent": 4,
+    "priority": "P3",
+    "state": "open",
+    "subIssues": [],
+    "subIssuesCompleted": 0,
+    "subIssuesTotal": 0,
+    "title": "Add dark mode",
+    "type": "enhancement",
+    "untriaged": false
+  },
+  "next": null,
+  "textFindings": [],
+  "warnings": []
+}

@@ -1,0 +1,89 @@
+{
+  "children": [
+    {
+      "areas": [
+        "importer"
+      ],
+      "assignees": [],
+      "blockedBy": [],
+      "blockedByTotal": 0,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "epic": false,
+      "inProgress": false,
+      "number": 1,
+      "openBlockers": [],
+      "parent": 4,
+      "priority": "P1",
+      "state": "open",
+      "subIssues": [],
+      "subIssuesCompleted": 0,
+      "subIssuesTotal": 0,
+      "title": "Wire up the importer",
+      "type": "task",
+      "untriaged": false
+    },
+    {
+      "areas": [],
+      "assignees": [],
+      "blockedBy": [
+        1
+      ],
+      "blockedByTotal": 1,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "epic": false,
+      "inProgress": false,
+      "number": 3,
+      "openBlockers": [
+        1
+      ],
+      "parent": 4,
+      "priority": "P3",
+      "state": "open",
+      "subIssues": [],
+      "subIssuesCompleted": 0,
+      "subIssuesTotal": 0,
+      "title": "Add dark mode",
+      "type": "enhancement",
+      "untriaged": false
+    }
+  ],
+  "issue": {
+    "areas": [],
+    "assignees": [],
+    "blockedBy": [],
+    "blockedByTotal": 0,
+    "body": "### Goal\n\nRelease\n\n### Done when\n\n- [ ] Released",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "epic": true,
+    "inProgress": false,
+    "number": 4,
+    "openBlockers": [],
+    "parent": null,
+    "priority": "P2",
+    "state": "open",
+    "subIssues": [
+      1,
+      3
+    ],
+    "subIssuesCompleted": 0,
+    "subIssuesTotal": 2,
+    "title": "Epic: Ship v1",
+    "type": null,
+    "untriaged": false
+  },
+  "next": 1,
+  "textFindings": [],
+  "warnings": [
+    {
+      "cycle": [
+        7,
+        8,
+        7
+      ],
+      "fetched": 0,
+      "issue": 0,
+      "kind": "dependency-cycle",
+      "total": 0
+    }
+  ]
+}

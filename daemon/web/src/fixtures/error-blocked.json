@@ -1,0 +1,10 @@
+{
+  "error": "blocked",
+  "fields": {
+    "issue": 3,
+    "openBlockers": [
+      1
+    ]
+  },
+  "message": "issue #3 has open blockers: #1"
+}
