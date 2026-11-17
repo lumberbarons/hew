@@ -5,8 +5,8 @@ coverage-consumer.out
 .claude/worktrees
 # `go build ./...` in evals/ drops the harness binary here.
 /evals/tokens
-# `go build ./cmd/hew-daemon` in daemon/ drops the server binary here.
-/daemon/hew-daemon
+# `go build ./cmd/hewd` in daemon/ drops the server binary here.
+/daemon/hewd
 coverage-daemon.out
 # The daemon's web UI: dist/ is build output embedded by go:embed (the
 # .gitkeep keeps the directory so the daemon compiles before the UI is built).

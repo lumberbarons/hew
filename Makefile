@@ -1,4 +1,4 @@
-.PHONY: help build test lint fmt vuln evals consumer daemon web web-e2e daemon-build ci
+.PHONY: help build test lint fmt vuln evals consumer daemon web web-e2e daemon-build daemon-run ci
 
 help: ## Show this help
 	@echo "Usage: make [target]"
@@ -35,7 +35,7 @@ consumer: ## Test and lint the external-consumer module
 	cd consumer && golangci-lint run
 	cd consumer && golangci-lint fmt --diff
 
-daemon: ## Test, lint and coverage-gate the hew-daemon module
+daemon: ## Test, lint and coverage-gate the daemon module
 	cd daemon && go mod tidy -diff
 	cd daemon && go test -race -coverprofile=coverage-daemon.out ./...
 	go run github.com/vladopajic/go-test-coverage/v2@v2.19.0 --config=./daemon/.testcoverage.yml --source-dir=./daemon
@@ -53,9 +53,12 @@ web: ## Typecheck, lint, test (90% floor) and build the daemon's web UI
 web-e2e: web ## Browser end-to-end specs (once: cd daemon/web && npx playwright install chromium)
 	cd daemon/web && npm run e2e
 
-daemon-build: web ## Build dist/hew-daemon with the web UI embedded
+daemon-build: web ## Build dist/hewd with the web UI embedded
 	mkdir -p dist
-	cd daemon && go build -o ../dist/hew-daemon ./cmd/hew-daemon
+	cd daemon && go build -o ../dist/hewd ./cmd/hewd
+
+daemon-run: daemon-build ## Build and serve this checkout at http://127.0.0.1:7777
+	dist/hewd --dir "$(CURDIR)" $(HEWD_ARGS)
 
 ci: ## Run everything CI blocks on (web-e2e needs a browser, so it runs there)
 	$(MAKE) lint fmt test vuln evals consumer daemon web

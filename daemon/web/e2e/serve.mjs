@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path';
 const daemonDir = resolve(import.meta.dirname, '..', '..');
 const work = mkdtempSync(join(tmpdir(), 'hew-e2e-'));
 const repo = join(work, 'repo');
-const bin = join(work, 'hew-daemon');
+const bin = join(work, 'hewd');
 
 // Isolate from the developer's git configuration and environment.
 const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
@@ -17,7 +17,7 @@ for (const k of Object.keys(env))
   if (k.startsWith('GIT_') && !k.startsWith('GIT_CONFIG_')) delete env[k];
 
 execFileSync('git', ['init', '--initial-branch=main', repo], { env, stdio: 'ignore' });
-execFileSync('go', ['build', '-o', bin, './cmd/hew-daemon'], { cwd: daemonDir, stdio: 'inherit' });
+execFileSync('go', ['build', '-o', bin, './cmd/hewd'], { cwd: daemonDir, stdio: 'inherit' });
 
 const child = spawn(
   bin,
