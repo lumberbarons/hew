@@ -33,10 +33,16 @@ func Serve(ctx context.Context, srv *http.Server, ln net.Listener, grace time.Du
 	drain, cancel := context.WithTimeout(context.WithoutCancel(ctx), grace)
 	defer cancel()
 	err := srv.Shutdown(drain)
-	<-served
+	serveErr := <-served
 	if err != nil {
 		// Requests still running when the grace period ran out are cut off.
 		_ = srv.Close()
+		return err
 	}
-	return err
+	// After a Shutdown Serve reports ErrServerClosed; anything else is a
+	// failure that raced with it and should not be swallowed.
+	if !errors.Is(serveErr, http.ErrServerClosed) {
+		return serveErr
+	}
+	return nil
 }
