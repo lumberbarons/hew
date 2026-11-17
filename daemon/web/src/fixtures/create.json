@@ -1,0 +1,25 @@
+{
+  "edges": [],
+  "findings": [],
+  "issue": {
+    "areas": [],
+    "assignees": [],
+    "blockedBy": [],
+    "blockedByTotal": 0,
+    "body": "### Goal\n\nMake it so\n\n### Approach\n\nCarefully\n\n### Done when\n\n- [ ] It works\n- [ ] Docs updated",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "epic": false,
+    "inProgress": false,
+    "number": 9,
+    "openBlockers": [],
+    "parent": null,
+    "priority": "P2",
+    "state": "open",
+    "subIssues": [],
+    "subIssuesCompleted": 0,
+    "subIssuesTotal": 0,
+    "title": "Fixture issue",
+    "type": "task",
+    "untriaged": false
+  }
+}

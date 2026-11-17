@@ -29,6 +29,7 @@ func run() error {
 	dir := flag.String("dir", ".", "worktree to serve")
 	addr := flag.String("addr", "127.0.0.1:7777", "loopback address to listen on")
 	repo := flag.String("repo", "", "force the GitHub backend for owner/name")
+	initLocal := flag.Bool("init-local", false, "start a local tracker in --dir if it has none (refused where issues live on GitHub)")
 	flag.Parse()
 
 	if err := daemon.ValidateAddr(*addr); err != nil {
@@ -36,6 +37,12 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+
+	if *initLocal {
+		if err := daemon.EnsureLocalTracker(ctx, *dir); err != nil {
+			return err
+		}
+	}
 
 	cfg := tracker.Config{Worktree: *dir, Repo: *repo}
 	if *repo != "" {

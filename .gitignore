@@ -8,6 +8,14 @@ coverage-consumer.out
 # `go build ./cmd/hew-daemon` in daemon/ drops the server binary here.
 /daemon/hew-daemon
 coverage-daemon.out
+# The daemon's web UI: dist/ is build output embedded by go:embed (the
+# .gitkeep keeps the directory so the daemon compiles before the UI is built).
+/daemon/dist/*
+!/daemon/dist/.gitkeep
+/daemon/web/node_modules
+/daemon/web/coverage
+/daemon/web/playwright-report
+/daemon/web/test-results
 .opencode/worktrees/
 .opencode/plugins/worktree.ts
 .codex/worktrees

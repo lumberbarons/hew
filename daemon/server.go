@@ -24,7 +24,11 @@ import (
 	"github.com/lumberbarons/hew/tracker"
 )
 
-//go:embed web
+// webFS is the built UI. `npm run build` in web/ writes dist; a committed
+// .gitkeep keeps the directory present so the daemon always compiles, and a
+// missing index.html is reported at runtime instead (see uiHandler).
+//
+//go:embed all:dist
 var webFS embed.FS
 
 // PullRequests is the slice of *pr.Client the server uses. It is an interface
@@ -40,6 +44,7 @@ type Server struct {
 	tr     *tracker.Tracker
 	prc    PullRequests // nil when the backend has no pull requests
 	target tracker.Target
+	ui     fs.FS // nil means the embedded build
 }
 
 // New wires a Server. prc must be a nil interface, not a nil *pr.Client, when
@@ -62,6 +67,13 @@ func ValidateAddr(addr string) error {
 		return nil
 	}
 	return fmt.Errorf("refusing to listen on %q: the daemon has no auth and only serves loopback", addr)
+}
+
+// WithUI serves ui instead of the embedded build. It is for tests, and for
+// pointing the daemon at a UI built elsewhere.
+func (s *Server) WithUI(ui fs.FS) *Server {
+	s.ui = ui
+	return s
 }
 
 // Handler returns the full route table behind the loopback guard.
@@ -98,17 +110,7 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusNotFound, problem{Kind: "no_route", Message: "no such endpoint"})
 	})
 
-	web, err := fs.Sub(webFS, "web")
-	if err != nil {
-		panic(err) // the embed directive guarantees the directory
-	}
-	// The assets are embedded and change with the binary, so never let a
-	// browser serve a stale script or stylesheet from a previous build.
-	static := http.FileServerFS(web)
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-cache")
-		static.ServeHTTP(w, r)
-	})
+	mux.Handle("/", s.uiHandler())
 
 	return guard(mux)
 }
@@ -186,4 +188,57 @@ func number(r *http.Request, name string) (int, error) {
 		return 0, &tracker.InvalidInputError{Field: name, Reason: "must be a positive issue number"}
 	}
 	return n, nil
+}
+
+// uiHandler serves the built UI. The assets are embedded and change with the
+// binary, so a browser must never reuse a stale script or stylesheet from a
+// previous build. When the UI has not been built it says so, rather than
+// answering 404 for the page a person just opened.
+func (s *Server) uiHandler() http.Handler {
+	ui := s.ui
+	if ui == nil {
+		sub, err := fs.Sub(webFS, "dist")
+		if err != nil {
+			panic(err) // the embed directive guarantees the directory
+		}
+		ui = sub
+	}
+	static := http.FileServerFS(ui)
+	_, missing := fs.Stat(ui, "index.html")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		if missing != nil && r.URL.Path == "/" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(notBuilt))
+			return
+		}
+		static.ServeHTTP(w, r)
+	})
+}
+
+const notBuilt = `<!doctype html><meta charset="utf-8"><title>hew</title>
+<body style="font:16px/1.5 system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem">
+<h1>The web UI is not built</h1>
+<p>Run <code>make web</code> (or <code>npm ci &amp;&amp; npm run build</code> in <code>daemon/web</code>), then rebuild the daemon.</p>
+<p>The REST API is up: try <a href="/api/config">/api/config</a>.</p>
+`
+
+// EnsureLocalTracker initialises a local tracker in dir when there is none, so
+// the daemon can be pointed at an empty checkout. It refuses a checkout whose
+// issues live on GitHub: starting a local tracker beside it would switch every
+// later hew command in that checkout to the new, empty one.
+func EnsureLocalTracker(ctx context.Context, dir string) error {
+	target, err := tracker.Detect(dir)
+	if err != nil {
+		return err
+	}
+	if target.Backend == tracker.BackendLocal {
+		return nil
+	}
+	if target.Repo != "" {
+		return fmt.Errorf("%s tracks its issues on GitHub (%s); refusing to start a local tracker beside them", dir, target.Repo)
+	}
+	_, err = tracker.Init(ctx, tracker.InitConfig{Worktree: dir, Backend: tracker.BackendLocal})
+	return err
 }

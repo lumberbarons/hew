@@ -1,0 +1,27 @@
+{
+  "fetched": 1,
+  "issues": [
+    {
+      "areas": [],
+      "assignees": [],
+      "blockedBy": [],
+      "blockedByTotal": 0,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "epic": false,
+      "inProgress": false,
+      "number": 5,
+      "openBlockers": [],
+      "parent": null,
+      "priority": null,
+      "state": "open",
+      "subIssues": [],
+      "subIssuesCompleted": 0,
+      "subIssuesTotal": 0,
+      "title": "raw unvetted report",
+      "type": null,
+      "untriaged": true
+    }
+  ],
+  "textFindings": [],
+  "total": 1
+}

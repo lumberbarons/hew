@@ -1,0 +1,11 @@
+{
+  "error": "claimed_by_you",
+  "fields": {
+    "actor": "alice",
+    "assignees": [
+      "alice"
+    ],
+    "issue": 2
+  },
+  "message": "issue #2 is already claimed by acting identity alice"
+}

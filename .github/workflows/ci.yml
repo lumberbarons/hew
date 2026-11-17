@@ -241,6 +241,40 @@ jobs:
           config: ./daemon/.testcoverage.yml
           source-dir: ./daemon
 
+  # The daemon's web UI (daemon/web) is Vite, React and TypeScript, so it has
+  # its own gates: types, lint, format, unit tests held to the same 90% floor
+  # as the Go code, and a production build. The end-to-end specs then drive
+  # that build in a real browser against the real daemon binary, with a
+  # throwaway local tracker, which is the check that the two ends still agree.
+  # The unit tests render from fixtures the Go tests generate and verify
+  # (daemon/web/src/fixtures), so a changed response shape fails one side or
+  # the other instead of shipping.
+  daemon-ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: daemon/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: daemon/web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format
+      - name: unit tests and coverage floor
+        run: npm run test:coverage
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: end-to-end
+        run: npm run e2e
+
   # evals/ is its own module, so the root job's ./... never reaches it.
   evals:
     runs-on: ubuntu-latest

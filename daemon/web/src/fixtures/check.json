@@ -1,0 +1,11 @@
+{
+  "findings": [
+    {
+      "kind": "unmarked-code",
+      "tokens": [
+        "internal/cli/pr.go"
+      ]
+    }
+  ],
+  "ok": true
+}

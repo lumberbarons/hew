@@ -1,0 +1,28 @@
+{
+  "fetched": 1,
+  "issues": [
+    {
+      "areas": [
+        "importer"
+      ],
+      "assignees": [],
+      "blockedBy": [],
+      "blockedByTotal": 0,
+      "createdAt": "2026-01-01T00:00:00Z",
+      "epic": false,
+      "inProgress": false,
+      "number": 1,
+      "openBlockers": [],
+      "parent": 4,
+      "priority": "P1",
+      "state": "open",
+      "subIssues": [],
+      "subIssuesCompleted": 0,
+      "subIssuesTotal": 0,
+      "title": "Wire up the importer",
+      "type": "task",
+      "untriaged": false
+    }
+  ],
+  "total": 1
+}

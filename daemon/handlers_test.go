@@ -315,6 +315,10 @@ func TestApplyWiresDependenciesAndRejectsBadPlans(t *testing.T) {
 		{"id": "b", "title": "Second", "type": "task", "blockedBy": []map[string]any{{"id": "a"}, {"number": 1}}},
 		{"id": "c", "title": "Third", "type": "task", "parent": map[string]any{"number": 1}, "body": "raw body"},
 	}}
+	// A dry run reports an empty mapping, never null.
+	if status, res := e.call("POST", "/api/apply?dryRun=1", "", plan); status != 200 || res["mapping"] == nil {
+		t.Errorf("dry run mapping = %v (status %d), want {} not null", res["mapping"], status)
+	}
 	status, res := e.call("POST", "/api/apply", "", plan)
 	if status != 200 || res["created"] != float64(3) || res["wired"] == float64(0) {
 		t.Fatalf("apply = %d %v", status, res)

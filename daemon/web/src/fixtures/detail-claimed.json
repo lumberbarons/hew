@@ -1,0 +1,31 @@
+{
+  "children": [],
+  "issue": {
+    "areas": [
+      "cli"
+    ],
+    "assignees": [
+      "alice"
+    ],
+    "blockedBy": [],
+    "blockedByTotal": 0,
+    "body": "### Problem\n\nIt panics\n\n### Fix\n\nGuard the slice\n\n### Done when\n\n- [ ] No panic",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "epic": false,
+    "inProgress": true,
+    "number": 2,
+    "openBlockers": [],
+    "parent": null,
+    "priority": "P0",
+    "state": "open",
+    "subIssues": [],
+    "subIssuesCompleted": 0,
+    "subIssuesTotal": 0,
+    "title": "Crash on empty input",
+    "type": "bug",
+    "untriaged": false
+  },
+  "next": null,
+  "textFindings": [],
+  "warnings": []
+}

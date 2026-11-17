@@ -1,4 +1,4 @@
-.PHONY: help build test lint fmt vuln evals consumer daemon ci
+.PHONY: help build test lint fmt vuln evals consumer daemon web web-e2e daemon-build ci
 
 help: ## Show this help
 	@echo "Usage: make [target]"
@@ -42,7 +42,22 @@ daemon: ## Test, lint and coverage-gate the hew-daemon module
 	cd daemon && golangci-lint run
 	cd daemon && golangci-lint fmt --diff
 
-ci: ## Run everything CI blocks on
-	$(MAKE) lint fmt test vuln evals consumer daemon
+web: ## Typecheck, lint, test (90% floor) and build the daemon's web UI
+	cd daemon/web && npm ci
+	cd daemon/web && npm run typecheck
+	cd daemon/web && npm run lint
+	cd daemon/web && npm run format
+	cd daemon/web && npm run test:coverage
+	cd daemon/web && npm run build
+
+web-e2e: web ## Browser end-to-end specs (once: cd daemon/web && npx playwright install chromium)
+	cd daemon/web && npm run e2e
+
+daemon-build: web ## Build dist/hew-daemon with the web UI embedded
+	mkdir -p dist
+	cd daemon && go build -o ../dist/hew-daemon ./cmd/hew-daemon
+
+ci: ## Run everything CI blocks on (web-e2e needs a browser, so it runs there)
+	$(MAKE) lint fmt test vuln evals consumer daemon web
 
 .DEFAULT_GOAL := help

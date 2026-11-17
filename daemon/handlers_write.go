@@ -352,9 +352,14 @@ func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	// A dry run has no mapping, and a nil map would marshal as null.
+	mapping := res.Mapping
+	if mapping == nil {
+		mapping = map[string]int{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"dryRun": res.DryRun, "created": res.Created, "wired": res.Wired, "unwired": res.Unwired,
-		"warnings": orEmpty(res.Warnings), "mapping": res.Mapping, "wouldCreate": orEmpty(res.WouldCreate),
+		"warnings": orEmpty(res.Warnings), "mapping": mapping, "wouldCreate": orEmpty(res.WouldCreate),
 	})
 }
 

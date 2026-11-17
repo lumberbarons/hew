@@ -1,0 +1,10 @@
+{
+  "actorEditable": true,
+  "backend": "local",
+  "dir": "/path/to/checkout",
+  "id": "fixture-tracker",
+  "identity": "daemon",
+  "mainCheckout": "/path/to/checkout",
+  "pullRequests": false,
+  "repo": ""
+}
