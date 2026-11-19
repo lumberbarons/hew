@@ -139,26 +139,46 @@ func primerFrom(p tracker.PrimerResult) primerOut {
 	}
 }
 
+type prWarningOut struct {
+	Kind      string   `json:"kind"`
+	Issue     int      `json:"issue"`
+	Issues    []int    `json:"issues"`
+	Branch    string   `json:"branch"`
+	Assignees []string `json:"assignees"`
+	Actor     string   `json:"actor"`
+	Groups    [][]int  `json:"groups"`
+}
+
+// prWarningsOut keeps every subject a warning carries, the way warningsOut does
+// for tracker warnings: a bare kind cannot name the issue a claim conflict is
+// about or who holds it.
+func prWarningsOut(ws []pr.Warning) []prWarningOut {
+	out := make([]prWarningOut, 0, len(ws))
+	for _, w := range ws {
+		out = append(out, prWarningOut{
+			Kind: string(w.Kind), Issue: w.Issue, Issues: orEmpty(w.Issues), Branch: w.Branch,
+			Assignees: orEmpty(w.Assignees), Actor: w.Actor, Groups: orEmpty(w.Groups),
+		})
+	}
+	return out
+}
+
 type prOut struct {
-	Number      int          `json:"number"`
-	URL         string       `json:"url"`
-	Draft       bool         `json:"draft"`
-	Fixes       int          `json:"fixes"`
-	FixedIssues []int        `json:"fixedIssues"`
-	Head        string       `json:"head"`
-	Base        string       `json:"base"`
-	Title       string       `json:"title"`
-	Warnings    []string     `json:"warnings"`
-	Findings    []findingOut `json:"findings"`
+	Number      int            `json:"number"`
+	URL         string         `json:"url"`
+	Draft       bool           `json:"draft"`
+	Fixes       int            `json:"fixes"`
+	FixedIssues []int          `json:"fixedIssues"`
+	Head        string         `json:"head"`
+	Base        string         `json:"base"`
+	Title       string         `json:"title"`
+	Warnings    []prWarningOut `json:"warnings"`
+	Findings    []findingOut   `json:"findings"`
 }
 
 func prFrom(r pr.CreateResult) prOut {
-	warns := make([]string, 0, len(r.Warnings))
-	for _, w := range r.Warnings {
-		warns = append(warns, string(w.Kind))
-	}
 	return prOut{
 		Number: r.Number, URL: r.URL, Draft: r.Draft, Fixes: r.Fixes, FixedIssues: orEmpty(r.FixedIssues),
-		Head: r.Head, Base: r.Base, Title: r.Title, Warnings: warns, Findings: findingsOut(r.Findings),
+		Head: r.Head, Base: r.Base, Title: r.Title, Warnings: prWarningsOut(r.Warnings), Findings: findingsOut(r.Findings),
 	}
 }
