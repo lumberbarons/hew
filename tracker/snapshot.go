@@ -97,7 +97,7 @@ func snapshot(ctx context.Context, store gh.IssueStore, opts SnapshotOptions) (*
 	if err != nil {
 		return nil, asReadError(err)
 	}
-	return newSnapshot(issues, states), nil
+	return newSnapshot(issues, states, opts.Bodies), nil
 }
 
 // resolveStates turns the caller's states into the snapshot's record of what
@@ -125,8 +125,10 @@ func resolveStates(states []State) ([]State, []gh.IssueState, error) {
 
 // newSnapshot indexes a fetched issue set and keeps the warnings that bear on
 // read queries. Contradiction warnings (multiple labels, an in-progress epic)
-// are prime's business, not a snapshot's.
-func newSnapshot(issues []model.Issue, states []State) *Snapshot {
+// are prime's business, not a snapshot's. bodies records whether the
+// list-shaped reads carry text; the fetch keeps it either way, so a
+// single-issue read can still return it.
+func newSnapshot(issues []model.Issue, states []State, bodies bool) *Snapshot {
 	var warnings []Warning
 	for _, w := range warningsFromModel(model.Warnings(issues)) {
 		switch w.Kind {
@@ -134,7 +136,7 @@ func newSnapshot(issues []model.Issue, states []State) *Snapshot {
 			warnings = append(warnings, w)
 		}
 	}
-	return &Snapshot{issues: issues, warnings: warnings, states: states}
+	return &Snapshot{issues: issues, warnings: warnings, states: states, bodies: bodies}
 }
 
 // warningsFromModel maps every warning the domain produces, including the
@@ -172,6 +174,7 @@ type Snapshot struct {
 	issues   []model.Issue
 	warnings []Warning
 	states   []State
+	bodies   bool
 }
 
 // States returns the states this snapshot fetched. A query can only answer
@@ -190,17 +193,19 @@ func (s *Snapshot) Warnings() []Warning {
 }
 
 // Issues returns every fetched issue in list order — ready work first, then
-// claimed, blocked, epics and closed — with body. Callers that want one
-// question answered use Ready, Blocked, Claimed, Epics or Children instead.
+// claimed, blocked, epics and closed — carrying the body and comments only
+// when SnapshotOptions.Bodies asked for them. Callers that want one question
+// answered use Ready, Blocked, Claimed, Epics or Children instead.
 func (s *Snapshot) Issues() []Issue {
 	issues := slices.Clone(s.issues)
 	model.SortForList(issues)
-	return issuesFromModel(issues)
+	return issuesFromModel(issues, s.bodies)
 }
 
-// Get returns the issue from the snapshot, if the fetched states included it.
-// It is a lookup, not a fetch: use Reader.Get or Tracker.Get for an issue
-// outside the snapshot.
+// Get returns the issue from the snapshot, if the fetched states included it,
+// with its body and comments: a single-issue read keeps the text even when
+// the snapshot's list-shaped reads omit it. It is a lookup, not a fetch: use
+// Reader.Get or Tracker.Get for an issue outside the snapshot.
 func (s *Snapshot) Get(number int) (Issue, bool) {
 	for _, i := range s.issues {
 		if i.Number == number {
@@ -213,7 +218,7 @@ func (s *Snapshot) Get(number int) (Issue, bool) {
 // Ready returns open, non-epic, unclaimed, triaged issues with no open
 // blockers, sorted by priority — the same set `hew ready` prints.
 func (s *Snapshot) Ready() []Issue {
-	return issuesFromModel(model.Ready(s.issues))
+	return issuesFromModel(model.Ready(s.issues), s.bodies)
 }
 
 // Blocked returns open issues with at least one open blocker, sorted by
@@ -227,7 +232,7 @@ func (s *Snapshot) Blocked() []Issue {
 		}
 	}
 	model.SortByPriority(out)
-	return issuesFromModel(out)
+	return issuesFromModel(out, s.bodies)
 }
 
 // Claimed returns open claimed issues — an assignee or the in-progress label
@@ -240,33 +245,33 @@ func (s *Snapshot) Claimed() []Issue {
 		}
 	}
 	model.SortByPriority(out)
-	return issuesFromModel(out)
+	return issuesFromModel(out, s.bodies)
 }
 
 // Epics returns the issues that have sub-issues or carry the epic label,
 // sorted by priority. It spans the states the snapshot fetched, so the zero
 // SnapshotOptions yields open epics and a closed fetch adds the finished ones.
 func (s *Snapshot) Epics() []Issue {
-	return issuesFromModel(model.EpicsOf(s.issues))
+	return issuesFromModel(model.EpicsOf(s.issues), s.bodies)
 }
 
 // Children returns an epic's children, oldest first, from parent backlinks
 // over the full fetch — complete even when the epic's own sub-issue
 // connection was capped.
 func (s *Snapshot) Children(epic int) []Issue {
-	return issuesFromModel(model.Children(s.issues, epic))
+	return issuesFromModel(model.Children(s.issues, epic), s.bodies)
 }
 
-// issuesFromModel converts a query result to the library's flat shape. A
-// snapshot read carries bodies because the fetch already has them; comments
-// are only present on Reader.Get and Tracker.Get.
-func issuesFromModel(issues []model.Issue) []Issue {
+// issuesFromModel converts a query result to the library's flat shape.
+// withBodies carries the body and comments a list row does not need; the
+// snapshot's option decides, and every other list-shaped read omits them.
+func issuesFromModel(issues []model.Issue, withBodies bool) []Issue {
 	if issues == nil {
 		return nil
 	}
 	out := make([]Issue, len(issues))
 	for n, i := range issues {
-		out[n] = issueFromModel(i, true)
+		out[n] = issueFromModel(i, withBodies)
 	}
 	return out
 }

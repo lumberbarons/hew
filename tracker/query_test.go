@@ -653,3 +653,131 @@ func TestSearchRejectsAnUnknownStateBeforeCallingTheBackend(t *testing.T) {
 		t.Errorf("SearchIssues called %d times for an unknown state", store.calls)
 	}
 }
+
+// Search answers "already filed?" from titles and numbers; the body is a
+// list-row cost, so it rides only on the explicit opt-in.
+func TestSearchOmitsBodiesUnlessAsked(t *testing.T) {
+	match := fixture(1, "Retry loop", "P2", "bug")
+	match.Comments = []model.Comment{{Author: "alice", CreatedAt: time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC), Body: "a comment"}}
+	match.CommentsTotal = 1
+	store := &searchStore{matches: []model.Issue{match}, total: 1}
+	store.fakeClient = &fakeClient{}
+
+	got, err := WrapAs(store, BackendGitHub, "").Search(context.Background(), SearchRequest{Terms: "retry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Issues) != 1 || got.Issues[0].Body != nil {
+		t.Errorf("Issues = %+v, want one match without a body", got.Issues)
+	}
+	if len(got.Issues) == 1 && (len(got.Issues[0].Comments) != 0 || got.Issues[0].CommentsTotal != 0) {
+		t.Errorf("match comments = %+v total %d, want omitted", got.Issues[0].Comments, got.Issues[0].CommentsTotal)
+	}
+
+	withText, err := WrapAs(store, BackendGitHub, "").Search(context.Background(), SearchRequest{Terms: "retry", Bodies: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withText.Issues) != 1 || withText.Issues[0].Body == nil || *withText.Issues[0].Body != match.Body {
+		t.Errorf("Bodies: true Issues = %+v, want the match's body", withText.Issues)
+	}
+	if len(withText.Issues) == 1 && (len(withText.Issues[0].Comments) != 1 || withText.Issues[0].CommentsTotal != 1) {
+		t.Errorf("Bodies: true match comments = %+v total %d", withText.Issues[0].Comments, withText.Issues[0].CommentsTotal)
+	}
+}
+
+// Triage lists untriaged rows; its findings come from a scan the caller never
+// had to perform, so the text itself is another list-row cost.
+func TestTriageOmitsBodiesUnlessAsked(t *testing.T) {
+	untriaged := fixture(1, "Drive-by")
+	untriaged.Body = "hidden\u200b text"
+	untriaged.Comments = []model.Comment{{Author: "alice", CreatedAt: time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC), Body: "a comment"}}
+	untriaged.CommentsTotal = 1
+
+	queue, err := WrapAs(&fakeClient{issues: []model.Issue{untriaged}}, BackendGitHub, "").Triage(context.Background(), TriageRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queue.Issues) != 1 || queue.Issues[0].Body != nil {
+		t.Errorf("queue = %+v, want one untriaged row without a body", queue.Issues)
+	}
+	if _, ok := findingFor(queue.TextFindings, TextFindingBody); !ok {
+		t.Errorf("TextFindings = %+v, want the body finding to survive the omission", queue.TextFindings)
+	}
+	withText, err := WrapAs(&fakeClient{issues: []model.Issue{untriaged}}, BackendGitHub, "").Triage(context.Background(), TriageRequest{Bodies: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withText.Issues) != 1 || withText.Issues[0].Body == nil || *withText.Issues[0].Body != untriaged.Body {
+		t.Errorf("Bodies: true queue = %+v, want the untriaged body", withText.Issues)
+	}
+
+	search := &searchStore{matches: []model.Issue{untriaged}, total: 1}
+	search.fakeClient = &fakeClient{}
+	found, err := WrapAs(search, BackendGitHub, "").Triage(context.Background(), TriageRequest{Search: "drive"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Issues) != 1 || found.Issues[0].Body != nil {
+		t.Errorf("search = %+v, want one untriaged match without a body", found.Issues)
+	}
+	searchWithText, err := WrapAs(search, BackendGitHub, "").Triage(context.Background(), TriageRequest{Search: "drive", Bodies: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(searchWithText.Issues) != 1 || searchWithText.Issues[0].Body == nil {
+		t.Errorf("Bodies: true search = %+v, want the match's body", searchWithText.Issues)
+	}
+}
+
+// An epic's detail is the one place two kinds of read meet: the subject is a
+// document, its children are rows.
+func TestDetailEpicChildrenAreListRows(t *testing.T) {
+	epic := fixture(10, "Epic", "P2", "task", "epic")
+	epic.SubIssues = []model.Ref{{Number: 11, State: "OPEN"}}
+	epic.SubIssuesTotal = 1
+	child := fixture(11, "Child", "P2", "task")
+	child.Parent = &model.Ref{Number: 10, State: "OPEN"}
+
+	detail, err := WrapAs(&fakeClient{issues: []model.Issue{epic, child}}, BackendGitHub, "").Detail(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Issue.Body == nil || *detail.Issue.Body != epic.Body {
+		t.Errorf("subject body = %v, want %q", detail.Issue.Body, epic.Body)
+	}
+	if len(detail.Children) != 1 || detail.Children[0].Body != nil {
+		t.Errorf("Children = %+v, want one row without a body", detail.Children)
+	}
+}
+
+func TestPrimerSectionsCarryNoBodies(t *testing.T) {
+	ready := fixture(1, "Ready one", "P2", "bug")
+	claimed := fixture(2, "Working", "P1", "bug", "in-progress")
+	claimed.Assignees = []string{"me"}
+	epic := fixture(3, "Epic", "P2", "task", "epic")
+	epic.SubIssues = []model.Ref{{Number: 1, State: "OPEN"}}
+	epic.SubIssuesTotal = 1
+
+	result, err := WrapAs(&fakeClient{issues: []model.Issue{ready, claimed, epic}}, BackendGitHub, "").Primer(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, section := range []struct {
+		name   string
+		issues []Issue
+	}{
+		{"Ready", result.Ready},
+		{"InProgress", result.InProgress},
+		{"Epics", result.Epics},
+	} {
+		if len(section.issues) == 0 {
+			t.Fatalf("%s returned nothing to check", section.name)
+		}
+		for _, issue := range section.issues {
+			if issue.Body != nil {
+				t.Errorf("%s #%d body = %q, want omitted", section.name, issue.Number, *issue.Body)
+			}
+		}
+	}
+}

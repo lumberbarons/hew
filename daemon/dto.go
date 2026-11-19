@@ -87,7 +87,7 @@ type detailOut struct {
 
 func detailFrom(d tracker.IssueDetail) detailOut {
 	return detailOut{
-		Issue: d.Issue, Children: lean(d.Children), Next: d.Next,
+		Issue: d.Issue, Children: orEmpty(d.Children), Next: d.Next,
 		TextFindings: textFindingsOut(d.TextFindings), Warnings: warningsOut(d.Warnings),
 	}
 }
@@ -132,9 +132,9 @@ type primerOut struct {
 
 func primerFrom(p tracker.PrimerResult) primerOut {
 	return primerOut{
-		Ready: lean(p.Ready), ReadyTotal: p.ReadyTotal, OpenTotal: p.OpenTotal,
-		InProgress: lean(p.InProgress), InProgressTotal: p.InProgressTotal,
-		Epics: lean(p.Epics), EpicsTotal: p.EpicsTotal,
+		Ready: orEmpty(p.Ready), ReadyTotal: p.ReadyTotal, OpenTotal: p.OpenTotal,
+		InProgress: orEmpty(p.InProgress), InProgressTotal: p.InProgressTotal,
+		Epics: orEmpty(p.Epics), EpicsTotal: p.EpicsTotal,
 		Untriaged: p.Untriaged, Warnings: warningsOut(p.Warnings), Conventions: p.Conventions,
 	}
 }
@@ -161,17 +161,4 @@ func prFrom(r pr.CreateResult) prOut {
 		Number: r.Number, URL: r.URL, Draft: r.Draft, Fixes: r.Fixes, FixedIssues: orEmpty(r.FixedIssues),
 		Head: r.Head, Base: r.Base, Title: r.Title, Warnings: warns, Findings: findingsOut(r.Findings),
 	}
-}
-
-// lean strips the text a list row never shows. Snapshot reads carry every
-// issue's body, while `hew list --json` omits it unless asked; sending them
-// all would make the board's payload scale with body length. Detail is the
-// route that returns a body.
-func lean(in []tracker.Issue) []tracker.Issue {
-	out := make([]tracker.Issue, len(in))
-	for i, issue := range in {
-		issue.Body, issue.Comments, issue.CommentsTotal = nil, nil, 0
-		out[i] = issue
-	}
-	return out
 }
