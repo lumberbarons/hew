@@ -16,29 +16,29 @@ import (
 type PrimerResult struct {
 	// Ready is every ready issue, priority-sorted; ReadyTotal is its uncapped
 	// length.
-	Ready      []Issue
-	ReadyTotal int
+	Ready      []Issue `json:"ready"`
+	ReadyTotal int     `json:"readyTotal"`
 	// OpenTotal is the number of open issues the fetch returned, which is the
 	// denominator the primer reports.
-	OpenTotal int
+	OpenTotal int `json:"openTotal"`
 	// InProgress is every open, triaged issue carrying the in-progress label,
 	// priority-sorted; InProgressTotal is its length.
-	InProgress      []Issue
-	InProgressTotal int
+	InProgress      []Issue `json:"inProgress"`
+	InProgressTotal int     `json:"inProgressTotal"`
 	// Epics is every open epic, priority-sorted; EpicsTotal is its length.
-	Epics      []Issue
-	EpicsTotal int
+	Epics      []Issue `json:"epics"`
+	EpicsTotal int     `json:"epicsTotal"`
 	// Untriaged counts open untriaged issues. Their titles and bodies are not
 	// in any section: Triage is the deliberate API that returns them.
-	Untriaged int
+	Untriaged int `json:"untriaged"`
 	// Warnings is every contradiction and completeness notice the live state
 	// carries — multiple labels, an in-progress epic, a dependency cycle, and
 	// capped connections — in deterministic order.
-	Warnings []Warning
+	Warnings []Warning `json:"warnings"`
 	// Conventions is the backend's static primer text: the GitHub variant with
 	// the pull-request workflow, or the local variant that completes with
 	// close --completed.
-	Conventions string
+	Conventions string `json:"conventions"`
 }
 
 // Primer is the session-start read: one fetch of open issues, the ready,

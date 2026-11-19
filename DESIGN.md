@@ -967,6 +967,11 @@ schema carries the exported fields only; the accessors that expose reference
 states, raw labels, the parent's title and the close reason come from a library
 read.
 
+Every other exported result and warning type carries the same schema: camelCase
+keys, and an empty slice or map rather than null, so a caller can serve a result
+as its API's response without a mapping layer of its own. `consumer/` pins the
+shape of each one, and the daemon returns them directly.
+
 ### Warnings and findings
 
 A warning is a typed value on the result, never a line printed by a library call

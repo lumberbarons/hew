@@ -14,67 +14,67 @@ import (
 // body a person edited) are listed there but are not failures.
 type Result struct {
 	// DryRun reports which mode ran.
-	DryRun bool
+	DryRun bool `json:"dryRun"`
 	// Created, Wired, Closed and Relinked count the run's writes.
-	Created  int
-	Wired    int
-	Closed   int
-	Relinked int
+	Created  int `json:"created"`
+	Wired    int `json:"wired"`
+	Closed   int `json:"closed"`
+	Relinked int `json:"relinked"`
 	// Failed is the number of steps a rerun will attempt again.
-	Failed int
+	Failed int `json:"failed"`
 	// Selected is how many source records the run selected to migrate.
 	// A run that selects none reports it here, so a caller can render an empty
 	// plan without confusing it with a fully resumed run, whose Selected is
 	// non-zero and Created is zero.
-	Selected int
+	Selected int `json:"selected"`
 	// Skipped counts source records the run's selection left out: the closed
 	// beads a run without IncludeClosed does not migrate.
-	Skipped int
+	Skipped int `json:"skipped"`
 	// Backend is the tracker's backend after the run, when a workflow changed
 	// it: the local-to-GitHub migration seals and flips to BackendGitHub.
 	// Empty means the workflow did not change it.
-	Backend tracker.Backend
+	Backend tracker.Backend `json:"backend"`
 	// Warnings names the edges that did not land, the steps that failed, the
 	// bodies a person edited first, the source labels a migration renamed, and
 	// anything else a rerun cannot change.
-	Warnings []Warning
+	Warnings []Warning `json:"warnings"`
 	// Mapping is every key → issue number after the run.
-	Mapping map[string]int
+	Mapping map[string]int `json:"mapping"`
 	// Plan is a dry run's steps in source order: the items the checkpoint
 	// already accounts for and the ones a real run would create, interleaved as
 	// the source lists them. It is empty otherwise.
-	Plan []PlanStep
+	Plan []PlanStep `json:"plan"`
 	// WouldCreate and AlreadyCreated are Plan split by kind: the items a real
 	// run would create, in source order, and the mapping its checkpoint already
 	// accounts for. They are empty otherwise.
-	WouldCreate    []PlannedItem
-	AlreadyCreated map[string]int
+	WouldCreate    []PlannedItem  `json:"wouldCreate"`
+	AlreadyCreated map[string]int `json:"alreadyCreated"`
 }
 
 // PlanStep is one line of a dry run's plan, in source order.
 type PlanStep struct {
 	// Key identifies the source record the step is about.
-	Key string
+	Key string `json:"key"`
 	// Migrated is the issue number the checkpoint records for Key; zero means
 	// the step is a planned create.
-	Migrated int
+	Migrated int `json:"migrated"`
 	// Title, Priority, Type, Parent, BlockedBy, InProgress and ThenClose
 	// describe the issue a planned create would file, derived from the item's
 	// labels and edges. They are zero for a step the checkpoint already
 	// accounts for.
-	Title      string
-	Priority   string
-	Type       string
-	Parent     string
-	BlockedBy  []string
-	InProgress bool
-	ThenClose  bool
+	Title      string   `json:"title"`
+	Priority   string   `json:"priority"`
+	Type       string   `json:"type"`
+	Parent     string   `json:"parent"`
+	BlockedBy  []string `json:"blockedBy"`
+	InProgress bool     `json:"inProgress"`
+	ThenClose  bool     `json:"thenClose"`
 }
 
 // PlannedItem is one issue a dry run would create, in the source's order.
 type PlannedItem struct {
-	Key   string
-	Title string
+	Key   string `json:"key"`
+	Title string `json:"title"`
 }
 
 // note records a warning a rerun cannot change.

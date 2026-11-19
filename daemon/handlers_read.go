@@ -35,16 +35,7 @@ func (s *Server) primer(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(primerFrom(p)), nil
-}
-
-type boardOut struct {
-	Ready     []tracker.Issue `json:"ready"`
-	Claimed   []tracker.Issue `json:"claimed"`
-	Blocked   []tracker.Issue `json:"blocked"`
-	Epics     []tracker.Issue `json:"epics"`
-	Untriaged int             `json:"untriaged"`
-	Warnings  []warningOut    `json:"warnings"`
+	return ok(p), nil
 }
 
 // board is the landing view: one snapshot sliced into the sections `hew list`
@@ -64,7 +55,7 @@ func (s *Server) board(q *request[none]) (reply, error) {
 	return ok(boardOut{
 		Ready: orEmpty(snap.Ready()), Claimed: orEmpty(snap.Claimed()),
 		Blocked: orEmpty(snap.Blocked()), Epics: orEmpty(snap.Epics()),
-		Untriaged: untriaged, Warnings: warningsOut(snap.Warnings()),
+		Untriaged: untriaged, Warnings: snap.Warnings(),
 	}), nil
 }
 
@@ -124,7 +115,7 @@ func (s *Server) detail(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(detailFrom(d)), nil
+	return ok(d), nil
 }
 
 func (s *Server) epics(q *request[none]) (reply, error) {
@@ -148,12 +139,7 @@ func (s *Server) search(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(listOut{Issues: orEmpty(res.Issues), Total: res.Total, Fetched: res.Fetched}), nil
-}
-
-type triageOut struct {
-	listOut
-	TextFindings []textFindingOut `json:"textFindings"`
+	return ok(res), nil
 }
 
 // triage is the one route that returns untriaged text. The UI says so before
@@ -163,8 +149,5 @@ func (s *Server) triage(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(triageOut{
-		listOut:      listOut{Issues: orEmpty(res.Issues), Total: res.Total, Fetched: res.Fetched},
-		TextFindings: textFindingsOut(res.TextFindings),
-	}), nil
+	return ok(res), nil
 }

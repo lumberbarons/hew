@@ -23,16 +23,16 @@ func WrapWriter(store gh.IssueStore) *Writer { return &Writer{store: store} }
 // requested blockers in request order; an empty Added means the call was a
 // no-op.
 type BlockResult struct {
-	Added    []int
-	Existing []int
+	Added    []int `json:"added"`
+	Existing []int `json:"existing"`
 }
 
 // UnblockResult reports what Unblock changed. Removed and Missing are the
 // requested blockers in request order; an empty Removed means the call was a
 // no-op.
 type UnblockResult struct {
-	Removed []int
-	Missing []int
+	Removed []int `json:"removed"`
+	Missing []int `json:"missing"`
 }
 
 // Block adds native dependencies after a transitive client-side cycle check

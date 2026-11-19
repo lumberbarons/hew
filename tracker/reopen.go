@@ -8,9 +8,9 @@ import "context"
 // — the in-progress label and the assignees that carried it. Either half can
 // be empty when the claim had only one.
 type ReopenResult struct {
-	Reopened          bool
-	ReleasedLabel     bool
-	ReleasedAssignees []string
+	Reopened          bool     `json:"reopened"`
+	ReleasedLabel     bool     `json:"releasedLabel"`
+	ReleasedAssignees []string `json:"releasedAssignees"`
 }
 
 // Reopen is Close's inverse: comment opts.Reason on a closed issue, reopen it,

@@ -11,7 +11,7 @@ import (
 // CloseResult reports a completed closure. StateReason is the backend's close
 // reason: COMPLETED, NOT_PLANNED or DUPLICATE.
 type CloseResult struct {
-	StateReason string
+	StateReason string `json:"stateReason"`
 }
 
 // Close comments opts.Reason on an issue and closes it: not planned unless

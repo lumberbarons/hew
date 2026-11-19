@@ -437,6 +437,9 @@ func TestPullRequestRoutesMapRequestsAndResults(t *testing.T) {
 	if status != 201 || res["number"] != float64(12) || res["draft"] != false || res["url"] != "https://example.test/pull/12" {
 		t.Fatalf("create = %d %v", status, res)
 	}
+	// Warnings are the library's typed values, so the client reads the kind
+	// instead of a pre-rendered string — and reads each warning's subject, so
+	// an advisory names the issue, assignees and actor it is about.
 	if w := res["warnings"].([]any); len(w) != 2 {
 		t.Fatalf("warnings = %v, want two structured warnings", w)
 	} else if unclaimed, ok := w[0].(map[string]any); !ok {
