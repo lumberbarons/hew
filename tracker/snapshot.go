@@ -210,6 +210,16 @@ func (s *Snapshot) Get(number int) (Issue, bool) {
 	return Issue{}, false
 }
 
+// Untriaged returns how many open issues in the snapshot are untriaged — the
+// same count Primer reports, with none of their titles or bodies. An untriaged
+// issue is ordinary tracker state rather than a defect, so it stays out of the
+// read queries; Triage is the deliberate API that returns its text. Epics are
+// containers and are never untriaged, and a closed fetch holds no open triage
+// work, so either counts zero.
+func (s *Snapshot) Untriaged() int {
+	return len(model.UntriagedIssues(s.issues))
+}
+
 // Ready returns open, non-epic, unclaimed, triaged issues with no open
 // blockers, sorted by priority — the same set `hew ready` prints.
 func (s *Snapshot) Ready() []Issue {

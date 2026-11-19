@@ -905,6 +905,8 @@ explicitly named issue, the children of an explicitly named epic, and the
 deliberate `Triage` API are the only operations that return them. `Snapshot.Issues`
 is the raw fetched set behind those queries; a caller that surfaces it directly
 takes on the boundary, which is why the commands use the query methods.
+`Snapshot.Untriaged` reports how many open issues the fetch holds untriaged — the
+count the primer rolls up — without returning any of their text.
 
 ### Types an external module names
 

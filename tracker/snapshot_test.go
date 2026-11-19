@@ -180,6 +180,41 @@ func TestSnapshotIncludesClosedOnRequest(t *testing.T) {
 	}
 }
 
+// TestSnapshotUntriagedCountsOpenUntriagedOnly pins what a board needs: the
+// number a primer reports, without the titles and bodies Triage is the
+// deliberate read for. A closed issue is not triage work, and an epic is never
+// untriaged whatever its labels say.
+func TestSnapshotUntriagedCountsOpenUntriagedOnly(t *testing.T) {
+	open := fixture(1, "Unvetted report")
+	claimed := fixture(2, "Claimed unvetted report", "in-progress")
+	claimed.Assignees = []string{"alice"}
+	closed := fixture(3, "Closed unvetted report")
+	closed.State = "CLOSED"
+	epic := fixture(4, "Childless epic", "epic")
+	triaged := fixture(5, "Triaged", "P2", "bug")
+
+	store := &fakeClient{issues: []model.Issue{open, claimed, closed, epic, triaged}}
+	snapshot, err := Wrap(store).Snapshot(context.Background(), SnapshotOptions{States: []State{StateOpen, StateClosed}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An open untriaged issue counts whether or not it is claimed: claiming it
+	// is triage, so the claim does not take it out of the queue.
+	if got, want := snapshot.Untriaged(), 2; got != want {
+		t.Errorf("Untriaged() = %d, want %d (open, non-epic only)", got, want)
+	}
+
+	// A closed-only fetch holds no open triage work, so the count is zero even
+	// though the closed issue in it is untriaged.
+	closedOnly, err := Wrap(&fakeClient{issues: []model.Issue{closed}}).Snapshot(context.Background(), SnapshotOptions{States: []State{StateClosed}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := closedOnly.Untriaged(); got != 0 {
+		t.Errorf("Untriaged() on a closed-only snapshot = %d, want 0", got)
+	}
+}
+
 func TestGetCarriesBodyAndComments(t *testing.T) {
 	issue := fixture(7, "Detailed", "P1", "bug", "tests")
 	issue.StateReason = "completed"

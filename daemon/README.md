@@ -106,9 +106,6 @@ Things a consumer had to work around. None blocked a route.
 - **Snapshot reads always carry issue bodies.** `hew list --json` omits them unless
   asked; `Snapshot.Ready`, `List` and the rest include them, so a consumer building a
   list view has to strip them (`lean` in `dto.go`).
-- **No untriaged count on a `Snapshot`.** `Primer` reports one, but a board built from
-  a snapshot has to count over `Snapshot.Issues()`, the raw read that includes
-  untriaged text.
 - **No error classification.** The typed errors are enough, but the mapping from them
   to "claimed by you / by someone else / blocked" lives in `internal/cli`, so every
   consumer re-derives it (`errors.go`).

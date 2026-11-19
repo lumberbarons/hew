@@ -55,16 +55,10 @@ func (s *Server) board(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	untriaged := 0
-	for _, i := range snap.Issues() {
-		if i.Untriaged {
-			untriaged++
-		}
-	}
 	return ok(boardOut{
 		Ready: lean(snap.Ready()), Claimed: lean(snap.Claimed()),
 		Blocked: lean(snap.Blocked()), Epics: lean(snap.Epics()),
-		Untriaged: untriaged, Warnings: warningsOut(snap.Warnings()),
+		Untriaged: snap.Untriaged(), Warnings: warningsOut(snap.Warnings()),
 	}), nil
 }
 
