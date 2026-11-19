@@ -110,9 +110,9 @@ Things a consumer had to work around. None blocked a route.
   list-shaped reads return body-free rows unless the request asks for them
   (`SnapshotOptions.Bodies`, `SearchRequest.Bodies`, `TriageRequest.Bodies`), and
   the daemon no longer strips anything.
-- **No untriaged count on a `Snapshot`.** `Primer` reports one, but a board built from
-  a snapshot has to count over `Snapshot.Issues()`, the raw read that includes
-  untriaged text.
+- **No untriaged count on a `Snapshot`** (fixed in #352). `Primer` reported one, but a
+  board built from a snapshot had to count over `Snapshot.Issues()`, the raw read that
+  includes untriaged text. `Snapshot.Untriaged` now returns the count without the text.
 - **No error classification.** The typed errors are enough, but the mapping from them
   to "claimed by you / by someone else / blocked" lives in `internal/cli`, so every
   consumer re-derives it (`errors.go`).
