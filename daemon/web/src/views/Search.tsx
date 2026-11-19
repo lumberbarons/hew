@@ -5,7 +5,11 @@ import type { SearchResult } from '../types';
 import { PageHead, Section } from '../ui';
 import { useLoad } from '../useLoad';
 
-/** One search's results. Keyed by submit too, so repeating a search remounts it. */
+/**
+ * One search's results. Keyed by the submit sequence as well as the terms, so
+ * repeating a search remounts it and refetches; the old results are dropped
+ * deliberately while the new request is in flight.
+ */
 function Results({ terms }: { terms: string }) {
   const state = useLoad(() =>
     api<SearchResult>('GET', `/api/search?q=${encodeURIComponent(terms)}`),
@@ -28,13 +32,14 @@ function Results({ terms }: { terms: string }) {
 
 export function Search({ initial }: { initial: string }) {
   const [q, setQ] = useState(initial);
-  const [submitted, setSubmitted] = useState(initial.trim());
-  const [submits, setSubmits] = useState(0);
+  const [search, setSearch] = useState({ terms: initial.trim(), seq: 0 });
 
   const submit = (ev: FormEvent) => {
     ev.preventDefault();
-    setSubmitted(q.trim());
-    setSubmits((n) => n + 1);
+    const terms = q.trim();
+    // Terms and sequence live in one value so a run of a search cannot update
+    // one half of the results key without the other.
+    setSearch((prev) => ({ terms, seq: prev.seq + 1 }));
   };
 
   return (
@@ -53,7 +58,7 @@ export function Search({ initial }: { initial: string }) {
           Search
         </button>
       </form>
-      {submitted && <Results key={`${submits}:${submitted}`} terms={submitted} />}
+      {search.terms && <Results key={`${search.seq}:${search.terms}`} terms={search.terms} />}
     </>
   );
 }
