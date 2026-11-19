@@ -35,7 +35,6 @@ func (s *Server) primer(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	p.Ready, p.InProgress, p.Epics = lean(p.Ready), lean(p.InProgress), lean(p.Epics)
 	return ok(p), nil
 }
 
@@ -54,8 +53,8 @@ func (s *Server) board(q *request[none]) (reply, error) {
 		}
 	}
 	return ok(boardOut{
-		Ready: lean(snap.Ready()), Claimed: lean(snap.Claimed()),
-		Blocked: lean(snap.Blocked()), Epics: lean(snap.Epics()),
+		Ready: orEmpty(snap.Ready()), Claimed: orEmpty(snap.Claimed()),
+		Blocked: orEmpty(snap.Blocked()), Epics: orEmpty(snap.Epics()),
 		Untriaged: untriaged, Warnings: snap.Warnings(),
 	}), nil
 }
@@ -73,7 +72,7 @@ func (s *Server) ready(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(lean(limited(snap.Ready(), q.query))), nil
+	return ok(limited(orEmpty(snap.Ready()), q.query)), nil
 }
 
 // states parses ?state=open|closed|all. The snapshot default (open only) and
@@ -108,7 +107,7 @@ func (s *Server) list(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(lean(limited(snap.List(filter), q.query))), nil
+	return ok(limited(orEmpty(snap.List(filter)), q.query)), nil
 }
 
 func (s *Server) detail(q *request[none]) (reply, error) {
@@ -116,7 +115,6 @@ func (s *Server) detail(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	d.Children = lean(d.Children)
 	return ok(d), nil
 }
 
@@ -129,7 +127,7 @@ func (s *Server) epics(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(lean(snap.Epics())), nil
+	return ok(orEmpty(snap.Epics())), nil
 }
 
 func (s *Server) search(q *request[none]) (reply, error) {
@@ -141,7 +139,6 @@ func (s *Server) search(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	res.Issues = lean(res.Issues)
 	return ok(res), nil
 }
 
@@ -152,6 +149,5 @@ func (s *Server) triage(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	res.Issues = lean(res.Issues)
 	return ok(res), nil
 }

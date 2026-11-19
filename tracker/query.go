@@ -27,7 +27,7 @@ type ListFilter struct {
 func (s *Snapshot) List(filter ListFilter) []Issue {
 	issues := slices.Clone(s.issues)
 	model.SortForList(issues)
-	return issuesFromModel(model.List(issues, model.ListFilter{Label: filter.Label, Epic: filter.Epic}))
+	return issuesFromModel(model.List(issues, model.ListFilter{Label: filter.Label, Epic: filter.Epic}), s.bodies)
 }
 
 // TextFinding is one field's advisory character findings. Source attributes
@@ -64,7 +64,8 @@ type IssueDetail struct {
 	Issue Issue `json:"issue"`
 	// Children is an epic's full child set, oldest first, including closed
 	// and untriaged children: naming the epic is the explicit retrieval path.
-	// It is nil for a non-epic.
+	// It is a list of rows, so it carries no bodies; it is nil for a
+	// non-epic.
 	Children []Issue `json:"children"`
 	// Next is the epic's next workable child, nil for a non-epic or when the
 	// sequence is dry.
@@ -99,9 +100,9 @@ func (t *Tracker) Detail(ctx context.Context, number int) (IssueDetail, error) {
 	if err != nil {
 		return IssueDetail{}, asReadError(err)
 	}
-	snapshot := newSnapshot(issues, states)
+	snapshot := newSnapshot(issues, states, false)
 	children := model.Children(snapshot.issues, number)
-	detail.Children = issuesFromModel(children)
+	detail.Children = issuesFromModel(children, false)
 	detail.Warnings = snapshot.Warnings()
 	if next, ok := model.EpicNext(children); ok {
 		number := next.Number
@@ -142,11 +143,16 @@ type SearchRequest struct {
 	// unlike SnapshotOptions.States, where empty means open only. An unknown
 	// state is an invalid-input error.
 	States []State
+	// Bodies carries each match's body and comments. The zero value omits
+	// them: dedup reads a title, a number and its labels, and a caller that
+	// needs the text reads the issue.
+	Bodies bool
 }
 
 // SearchResult is a search listing: the triaged matches in the backend's
 // relevance order, plus the backend's full match count and how many matches
-// it fetched. Total above Fetched means the result was capped.
+// it fetched. Total above Fetched means the result was capped. Issues carries
+// bodies only when SearchRequest.Bodies asked for them.
 type SearchResult struct {
 	Issues  []Issue `json:"issues"`
 	Total   int     `json:"total"`
@@ -174,7 +180,7 @@ func (t *Tracker) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 		return SearchResult{}, asReadError(err)
 	}
 	return SearchResult{
-		Issues:  issuesFromModel(triagedOnly(issues)),
+		Issues:  issuesFromModel(triagedOnly(issues), req.Bodies),
 		Total:   total,
 		Fetched: len(issues),
 	}, nil
@@ -184,11 +190,18 @@ func (t *Tracker) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 // queue; a non-empty Search is the untriaged half of dedup across both states.
 type TriageRequest struct {
 	Search string
+	// Bodies carries each untriaged issue's body and comments. The zero
+	// value omits them; the advisory findings are computed from the fetched
+	// text regardless, so an annotator can leave it unset. `hew triage` sets
+	// it because its renderers scan the text themselves.
+	Bodies bool
 }
 
 // TriageResult is a triage listing: the untriaged matches, the completeness
 // counts for a search (the queue form is uncapped, so its Total equals
-// Fetched), and the advisory text findings for each match.
+// Fetched), and the advisory text findings for each match. Issues carries
+// bodies only when TriageRequest.Bodies asked for them; the findings are
+// computed from the fetched text either way.
 type TriageResult struct {
 	Issues       []Issue       `json:"issues"`
 	Total        int           `json:"total"`
@@ -211,7 +224,7 @@ func (t *Tracker) Triage(ctx context.Context, req TriageRequest) (TriageResult, 
 		}
 		matches := model.UntriagedIssues(issues)
 		return TriageResult{
-			Issues:       issuesFromModel(matches),
+			Issues:       issuesFromModel(matches, req.Bodies),
 			Total:        len(matches),
 			Fetched:      len(matches),
 			TextFindings: triageFindings(matches),
@@ -223,7 +236,7 @@ func (t *Tracker) Triage(ctx context.Context, req TriageRequest) (TriageResult, 
 	}
 	matches := untriagedOnly(issues)
 	return TriageResult{
-		Issues:       issuesFromModel(matches),
+		Issues:       issuesFromModel(matches, req.Bodies),
 		Total:        total,
 		Fetched:      len(issues),
 		TextFindings: triageFindings(matches),

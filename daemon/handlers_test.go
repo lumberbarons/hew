@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -613,5 +614,64 @@ func TestDryRunIsRefusedWhereItWouldBeIgnored(t *testing.T) {
 	}
 	if status, _ := e.call("POST", "/api/issues?dryRun=1", "", body); status != 200 {
 		t.Errorf("dryRun=1 on create = %d, want 200", status)
+	}
+}
+
+// List responses are rows, not documents: the library omits bodies on its
+// list-shaped reads, so the daemon has nothing to strip. Only the detail
+// route carries text.
+func TestListRoutesCarryNoIssueBodies(t *testing.T) {
+	e := newEnv(t, true)
+	text := map[string]any{"goal": "Ship it", "doneWhen": []string{"shipped"}}
+	ready := e.create("Ready with a body", map[string]any{"body": text})
+	status, res := e.call("POST", "/api/epics", "", map[string]any{"title": "Ship v1", "children": []int{ready}, "body": text})
+	if status != http.StatusCreated {
+		t.Fatalf("create epic = %d %v", status, res)
+	}
+	epic := int(res["issue"].(map[string]any)["number"].(float64))
+
+	lists := []struct {
+		path   string
+		issues func(map[string]any) []any
+	}{
+		{"/api/board", func(res map[string]any) []any {
+			var all []any
+			for _, key := range []string{"ready", "claimed", "blocked", "epics"} {
+				all = append(all, res[key].([]any)...)
+			}
+			return all
+		}},
+		{"/api/ready", func(res map[string]any) []any { return res["_list"].([]any) }},
+		{"/api/issues", func(res map[string]any) []any { return res["_list"].([]any) }},
+		{"/api/epics", func(res map[string]any) []any { return res["_list"].([]any) }},
+		{"/api/search?q=Ready", func(res map[string]any) []any { return res["issues"].([]any) }},
+		{"/api/triage", func(res map[string]any) []any { return res["issues"].([]any) }},
+		{fmt.Sprintf("/api/issues/%d", epic), func(res map[string]any) []any { return res["children"].([]any) }},
+	}
+	for _, list := range lists {
+		status, res := e.call("GET", list.path, "", nil)
+		if status != http.StatusOK {
+			t.Fatalf("%s = %d %v", list.path, status, res)
+		}
+		issues := list.issues(res)
+		if len(issues) == 0 {
+			t.Errorf("%s listed no issues to check", list.path)
+		}
+		for _, v := range issues {
+			issue := v.(map[string]any)
+			if body, ok := issue["body"]; ok {
+				t.Errorf("%s listed #%v with a body: %v", list.path, issue["number"], body)
+			}
+		}
+	}
+
+	// The detail route is the one that carries text, so the check above has
+	// something to contrast with.
+	status, detail := e.call("GET", fmt.Sprintf("/api/issues/%d", ready), "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("detail = %d %v", status, detail)
+	}
+	if body, ok := detail["issue"].(map[string]any)["body"]; !ok || body == "" {
+		t.Errorf("detail issue body = %v, want the composed body", body)
 	}
 }

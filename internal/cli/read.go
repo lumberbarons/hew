@@ -178,6 +178,7 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 	}
 	snapshot, err := tracker.Wrap(a.Client).Snapshot(ctx, tracker.SnapshotOptions{
 		States: states,
+		Bodies: opts.Bodies,
 	})
 	if err != nil {
 		return err
@@ -275,7 +276,9 @@ func (a *App) Triage(ctx context.Context, opts TriageOpts) error {
 	if opts.Search != "" && strings.TrimSpace(opts.Search) == "" {
 		return usageErr("usage: hew triage --search <terms>")
 	}
-	result, err := a.readTracker().Triage(ctx, tracker.TriageRequest{Search: opts.Search})
+	// The renderers scan title and body themselves, so triage's rows have to
+	// carry the text the library omits by default.
+	result, err := a.readTracker().Triage(ctx, tracker.TriageRequest{Search: opts.Search, Bodies: true})
 	if err != nil {
 		return err
 	}

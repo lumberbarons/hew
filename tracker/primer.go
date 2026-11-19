@@ -58,12 +58,12 @@ func (t *Tracker) Primer(ctx context.Context) (PrimerResult, error) {
 		static = conventions.PrimerLocal
 	}
 	return PrimerResult{
-		Ready:           issuesFromModel(ready),
+		Ready:           issuesFromModel(ready, false),
 		ReadyTotal:      len(ready),
 		OpenTotal:       len(issues),
-		InProgress:      issuesFromModel(inProgress),
+		InProgress:      issuesFromModel(inProgress, false),
 		InProgressTotal: len(inProgress),
-		Epics:           issuesFromModel(epics),
+		Epics:           issuesFromModel(epics, false),
 		EpicsTotal:      len(epics),
 		Untriaged:       len(model.UntriagedIssues(issues)),
 		Warnings:        warningsFromModel(model.Warnings(issues)),

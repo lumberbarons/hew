@@ -105,8 +105,11 @@ Things a consumer had to work around. None blocked a route.
   with Go field names and `null` for nil slices, so `dto.go` re-mapped them. They
   now carry the schema themselves and the routes return them directly.
 - **Snapshot reads always carry issue bodies.** `hew list --json` omits them unless
-  asked; `Snapshot.Ready`, `List` and the rest include them, so a consumer building a
-  list view has to strip them (`lean` in `dto.go`).
+  asked; `Snapshot.Ready`, `List` and the rest included them, so a consumer building a
+  list view had to strip them (`lean` in `dto.go`). Filed as #351 and fixed: the
+  list-shaped reads return body-free rows unless the request asks for them
+  (`SnapshotOptions.Bodies`, `SearchRequest.Bodies`, `TriageRequest.Bodies`), and
+  the daemon no longer strips anything.
 - **No untriaged count on a `Snapshot`.** `Primer` reports one, but a board built from
   a snapshot has to count over `Snapshot.Issues()`, the raw read that includes
   untriaged text.

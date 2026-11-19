@@ -906,6 +906,15 @@ deliberate `Triage` API are the only operations that return them. `Snapshot.Issu
 is the raw fetched set behind those queries; a caller that surfaces it directly
 takes on the boundary, which is why the commands use the query methods.
 
+Body presence follows the list/document split rather than the fetch. The
+list-shaped reads — `Snapshot.Issues`, `Ready`, `List`, `Blocked`, `Claimed`,
+`Epics` and `Children`, plus `Search`, `Triage` and `Primer`'s sections — return
+rows without bodies or comments, which is what a list view renders and what keeps
+its payload from scaling with total body length. A caller that wants the text
+asks: `SnapshotOptions.Bodies`, `SearchRequest.Bodies` or `TriageRequest.Bodies`.
+The single-issue reads carry it unconditionally — `Get`, `Detail`, and the write
+results (`Create`, `Start`, `Edit`) — and `Detail`'s children stay rows.
+
 ### Types an external module names
 
 The values below are the contract, not an implementation sketch: a consumer

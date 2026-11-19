@@ -75,16 +75,3 @@ func (b boardOut) MarshalJSON() ([]byte, error) {
 	out.Warnings = orEmpty(out.Warnings)
 	return json.Marshal(out)
 }
-
-// lean strips the text a list row never shows. Snapshot reads carry every
-// issue's body, while `hew list --json` omits it unless asked; sending them
-// all would make the board's payload scale with body length. Detail is the
-// route that returns a body.
-func lean(in []tracker.Issue) []tracker.Issue {
-	out := make([]tracker.Issue, len(in))
-	for i, issue := range in {
-		issue.Body, issue.Comments, issue.CommentsTotal = nil, nil, 0
-		out[i] = issue
-	}
-	return out
-}
