@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { fx } from '../test/fixtures';
 import { mockApi, status } from '../test/mockApi';
@@ -12,6 +12,15 @@ describe('Search', () => {
     expect(await screen.findByRole('link', { name: 'Wire up the importer' })).toBeInTheDocument();
     expect(calls).toHaveLength(1);
     expect(screen.getByLabelText('Search terms')).toHaveValue('importer');
+  });
+
+  it('searches again when the same terms are submitted twice', async () => {
+    const { calls } = mockApi({ 'GET /api/search?q=importer': fx.search });
+    const { user } = renderView(<Search initial="importer" />);
+    expect(await screen.findByRole('link', { name: 'Wire up the importer' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls.map((c) => c.path)).toEqual(['/api/search?q=importer', '/api/search?q=importer']);
   });
 
   it('does nothing until there is something to search for', async () => {
