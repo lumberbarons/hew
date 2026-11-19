@@ -1,5 +1,6 @@
 // Command hewd serves a hew tracker over REST plus a small web UI.
-// It is a scratch proof of the public library: no auth, loopback only.
+// It is built only on the public library and is experimental like it: no auth,
+// loopback only.
 package main
 
 import (
