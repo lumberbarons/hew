@@ -51,6 +51,46 @@ func (e *BlockedError) Error() string {
 	return fmt.Sprintf("issue #%d has open blockers: %s", e.Issue, formatNumbers(e.OpenBlockers, ", "))
 }
 
+// StartOutcome is the decision a refused Start asks an agent loop to make.
+// The three values are the whole vocabulary: the CLI's exit codes, the
+// daemon's error kinds and a consumer's own branch points are spellings of
+// them, so no caller re-derives the decision from ClaimedError.ByActor.
+// Every other Start refusal — a closed target, an epic, an untriaged issue, a
+// bad priority, a write failure — is not a start outcome.
+type StartOutcome string
+
+const (
+	// StartClaimedByOther means someone else holds the issue: pick the next
+	// ready item (CLI exit 3).
+	StartClaimedByOther StartOutcome = "claimed_by_other"
+	// StartClaimedByYou means the acting identity already holds the issue:
+	// resume that work (CLI exit 5).
+	StartClaimedByYou StartOutcome = "claimed_by_you"
+	// StartBlocked means open blockers remain: pick the next ready item
+	// (CLI exit 6).
+	StartBlocked StartOutcome = "blocked"
+)
+
+// StartOutcomeOf reports which of the three decisions err carries: a claim by
+// someone else, a claim by the acting identity, or open blockers. ok is false
+// for every other error, which callers report as itself rather than as a
+// claim decision. The facts stay on *ClaimedError and *BlockedError; this
+// names the decision, not a copy of them.
+func StartOutcomeOf(err error) (StartOutcome, bool) {
+	var claimed *ClaimedError
+	if errors.As(err, &claimed) {
+		if claimed.ByActor {
+			return StartClaimedByYou, true
+		}
+		return StartClaimedByOther, true
+	}
+	var blocked *BlockedError
+	if errors.As(err, &blocked) {
+		return StartBlocked, true
+	}
+	return "", false
+}
+
 // AuthError reports an authentication failure, retaining the backend cause.
 type AuthError struct{ Err error }
 

@@ -409,7 +409,10 @@ func (s *stubPRs) Create(_ context.Context, req pr.CreateRequest) (pr.CreateResu
 	return pr.CreateResult{
 		Number: 12, URL: "https://example.test/pull/12", Draft: !req.Ready, Fixes: 1, FixedIssues: []int{1},
 		Head: "feat/x", Base: "main", Title: "feat: x",
-		Warnings: []pr.Warning{{Kind: pr.WarnMissingTesting}},
+		Warnings: []pr.Warning{
+			{Kind: pr.WarnUnclaimed, Issue: 9, Assignees: []string{"alice"}, Actor: "bob"},
+			{Kind: pr.WarnMissingTesting},
+		},
 	}, nil
 }
 
@@ -435,9 +438,19 @@ func TestPullRequestRoutesMapRequestsAndResults(t *testing.T) {
 		t.Fatalf("create = %d %v", status, res)
 	}
 	// Warnings are the library's typed values, so the client reads the kind
-	// instead of a pre-rendered string.
-	if w := res["warnings"].([]any); len(w) != 1 || w[0].(map[string]any)["kind"] != "missing-testing" {
-		t.Errorf("warnings = %v, want one missing-testing warning", w)
+	// instead of a pre-rendered string — and reads each warning's subject, so
+	// an advisory names the issue, assignees and actor it is about.
+	if w := res["warnings"].([]any); len(w) != 2 {
+		t.Fatalf("warnings = %v, want two structured warnings", w)
+	} else if unclaimed, ok := w[0].(map[string]any); !ok {
+		t.Errorf("warnings[0] = %v, want an object naming the issue and its assignees", w[0])
+	} else if unclaimed["kind"] != "unclaimed" || unclaimed["issue"] != float64(9) ||
+		unclaimed["actor"] != "bob" || fmt.Sprint(unclaimed["assignees"]) != "[alice]" {
+		t.Errorf("unclaimed warning = %v, want its issue, assignees and actor", unclaimed)
+	} else if missing, ok := w[1].(map[string]any); !ok || missing["kind"] != "missing-testing" {
+		t.Errorf("warnings[1] = %v, want missing-testing", w[1])
+	} else if missing["issues"] == nil || missing["assignees"] == nil || missing["groups"] == nil {
+		t.Errorf("warnings[1] = %v, want empty lists rather than null", missing)
 	}
 	if res["findings"] == nil || res["fixedIssues"] == nil {
 		t.Errorf("create left a list null: %v", res)

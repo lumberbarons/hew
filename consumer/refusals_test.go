@@ -33,6 +33,19 @@ func TestExternalConsumerMatchesClaimAndOwnershipRefusals(t *testing.T) {
 	if _, err := tr.As("owner").Start(ctx, number, tracker.StartOptions{}); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
+
+	// The claim outcome is the library's classification, not the consumer's
+	// own reading of ByActor: another actor is told to pick the next item,
+	// the owner to resume.
+	_, err = tr.As("intruder").Start(ctx, number, tracker.StartOptions{})
+	if outcome, ok := tracker.StartOutcomeOf(err); !ok || outcome != tracker.StartClaimedByOther {
+		t.Fatalf("Start by another actor = %q, %t; want %q", outcome, ok, tracker.StartClaimedByOther)
+	}
+	_, err = tr.As("owner").Start(ctx, number, tracker.StartOptions{})
+	if outcome, ok := tracker.StartOutcomeOf(err); !ok || outcome != tracker.StartClaimedByYou {
+		t.Fatalf("Start by the claimant = %q, %t; want %q", outcome, ok, tracker.StartClaimedByYou)
+	}
+
 	err = tr.As("intruder").Release(ctx, number, tracker.ReleaseOptions{})
 	var notOwner *tracker.NotOwnerError
 	if !errors.As(err, &notOwner) {
@@ -75,6 +88,13 @@ func TestExternalConsumerMatchesBlockerAndCycleRefusals(t *testing.T) {
 	}
 	if !slices.Equal(openBlockers.OpenBlockers, []int{blocker.Issue.Number}) {
 		t.Errorf("OpenBlockers = %v", openBlockers.OpenBlockers)
+	}
+	if outcome, ok := tracker.StartOutcomeOf(err); !ok || outcome != tracker.StartBlocked {
+		t.Errorf("Start behind a blocker = %q, %t; want %q", outcome, ok, tracker.StartBlocked)
+	}
+	// A refusal that is not one of the three decisions is reported as itself.
+	if outcome, ok := tracker.StartOutcomeOf(&tracker.ClosedError{Issue: 1}); ok {
+		t.Errorf("a closed target classified as start outcome %q", outcome)
 	}
 
 	// The cycle check is client-side and mandatory, so the reverse edge is
