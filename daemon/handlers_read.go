@@ -62,8 +62,8 @@ func (s *Server) board(q *request[none]) (reply, error) {
 		}
 	}
 	return ok(boardOut{
-		Ready: lean(snap.Ready()), Claimed: lean(snap.Claimed()),
-		Blocked: lean(snap.Blocked()), Epics: lean(snap.Epics()),
+		Ready: orEmpty(snap.Ready()), Claimed: orEmpty(snap.Claimed()),
+		Blocked: orEmpty(snap.Blocked()), Epics: orEmpty(snap.Epics()),
 		Untriaged: untriaged, Warnings: warningsOut(snap.Warnings()),
 	}), nil
 }
@@ -81,7 +81,7 @@ func (s *Server) ready(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(lean(limited(snap.Ready(), q.query))), nil
+	return ok(limited(orEmpty(snap.Ready()), q.query)), nil
 }
 
 // states parses ?state=open|closed|all. The snapshot default (open only) and
@@ -116,7 +116,7 @@ func (s *Server) list(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(lean(limited(snap.List(filter), q.query))), nil
+	return ok(limited(orEmpty(snap.List(filter)), q.query)), nil
 }
 
 func (s *Server) detail(q *request[none]) (reply, error) {
@@ -136,7 +136,7 @@ func (s *Server) epics(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(lean(snap.Epics())), nil
+	return ok(orEmpty(snap.Epics())), nil
 }
 
 func (s *Server) search(q *request[none]) (reply, error) {
@@ -148,7 +148,7 @@ func (s *Server) search(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(listOut{Issues: lean(res.Issues), Total: res.Total, Fetched: res.Fetched}), nil
+	return ok(listOut{Issues: orEmpty(res.Issues), Total: res.Total, Fetched: res.Fetched}), nil
 }
 
 type triageOut struct {
@@ -164,7 +164,7 @@ func (s *Server) triage(q *request[none]) (reply, error) {
 		return reply{}, err
 	}
 	return ok(triageOut{
-		listOut:      listOut{Issues: lean(res.Issues), Total: res.Total, Fetched: res.Fetched},
+		listOut:      listOut{Issues: orEmpty(res.Issues), Total: res.Total, Fetched: res.Fetched},
 		TextFindings: textFindingsOut(res.TextFindings),
 	}), nil
 }
