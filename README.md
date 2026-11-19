@@ -492,111 +492,25 @@ primer still reports how much is waiting.
 
 ## Use as a library
 
-A Go program can drive hew in-process instead of shelling out to the binary:
+A Go program can drive hew in-process instead of shelling out to the binary.
 `github.com/lumberbarons/hew/tracker`
 ([docs](https://pkg.go.dev/github.com/lumberbarons/hew/tracker)) takes the
-worktree and the claim identity as arguments — never the process's working
-directory or environment — and returns typed results, warnings and errors, not
-exit codes. Pull requests and migrations are separate packages in the contract,
-`pr` and `migrate`, rather than hanging off a tracker handle they do not belong
-to.
-
+worktree and the claim identity as arguments and returns typed results and
+errors, not exit codes; pull requests and migrations are the separate `pr` and
+`migrate` packages. The package documentation has runnable examples,
 [DESIGN.md's Tracker library contract](DESIGN.md#tracker-library) maps every
-command to the public operation that performs its workflow, names the request,
-result, warning and error types an external module can refer to, and states the
-concurrency, identity, backend and authentication guarantees. That inventory is
-the target to program against: it covers reads and queries, primer data, creation,
-editing, reopening, claims, closure, dependencies, apply plans, pull requests
-and both migrations. Flags, `$EDITOR`, file input, terminal rendering and exit
-codes stay in the CLI, so a library caller passes values and renders nothing.
+command to its public operation, and [`consumer/`](consumer/) is a separate
+module that imports only these packages and runs the workflows in CI.
 
-```go
-t, err := tracker.Open(ctx, tracker.Config{Worktree: worktree})
-if err != nil {
-	return err // *tracker.AuthError, *tracker.InvalidInputError, ...
-}
-snap, err := t.Snapshot(ctx, tracker.SnapshotOptions{}) // open issues, one fetch
-if err != nil {
-	return err
-}
-for _, issue := range snap.Ready() {
-	fmt.Println(issue.Number, issue.Title)
-}
-for _, issue := range snap.List(tracker.ListFilter{Label: "parser"}) {
-	fmt.Println(issue.Number, issue.Title)
-}
+**Stability: experimental.** The public packages may change in any v0.x minor
+release until 1.0; breaking changes ship as `feat!:`/`fix!:` commits and CI diffs
+the exported surface. The GitHub backend needs the same `gh auth login`
+credentials as the CLI; the local backend needs neither `gh` nor a network. The
+minimum toolchain is the `go` directive in [`go.mod`](go.mod).
 
-// A single issue's view carries its body, comments and advisory text findings.
-detail, err := t.Detail(ctx, 42)
-if err != nil {
-	return err
-}
-fmt.Println(detail.Issue.Number, *detail.Issue.Body, detail.TextFindings)
-
-// The same state the primer renders, including the backend's convention text.
-primer, err := t.Primer(ctx)
-if err != nil {
-	return err
-}
-fmt.Println(primer.ReadyTotal, len(primer.Warnings), primer.Conventions)
-
-// Dependency writes are cycle-checked client-side, exactly as `hew block` is.
-_, err = t.Block(ctx, 42, []int{41}, tracker.BlockOptions{})
-var cycle *tracker.CycleError
-if errors.As(err, &cycle) {
-	// cycle.Cycle is the ordered path, e.g. []int{42, 41, 42}.
-}
-
-// A local tracker carries one claimant per worker; GitHub has only the login.
-worker := t.As("worker-3")
-fmt.Println("claiming as", worker.Identity())
-```
-
-`Open` answers every path and worktree question from `Config.Worktree`.
-`Config.Actor` (or `As`, which shares the open store) names the claimant on a
-local tracker; GitHub claims as the `gh` CLI's authenticated login and detects
-the repository from the origin remote unless `Config.Repo` pins one. Notices go
-to the optional `Config.Notice` writer — the library never prints. The backend
-is fixed at `Open`, so a long-lived process can pin it with `Config.Backend` and
-treat a later `Detect` that disagrees as an error instead of following it.
-
-The local backend is safe to write from several worktrees at once: every
-mutation takes the tracker's lock, and its claim and release are atomic, so
-`start` has one winner. On GitHub every worker shares the authenticated login,
-so the tracker cannot tell two sessions apart — a consumer keeps its own record
-of which worker holds which issue. Every call takes a `context.Context`;
-cancellation is matchable with `errors.Is`, and an interrupted multi-write
-operation reports the part that landed.
-
-The whole inventory ships today: backend detection and target metadata, snapshot
-and single-issue reads, the query policy behind `ready`, `list`, `show`,
-`epic status`, `search`, `triage` and `prime` — including the untriaged
-boundary and advisory text findings — creation and epics, editing and
-reopening, the claim lifecycle (`Start`, `Release`, `Close`), `Block`/`Unblock`
-and `ApplyPlan` with its checkpoints, initialization, pull-request creation and
-amendment, and both migrations. [`consumer/`](consumer/) is a separate Go
-module that imports only these three packages and runs those workflows in CI,
-against a real local tracker and an isolated GitHub transport; an operation
-that needs an internal type fails to build there instead of passing its own
-unit tests.
-
-[`daemon/`](daemon/) is a second, heavier consumer: `hewd` serves a local
-tracker over a REST API and a React web UI, built from the same public packages.
-It has no authentication and listens on loopback only, so it is for one person
-on one machine. See [`daemon/README.md`](daemon/README.md).
-
-**Stability: experimental.** The public packages are experimental until 1.0: the
-API may change in any v0.x minor release. A breaking change ships as a
-`feat!:`/`fix!:` commit, so it lands under Breaking changes in the release notes
-rather than Features, and CI diffs the exported surface of every public package
-so each change is deliberate and visible in review; the [`consumer/`](consumer/)
-module is the compile-time half of the same gate. From 1.0 it will be covered
-by the project's compatibility policy. The minimum toolchain is the `go`
-directive in [`go.mod`](go.mod), which carries an explicit patch release and is
-raised when a standard-library advisory lands; it is also what CI builds with,
-and the consumer module declares the same minimum. The GitHub backend needs the
-same `gh auth login` credentials as the CLI; the local backend needs neither
-`gh` nor a network.
+[`daemon/`](daemon/) is a second consumer: `hewd`, a loopback-only REST API and
+web UI over a local or GitHub tracker, for one person on one machine. See
+[`daemon/README.md`](daemon/README.md).
 
 ## Design
 

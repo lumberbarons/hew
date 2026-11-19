@@ -1,8 +1,8 @@
 // This file is done-when's contract-and-boundary item, checked rather than
 // asserted: the consumer module follows the documented toolchain, the public
 // packages' production dependency graph excludes the CLI and renderers, the
-// consumer imports nothing internal, and the names DESIGN.md and README.md
-// promise are exported.
+// consumer imports nothing internal, and the names DESIGN.md
+// promises are exported.
 package consumer_test
 
 import (
@@ -222,31 +222,6 @@ func TestDesignContractNamesExportedTypes(t *testing.T) {
 	}
 }
 
-// readmeLibraryExample returns the Go block under "## Use as a library".
-func readmeLibraryExample(t *testing.T) string {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "README.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(raw)
-	start := strings.Index(text, "## Use as a library")
-	if start < 0 {
-		t.Fatal("README.md has no library section")
-	}
-	text = text[start:]
-	open := strings.Index(text, "```go\n")
-	if open < 0 {
-		t.Fatal("the library section carries no Go example")
-	}
-	text = text[open+len("```go\n"):]
-	end := strings.Index(text, "```")
-	if end < 0 {
-		t.Fatal("the Go example is not closed")
-	}
-	return text[:end]
-}
-
 // TestDesignOperationInventoryIsCallable is done-when's contract item for the
 // operation inventory: every command's public operation is a real exported
 // function or method, so no workflow in the inventory lives only in the CLI.
@@ -318,41 +293,4 @@ func TestDesignOperationInventoryIsCallable(t *testing.T) {
 	if checked < 20 {
 		t.Fatalf("the inventory check found %d operations, want the whole table", checked)
 	}
-}
-
-// TestReadmeExampleParsesAndNamesExportedSymbols is done-when's README item:
-// the published example is Go source, and every tracker, pr or migrate symbol
-// it names exists, so a rename cannot leave the documentation advertising an
-// API the library no longer has.
-func TestReadmeExampleParsesAndNamesExportedSymbols(t *testing.T) {
-	snippet := readmeLibraryExample(t)
-	wrapped := "package example\n\nfunc example() error {\n" + snippet + "\n}\n"
-	file, err := parser.ParseFile(token.NewFileSet(), "README.go", wrapped, 0)
-	if err != nil {
-		t.Fatalf("the README example does not parse: %v", err)
-	}
-
-	packages := map[string]map[string]bool{
-		"tracker": exportedNames(t, filepath.Join("..", "tracker")),
-		"pr":      exportedNames(t, filepath.Join("..", "pr")),
-		"migrate": exportedNames(t, filepath.Join("..", "migrate")),
-	}
-	ast.Inspect(file, func(node ast.Node) bool {
-		selector, ok := node.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		ident, ok := selector.X.(*ast.Ident)
-		if !ok {
-			return true
-		}
-		exported, ok := packages[ident.Name]
-		if !ok {
-			return true
-		}
-		if !exported[selector.Sel.Name] {
-			t.Errorf("the README example names %s.%s, which the package does not export", ident.Name, selector.Sel.Name)
-		}
-		return true
-	})
 }
