@@ -1,13 +1,16 @@
 package daemon
 
 import (
-	"github.com/lumberbarons/hew/pr"
+	"encoding/json"
+
 	"github.com/lumberbarons/hew/tracker"
 )
 
-// The library tags only tracker.Issue for JSON (it is the --json schema).
-// Every other result type marshals with Go field names, so each is mapped to
-// the camelCase shape the frontend sees. This file is the cost of that gap.
+// The library's result types carry the wire shape themselves (tracker/json.go,
+// pr/json.go, migrate/json.go): camelCase keys and empty collections instead of
+// null. The handlers therefore return a result value directly. What is left
+// here is the request side and the two responses that are compositions rather
+// than one library result.
 
 type bodyIn struct {
 	Where    string   `json:"where"`
@@ -30,148 +33,45 @@ func (b bodyIn) body(discoveredFrom int) tracker.Body {
 	}
 }
 
-type findingOut struct {
-	Kind   string   `json:"kind"`
-	Tokens []string `json:"tokens"`
+// checkOut is a validation answer: whether the call was accepted, plus the
+// advisory findings that never refuse it. There is no library result type for
+// "valid, with advice" — the body-check result carries only the findings — so
+// the route composes the two.
+type checkOut struct {
+	OK       bool              `json:"ok"`
+	Findings []tracker.Finding `json:"findings"`
 }
 
-func findingsOut(fs []tracker.Finding) []findingOut {
-	out := make([]findingOut, 0, len(fs))
-	for _, f := range fs {
-		out = append(out, findingOut{Kind: string(f.Kind), Tokens: orEmpty(f.Tokens)})
-	}
-	return out
+// MarshalJSON keeps an accepted body's advice an empty array rather than null,
+// the same guarantee the library's result types give.
+func (c checkOut) MarshalJSON() ([]byte, error) {
+	type plain checkOut
+	out := plain(c)
+	out.Findings = orEmpty(out.Findings)
+	return json.Marshal(out)
 }
 
-type warningOut struct {
-	Kind    string `json:"kind"`
-	Issue   int    `json:"issue"`
-	Cycle   []int  `json:"cycle"`
-	Total   int    `json:"total"`
-	Fetched int    `json:"fetched"`
+// boardOut is the landing view: one snapshot sliced into the sections `hew
+// list` orders, plus the untriaged count. It is a composition of several
+// library reads, not a re-mapping of one result.
+type boardOut struct {
+	Ready     []tracker.Issue   `json:"ready"`
+	Claimed   []tracker.Issue   `json:"claimed"`
+	Blocked   []tracker.Issue   `json:"blocked"`
+	Epics     []tracker.Issue   `json:"epics"`
+	Untriaged int               `json:"untriaged"`
+	Warnings  []tracker.Warning `json:"warnings"`
 }
 
-func warningsOut(ws []tracker.Warning) []warningOut {
-	out := make([]warningOut, 0, len(ws))
-	for _, w := range ws {
-		out = append(out, warningOut{Kind: string(w.Kind), Issue: w.Issue, Cycle: orEmpty(w.Cycle), Total: w.Total, Fetched: w.Fetched})
-	}
-	return out
-}
-
-type textFindingOut struct {
-	Issue       int    `json:"issue"`
-	Source      string `json:"source"`
-	Comment     int    `json:"comment"`
-	ZeroWidth   bool   `json:"zeroWidth"`
-	BidiControl bool   `json:"bidiControl"`
-	UnicodeTags bool   `json:"unicodeTags"`
-	Confusable  bool   `json:"confusable"`
-}
-
-func textFindingsOut(fs []tracker.TextFinding) []textFindingOut {
-	out := make([]textFindingOut, 0, len(fs))
-	for _, f := range fs {
-		out = append(out, textFindingOut(f))
-	}
-	return out
-}
-
-type detailOut struct {
-	Issue        tracker.Issue    `json:"issue"`
-	Children     []tracker.Issue  `json:"children"`
-	Next         *int             `json:"next"`
-	TextFindings []textFindingOut `json:"textFindings"`
-	Warnings     []warningOut     `json:"warnings"`
-}
-
-func detailFrom(d tracker.IssueDetail) detailOut {
-	return detailOut{
-		Issue: d.Issue, Children: lean(d.Children), Next: d.Next,
-		TextFindings: textFindingsOut(d.TextFindings), Warnings: warningsOut(d.Warnings),
-	}
-}
-
-type edgeOut struct {
-	Kind string `json:"kind"`
-	To   int    `json:"to"`
-}
-
-type createOut struct {
-	Issue    tracker.Issue `json:"issue"`
-	Edges    []edgeOut     `json:"edges"`
-	Findings []findingOut  `json:"findings"`
-}
-
-func createFrom(r tracker.CreateResult) createOut {
-	edges := make([]edgeOut, 0, len(r.Edges))
-	for _, e := range r.Edges {
-		edges = append(edges, edgeOut{Kind: string(e.Kind), To: e.To})
-	}
-	return createOut{Issue: r.Issue, Edges: edges, Findings: findingsOut(r.Findings)}
-}
-
-type listOut struct {
-	Issues  []tracker.Issue `json:"issues"`
-	Total   int             `json:"total"`
-	Fetched int             `json:"fetched"`
-}
-
-type primerOut struct {
-	Ready           []tracker.Issue `json:"ready"`
-	ReadyTotal      int             `json:"readyTotal"`
-	OpenTotal       int             `json:"openTotal"`
-	InProgress      []tracker.Issue `json:"inProgress"`
-	InProgressTotal int             `json:"inProgressTotal"`
-	Epics           []tracker.Issue `json:"epics"`
-	EpicsTotal      int             `json:"epicsTotal"`
-	Untriaged       int             `json:"untriaged"`
-	Warnings        []warningOut    `json:"warnings"`
-	Conventions     string          `json:"conventions"`
-}
-
-func primerFrom(p tracker.PrimerResult) primerOut {
-	return primerOut{
-		Ready: lean(p.Ready), ReadyTotal: p.ReadyTotal, OpenTotal: p.OpenTotal,
-		InProgress: lean(p.InProgress), InProgressTotal: p.InProgressTotal,
-		Epics: lean(p.Epics), EpicsTotal: p.EpicsTotal,
-		Untriaged: p.Untriaged, Warnings: warningsOut(p.Warnings), Conventions: p.Conventions,
-	}
-}
-
-type prOut struct {
-	Number      int          `json:"number"`
-	URL         string       `json:"url"`
-	Draft       bool         `json:"draft"`
-	Fixes       int          `json:"fixes"`
-	FixedIssues []int        `json:"fixedIssues"`
-	Head        string       `json:"head"`
-	Base        string       `json:"base"`
-	Title       string       `json:"title"`
-	Warnings    []string     `json:"warnings"`
-	Findings    []findingOut `json:"findings"`
-}
-
-func prFrom(r pr.CreateResult) prOut {
-	warns := make([]string, 0, len(r.Warnings))
-	for _, w := range r.Warnings {
-		warns = append(warns, string(w.Kind))
-	}
-	return prOut{
-		Number: r.Number, URL: r.URL, Draft: r.Draft, Fixes: r.Fixes, FixedIssues: orEmpty(r.FixedIssues),
-		Head: r.Head, Base: r.Base, Title: r.Title, Warnings: warns, Findings: findingsOut(r.Findings),
-	}
-}
-
-// lean strips the text a list row never shows. Snapshot reads carry every
-// issue's body, while `hew list --json` omits it unless asked; sending them
-// all would make the board's payload scale with body length. Detail is the
-// route that returns a body.
-func lean(in []tracker.Issue) []tracker.Issue {
-	out := make([]tracker.Issue, len(in))
-	for i, issue := range in {
-		issue.Body, issue.Comments, issue.CommentsTotal = nil, nil, 0
-		out[i] = issue
-	}
-	return out
+// MarshalJSON keeps every section and the warnings an empty array rather than
+// null, the same guarantee the library's result types give.
+func (b boardOut) MarshalJSON() ([]byte, error) {
+	type plain boardOut
+	out := plain(b)
+	out.Ready = orEmpty(out.Ready)
+	out.Claimed = orEmpty(out.Claimed)
+	out.Blocked = orEmpty(out.Blocked)
+	out.Epics = orEmpty(out.Epics)
+	out.Warnings = orEmpty(out.Warnings)
+	return json.Marshal(out)
 }

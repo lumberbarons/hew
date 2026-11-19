@@ -40,23 +40,23 @@ type InitConfig struct {
 // without asking the filesystem or the API again.
 type InitResult struct {
 	// Backend is the backend initialization ran against.
-	Backend Backend
+	Backend Backend `json:"backend"`
 	// Path is the local tracker directory (the .hew directory). Empty on
 	// GitHub, which keeps no state in the checkout.
-	Path string
+	Path string `json:"path"`
 	// CreatedLabels names the convention labels the run created, in the
 	// conventions' order. It is non-nil and empty when none were missing, and
 	// always empty on the local backend, which carries its labels in the
 	// tracker itself.
-	CreatedLabels []string
+	CreatedLabels []string `json:"createdLabels"`
 	// IssuesRecreated reports a local tracker whose issues.jsonl was missing
 	// beside an existing config. The file is empty now and the tracker has a
 	// new id, so resume checkpoints bound to the old tracker start over.
-	IssuesRecreated bool
+	IssuesRecreated bool `json:"issuesRecreated"`
 	// Notices are the warnings the run would have printed, in the order they
 	// happened. They are data because the library never writes to stdout or
 	// stderr; a caller renders or discards them.
-	Notices []string
+	Notices []string `json:"notices"`
 }
 
 // Init bootstraps the tracker for the checkout containing cfg.Worktree, or for

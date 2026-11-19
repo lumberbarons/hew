@@ -185,7 +185,9 @@ func (c *Client) prepare(ctx context.Context, requested []int) (prepared, error)
 	// matches an existing pull request by, and the name a reviewer reads.
 	head := state.Head()
 
-	snapshot, err := c.tracker.Snapshot(ctx, tracker.SnapshotOptions{})
+	// The composed body quotes the linked issue's What/Why sections, so this
+	// snapshot asks for the text that list-shaped reads omit by default.
+	snapshot, err := c.tracker.Snapshot(ctx, tracker.SnapshotOptions{Bodies: true})
 	if err != nil {
 		return prepared{}, err
 	}

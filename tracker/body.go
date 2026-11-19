@@ -77,15 +77,15 @@ func (t PRTrailers) isZero() bool { return len(t.Fixes) == 0 && len(t.Epics) == 
 // ComposedBody is the result of composing a body. Body is the text to publish;
 // Findings are advisory and never fail the call or change the text.
 type ComposedBody struct {
-	Body     string
-	Findings []Finding
+	Body     string    `json:"body"`
+	Findings []Finding `json:"findings"`
 }
 
 // BodyCheck is the result of checking body text a caller already has. A check
 // never rewrites the text: the caller keeps its bytes, and the findings say
 // what to improve.
 type BodyCheck struct {
-	Findings []Finding
+	Findings []Finding `json:"findings"`
 }
 
 // FindingKind identifies an advisory finding about body text, so a caller can
@@ -100,10 +100,10 @@ const (
 
 // Finding is one piece of advice about body text.
 type Finding struct {
-	Kind FindingKind
+	Kind FindingKind `json:"kind"`
 	// Tokens are the offending code-shaped tokens, de-duplicated and in order
 	// of first appearance, for FindingUnmarkedCode.
-	Tokens []string
+	Tokens []string `json:"tokens"`
 }
 
 // ValidateSections enforces the issue body's section rules: Problem and Goal

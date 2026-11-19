@@ -18,6 +18,11 @@ type SnapshotOptions struct {
 	// States selects the issue states to fetch. Empty means open only —
 	// unlike SearchRequest.States, where empty means open and closed.
 	States []State
+	// Bodies carries each issue's body and comments on the snapshot's
+	// list-shaped reads — Issues, Ready, List, Blocked, Claimed, Epics and
+	// Children. The zero value omits them, matching `hew list` without
+	// --bodies; Snapshot.Get is a single-issue read and always carries them.
+	Bodies bool
 }
 
 // StartOptions configures a claim. The zero value preserves the existing

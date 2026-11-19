@@ -500,3 +500,91 @@ func TestSnapshotEpicsSpanTheFetchedStates(t *testing.T) {
 		}
 	}
 }
+
+// A list-shaped read is a row, not a document. The zero SnapshotOptions is
+// what `hew list` reads, so bodies and comments stay behind for the caller to
+// ask for — Get is the single-issue read and keeps them.
+func TestSnapshotListReadsOmitBodiesUnlessAsked(t *testing.T) {
+	ready := fixture(1, "Ready one", "P2", "bug")
+	ready.Comments = []model.Comment{{Author: "alice", CreatedAt: time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC), Body: "a comment"}}
+	ready.CommentsTotal = 1
+	claimed := fixture(2, "Claimed", "P1", "bug", "in-progress")
+	claimed.Assignees = []string{"alice"}
+	blocked := fixture(3, "Blocked", "P2", "bug")
+	blocked.BlockedBy = []model.Ref{{Number: 1, State: "OPEN"}}
+	epic := fixture(4, "Epic", "P2", "task", "epic")
+	epic.SubIssues = []model.Ref{{Number: 5, State: "OPEN"}}
+	epic.SubIssuesTotal = 1
+	child := fixture(5, "Child", "P2", "task")
+	child.Parent = &model.Ref{Number: 4, State: "OPEN"}
+	store := &fakeClient{issues: []model.Issue{ready, claimed, blocked, epic, child}}
+
+	snapshot, err := Wrap(store).Snapshot(context.Background(), SnapshotOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads := []struct {
+		name   string
+		issues []Issue
+	}{
+		{"Issues", snapshot.Issues()},
+		{"List", snapshot.List(ListFilter{})},
+		{"Ready", snapshot.Ready()},
+		{"Blocked", snapshot.Blocked()},
+		{"Claimed", snapshot.Claimed()},
+		{"Epics", snapshot.Epics()},
+		{"Children", snapshot.Children(4)},
+	}
+	for _, read := range reads {
+		if len(read.issues) == 0 {
+			t.Fatalf("%s returned nothing to check", read.name)
+		}
+		for _, issue := range read.issues {
+			if issue.Body != nil {
+				t.Errorf("%s #%d body = %q, want omitted", read.name, issue.Number, *issue.Body)
+			}
+			if len(issue.Comments) != 0 || issue.CommentsTotal != 0 {
+				t.Errorf("%s #%d comments = %+v total %d, want omitted", read.name, issue.Number, issue.Comments, issue.CommentsTotal)
+			}
+		}
+	}
+
+	got, ok := snapshot.Get(1)
+	if !ok || got.Body == nil || *got.Body != ready.Body {
+		t.Errorf("Get(1) body = %v, want %q", got.Body, ready.Body)
+	}
+	if len(got.Comments) != 1 || got.CommentsTotal != 1 {
+		t.Errorf("Get(1) comments = %+v total %d, want the fetched comment", got.Comments, got.CommentsTotal)
+	}
+}
+
+func TestSnapshotBodiesOptionCarriesTextOnListReads(t *testing.T) {
+	ready := fixture(1, "Ready one", "P2", "bug")
+	ready.Comments = []model.Comment{{Author: "alice", CreatedAt: time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC), Body: "a comment"}}
+	ready.CommentsTotal = 1
+	store := &fakeClient{issues: []model.Issue{ready}}
+
+	snapshot, err := Wrap(store).Snapshot(context.Background(), SnapshotOptions{Bodies: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, read := range []struct {
+		name   string
+		issues []Issue
+	}{
+		{"Issues", snapshot.Issues()},
+		{"List", snapshot.List(ListFilter{})},
+		{"Ready", snapshot.Ready()},
+	} {
+		if len(read.issues) != 1 {
+			t.Fatalf("%s = %v, want the one issue", read.name, numbers(read.issues))
+		}
+		issue := read.issues[0]
+		if issue.Body == nil || *issue.Body != ready.Body {
+			t.Errorf("%s body = %v, want %q", read.name, issue.Body, ready.Body)
+		}
+		if len(issue.Comments) != 1 || issue.CommentsTotal != 1 {
+			t.Errorf("%s comments = %+v total %d, want the fetched comment", read.name, issue.Comments, issue.CommentsTotal)
+		}
+	}
+}

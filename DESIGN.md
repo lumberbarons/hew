@@ -862,7 +862,7 @@ warnings in [Warnings and findings](#warnings-and-findings).
 | `search <terms>` | `(*tracker.Tracker).Search(ctx, tracker.SearchRequest) (tracker.SearchResult, error)` | `--state` mapping onto `SearchRequest.States`, `--limit` truncation, no-triaged-match and truncation wording |
 | `create` | `(*tracker.Tracker).Create(ctx, tracker.CreateRequest) (tracker.CreateResult, error)`; `(*tracker.Tracker).CheckCreate(ctx, tracker.CreateRequest) error` is the same validation and reference reads with no write, so `--edit` refuses a bad flag or reference before the editor opens | title/body/area flags, `--body-file`, `--edit` |
 | `draft` | `tracker.ComposeBody(tracker.Body) (tracker.ComposedBody, error)`, `tracker.CheckBody(string) (tracker.BodyCheck, error)` | `--out`/`--check` file I/O and rendering |
-| `start <n>` | `(*tracker.Tracker).Start(ctx, n, tracker.StartOptions) (tracker.StartResult, error)` | `--show` rendering, exit 3/5/6 |
+| `start <n>` | `(*tracker.Tracker).Start(ctx, n, tracker.StartOptions) (tracker.StartResult, error)` | `--show` rendering, wording and exit 3/5/6 for each `tracker.StartOutcome` |
 | `release <n>` | `(*tracker.Tracker).Release(ctx, n, tracker.ReleaseOptions) error` | rendering and exit mapping |
 | `triage` | `(*tracker.Tracker).Triage(ctx, tracker.TriageRequest) (tracker.TriageResult, error)` | `--search` flag and rendering; this is the deliberate untriaged-list API |
 | `set <n>` | `(*tracker.Tracker).Edit(ctx, tracker.EditRequest) (tracker.EditResult, error)` | `--body-file` input, `--closed` flag mapping, rendering |
@@ -908,6 +908,15 @@ takes on the boundary, which is why the commands use the query methods.
 `Snapshot.Untriaged` reports how many open issues the fetch holds untriaged — the
 count the primer rolls up — without returning any of their text.
 
+Body presence follows the list/document split rather than the fetch. The
+list-shaped reads — `Snapshot.Issues`, `Ready`, `List`, `Blocked`, `Claimed`,
+`Epics` and `Children`, plus `Search`, `Triage` and `Primer`'s sections — return
+rows without bodies or comments, which is what a list view renders and what keeps
+its payload from scaling with total body length. A caller that wants the text
+asks: `SnapshotOptions.Bodies`, `SearchRequest.Bodies` or `TriageRequest.Bodies`.
+The single-issue reads carry it unconditionally — `Get`, `Detail`, and the write
+results (`Create`, `Start`, `Edit`) — and `Detail`'s children stay rows.
+
 ### Types an external module names
 
 The values below are the contract, not an implementation sketch: a consumer
@@ -915,7 +924,7 @@ imports `tracker`, `pr` or `migrate` and never an `internal` path.
 
 | Package | Requests and inputs | Results and values |
 |---|---|---|
-| `tracker` | `Config`, `SnapshotOptions`, `ListFilter`, `SearchRequest`, `TriageRequest`, `Body`, `Sections`, `CreateRequest`, `CreateEpicRequest`, `EditRequest`, `ReopenOptions`, `StartOptions`, `ReleaseOptions`, `CloseOptions`, `BlockOptions`, `InitConfig`, `PlanEntry`, `PlanRef`, `Checkpoint`, `ApplyOptions` | `Target`, `Issue`, `Ref`, `Comment`, `TextFinding`, `Snapshot`, `IssueDetail`, `SearchResult`, `TriageResult`, `PrimerResult`, `ComposedBody`, `BodyCheck`, `CreateResult`, `EditResult`, `ReopenResult`, `StartResult`, `CloseResult`, `BlockResult`, `UnblockResult`, `InitResult`, `ApplyResult`, `PlannedEntry`, `AppliedEntry`, `CheckpointState`, `CheckpointEntry`, `MemoryCheckpoint`, `FileCheckpoint`, `RateLimit`, `Edge`, `Backend`, `State`, `EdgeKind`, `ReopenStage` |
+| `tracker` | `Config`, `SnapshotOptions`, `ListFilter`, `SearchRequest`, `TriageRequest`, `Body`, `Sections`, `CreateRequest`, `CreateEpicRequest`, `EditRequest`, `ReopenOptions`, `StartOptions`, `ReleaseOptions`, `CloseOptions`, `BlockOptions`, `InitConfig`, `PlanEntry`, `PlanRef`, `Checkpoint`, `ApplyOptions` | `Target`, `Issue`, `Ref`, `Comment`, `TextFinding`, `Snapshot`, `IssueDetail`, `SearchResult`, `TriageResult`, `PrimerResult`, `ComposedBody`, `BodyCheck`, `CreateResult`, `EditResult`, `ReopenResult`, `StartResult`, `StartOutcome`, `CloseResult`, `BlockResult`, `UnblockResult`, `InitResult`, `ApplyResult`, `PlannedEntry`, `AppliedEntry`, `CheckpointState`, `CheckpointEntry`, `MemoryCheckpoint`, `FileCheckpoint`, `RateLimit`, `Edge`, `Backend`, `State`, `EdgeKind`, `ReopenStage` |
 | `pr` | `Config`, `CreateRequest`, `AmendRequest`, `Sections`, `Body`, `BodyEdit` | `Client`, `CreateResult`, `AmendResult`, `ComposedBody`, `BodyCheck` |
 | `migrate` | `Config`, `BeadsRequest`, `LocalRequest`, `RunRequest`, `Item`, `Options`, `Target`, `Labeler` | `Migrator`, `Result`, `PlanStep`, `PlannedItem`, `Label` |
 
@@ -960,6 +969,11 @@ schema carries the exported fields only; the accessors that expose reference
 states, raw labels, the parent's title and the close reason come from a library
 read.
 
+Every other exported result and warning type carries the same schema: camelCase
+keys, and an empty slice or map rather than null, so a caller can serve a result
+as its API's response without a mapping layer of its own. `consumer/` pins the
+shape of each one, and the daemon returns them directly.
+
 ### Warnings and findings
 
 A warning is a typed value on the result, never a line printed by a library call
@@ -987,8 +1001,8 @@ PR is ready for review, permitted to be absent on a draft.
 
 The library returns typed errors a caller matches with `errors.As`/`errors.Is`;
 it never returns an exit code, and no library code calls `os.Exit`. The CLI maps
-each type to the code it has always used, and that mapping lives in
-`internal/cli` alone:
+each type — and each `StartOutcome` — to the code it has always used, and that
+mapping lives in `internal/cli` alone:
 
 | Error | CLI exit | Meaning |
 |---|---|---|
@@ -1002,6 +1016,16 @@ each type to the code it has always used, and that mapping lives in
 The claimant and actor ride in the error so the CLI's message and a consumer's
 own handling read the same field instead of parsing a string. A new typed error
 that the CLI cannot map is a bug in the mapping, not a reason to widen the table.
+
+The three `start` distinctions are one public decision, not three private
+readings of the typed errors: `tracker.StartOutcomeOf(err)` returns a
+`tracker.StartOutcome` — `StartClaimedByOther` (pick the next ready item),
+`StartClaimedByYou` (resume that work) or `StartBlocked` (pick the next ready
+item) — and reports whether the error is one of them. The facts stay on
+`ClaimedError` and `BlockedError`; the outcome names the decision they ask for.
+The CLI maps the outcome to exits 3, 5 and 6, and the daemon maps it to its
+`claimed_by_other`, `claimed_by_you` and `blocked` kinds, so a consumer does not
+re-derive it from `ByActor`.
 
 `tracker` owns the vocabulary every package shares: `AuthError`,
 `InvalidInputError`, `NotFoundError`, `ClosedError`, `ClaimedError`,

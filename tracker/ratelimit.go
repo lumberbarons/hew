@@ -11,9 +11,9 @@ import (
 // consumer uses it to pace a long run without asking the API a second time.
 // The local backend never reports one, so Known is false there.
 type RateLimit struct {
-	Cost      int
-	Remaining int
-	ResetAt   time.Time
+	Cost      int       `json:"cost"`
+	Remaining int       `json:"remaining"`
+	ResetAt   time.Time `json:"resetAt"`
 }
 
 // rateLimiter is the optional capability a store implements when its backend

@@ -16,8 +16,8 @@ import (
 // resulting assignees with to notice a racing claim; it is also the identity a
 // consumer records for the work, without a second backend lookup.
 type StartResult struct {
-	Issue    Issue
-	Claimant string
+	Issue    Issue  `json:"issue"`
+	Claimant string `json:"claimant"`
 }
 
 // Start claims an issue as the tracker's acting identity: assign that identity

@@ -27,7 +27,7 @@ type ListFilter struct {
 func (s *Snapshot) List(filter ListFilter) []Issue {
 	issues := slices.Clone(s.issues)
 	model.SortForList(issues)
-	return issuesFromModel(model.List(issues, model.ListFilter{Label: filter.Label, Epic: filter.Epic}))
+	return issuesFromModel(model.List(issues, model.ListFilter{Label: filter.Label, Epic: filter.Epic}), s.bodies)
 }
 
 // TextFinding is one field's advisory character findings. Source attributes
@@ -37,16 +37,16 @@ func (s *Snapshot) List(filter ListFilter) []Issue {
 // reject the text.
 type TextFinding struct {
 	// Issue is the issue the text belongs to.
-	Issue int
+	Issue int `json:"issue"`
 	// Source is TextFindingTitle, TextFindingBody or TextFindingComment.
-	Source string
+	Source string `json:"source"`
 	// Comment indexes Issue.Comments when Source is TextFindingComment: the
 	// comments actually fetched and displayed, not the server-side thread.
-	Comment     int
-	ZeroWidth   bool
-	BidiControl bool
-	UnicodeTags bool
-	Confusable  bool
+	Comment     int  `json:"comment"`
+	ZeroWidth   bool `json:"zeroWidth"`
+	BidiControl bool `json:"bidiControl"`
+	UnicodeTags bool `json:"unicodeTags"`
+	Confusable  bool `json:"confusable"`
 }
 
 // Sources a TextFinding can name.
@@ -61,20 +61,21 @@ const (
 // for its text, and the snapshot warnings that bear on the view.
 type IssueDetail struct {
 	// Issue is the subject, with body, comments and close reason.
-	Issue Issue
+	Issue Issue `json:"issue"`
 	// Children is an epic's full child set, oldest first, including closed
 	// and untriaged children: naming the epic is the explicit retrieval path.
-	// It is nil for a non-epic.
-	Children []Issue
+	// It is a list of rows, so it carries no bodies; it is nil for a
+	// non-epic.
+	Children []Issue `json:"children"`
 	// Next is the epic's next workable child, nil for a non-epic or when the
 	// sequence is dry.
-	Next *int
+	Next *int `json:"next"`
 	// TextFindings annotates the title, body and displayed comments. Comments
 	// are scanned because Detail is a live single-issue read and carries them.
-	TextFindings []TextFinding
+	TextFindings []TextFinding `json:"textFindings"`
 	// Warnings is the snapshot's completeness notices for an epic read; nil
 	// for a non-epic, which fetches no snapshot.
-	Warnings []Warning
+	Warnings []Warning `json:"warnings"`
 }
 
 // Detail is the show read: one live issue in any state, with body and recent
@@ -99,9 +100,9 @@ func (t *Tracker) Detail(ctx context.Context, number int) (IssueDetail, error) {
 	if err != nil {
 		return IssueDetail{}, asReadError(err)
 	}
-	snapshot := newSnapshot(issues, states)
+	snapshot := newSnapshot(issues, states, false)
 	children := model.Children(snapshot.issues, number)
-	detail.Children = issuesFromModel(children)
+	detail.Children = issuesFromModel(children, false)
 	detail.Warnings = snapshot.Warnings()
 	if next, ok := model.EpicNext(children); ok {
 		number := next.Number
@@ -142,15 +143,20 @@ type SearchRequest struct {
 	// unlike SnapshotOptions.States, where empty means open only. An unknown
 	// state is an invalid-input error.
 	States []State
+	// Bodies carries each match's body and comments. The zero value omits
+	// them: dedup reads a title, a number and its labels, and a caller that
+	// needs the text reads the issue.
+	Bodies bool
 }
 
 // SearchResult is a search listing: the triaged matches in the backend's
 // relevance order, plus the backend's full match count and how many matches
-// it fetched. Total above Fetched means the result was capped.
+// it fetched. Total above Fetched means the result was capped. Issues carries
+// bodies only when SearchRequest.Bodies asked for them.
 type SearchResult struct {
-	Issues  []Issue
-	Total   int
-	Fetched int
+	Issues  []Issue `json:"issues"`
+	Total   int     `json:"total"`
+	Fetched int     `json:"fetched"`
 }
 
 // Search is the dedup read: a repo-scoped text search over open and closed
@@ -174,7 +180,7 @@ func (t *Tracker) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 		return SearchResult{}, asReadError(err)
 	}
 	return SearchResult{
-		Issues:  issuesFromModel(triagedOnly(issues)),
+		Issues:  issuesFromModel(triagedOnly(issues), req.Bodies),
 		Total:   total,
 		Fetched: len(issues),
 	}, nil
@@ -184,16 +190,23 @@ func (t *Tracker) Search(ctx context.Context, req SearchRequest) (SearchResult, 
 // queue; a non-empty Search is the untriaged half of dedup across both states.
 type TriageRequest struct {
 	Search string
+	// Bodies carries each untriaged issue's body and comments. The zero
+	// value omits them; the advisory findings are computed from the fetched
+	// text regardless, so an annotator can leave it unset. `hew triage` sets
+	// it because its renderers scan the text themselves.
+	Bodies bool
 }
 
 // TriageResult is a triage listing: the untriaged matches, the completeness
 // counts for a search (the queue form is uncapped, so its Total equals
-// Fetched), and the advisory text findings for each match.
+// Fetched), and the advisory text findings for each match. Issues carries
+// bodies only when TriageRequest.Bodies asked for them; the findings are
+// computed from the fetched text either way.
 type TriageResult struct {
-	Issues       []Issue
-	Total        int
-	Fetched      int
-	TextFindings []TextFinding
+	Issues       []Issue       `json:"issues"`
+	Total        int           `json:"total"`
+	Fetched      int           `json:"fetched"`
+	TextFindings []TextFinding `json:"textFindings"`
 }
 
 // Triage lists issues missing their priority or type label — the deliberate
@@ -211,7 +224,7 @@ func (t *Tracker) Triage(ctx context.Context, req TriageRequest) (TriageResult, 
 		}
 		matches := model.UntriagedIssues(issues)
 		return TriageResult{
-			Issues:       issuesFromModel(matches),
+			Issues:       issuesFromModel(matches, req.Bodies),
 			Total:        len(matches),
 			Fetched:      len(matches),
 			TextFindings: triageFindings(matches),
@@ -223,7 +236,7 @@ func (t *Tracker) Triage(ctx context.Context, req TriageRequest) (TriageResult, 
 	}
 	matches := untriagedOnly(issues)
 	return TriageResult{
-		Issues:       issuesFromModel(matches),
+		Issues:       issuesFromModel(matches, req.Bodies),
 		Total:        total,
 		Fetched:      len(issues),
 		TextFindings: triageFindings(matches),

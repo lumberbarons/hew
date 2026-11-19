@@ -35,16 +35,7 @@ func (s *Server) primer(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(primerFrom(p)), nil
-}
-
-type boardOut struct {
-	Ready     []tracker.Issue `json:"ready"`
-	Claimed   []tracker.Issue `json:"claimed"`
-	Blocked   []tracker.Issue `json:"blocked"`
-	Epics     []tracker.Issue `json:"epics"`
-	Untriaged int             `json:"untriaged"`
-	Warnings  []warningOut    `json:"warnings"`
+	return ok(p), nil
 }
 
 // board is the landing view: one snapshot sliced into the sections `hew list`
@@ -56,9 +47,9 @@ func (s *Server) board(q *request[none]) (reply, error) {
 		return reply{}, err
 	}
 	return ok(boardOut{
-		Ready: lean(snap.Ready()), Claimed: lean(snap.Claimed()),
-		Blocked: lean(snap.Blocked()), Epics: lean(snap.Epics()),
-		Untriaged: snap.Untriaged(), Warnings: warningsOut(snap.Warnings()),
+		Ready: orEmpty(snap.Ready()), Claimed: orEmpty(snap.Claimed()),
+		Blocked: orEmpty(snap.Blocked()), Epics: orEmpty(snap.Epics()),
+		Untriaged: snap.Untriaged(), Warnings: snap.Warnings(),
 	}), nil
 }
 
@@ -75,7 +66,7 @@ func (s *Server) ready(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(lean(limited(snap.Ready(), q.query))), nil
+	return ok(limited(orEmpty(snap.Ready()), q.query)), nil
 }
 
 // states parses ?state=open|closed|all. The snapshot default (open only) and
@@ -110,7 +101,7 @@ func (s *Server) list(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(lean(limited(snap.List(filter), q.query))), nil
+	return ok(limited(orEmpty(snap.List(filter)), q.query)), nil
 }
 
 func (s *Server) detail(q *request[none]) (reply, error) {
@@ -118,7 +109,7 @@ func (s *Server) detail(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(detailFrom(d)), nil
+	return ok(d), nil
 }
 
 func (s *Server) epics(q *request[none]) (reply, error) {
@@ -130,7 +121,7 @@ func (s *Server) epics(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(lean(snap.Epics())), nil
+	return ok(orEmpty(snap.Epics())), nil
 }
 
 func (s *Server) search(q *request[none]) (reply, error) {
@@ -142,12 +133,7 @@ func (s *Server) search(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(listOut{Issues: lean(res.Issues), Total: res.Total, Fetched: res.Fetched}), nil
-}
-
-type triageOut struct {
-	listOut
-	TextFindings []textFindingOut `json:"textFindings"`
+	return ok(res), nil
 }
 
 // triage is the one route that returns untriaged text. The UI says so before
@@ -157,8 +143,5 @@ func (s *Server) triage(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(triageOut{
-		listOut:      listOut{Issues: lean(res.Issues), Total: res.Total, Fetched: res.Fetched},
-		TextFindings: textFindingsOut(res.TextFindings),
-	}), nil
+	return ok(res), nil
 }

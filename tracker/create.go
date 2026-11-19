@@ -58,8 +58,8 @@ type CreateEpicRequest struct {
 // CreatedEdge is one relationship a creation wrote after the issue existed.
 // To is the other issue: the parent, a blocker, or a child.
 type CreatedEdge struct {
-	Kind EdgeKind
-	To   int
+	Kind EdgeKind `json:"kind"`
+	To   int      `json:"to"`
 }
 
 // String renders the edge as "blocked-by #2", the form error messages use.
@@ -73,9 +73,9 @@ func (e CreatedEdge) String() string { return fmt.Sprintf("%s #%d", e.Kind, e.To
 // title and labels the backend returned plus the body, assignees and edges the
 // call wrote. Get is the live read when a caller needs the backend's own view.
 type CreateResult struct {
-	Issue    Issue
-	Edges    []CreatedEdge
-	Findings []Finding
+	Issue    Issue         `json:"issue"`
+	Edges    []CreatedEdge `json:"edges"`
+	Findings []Finding     `json:"findings"`
 }
 
 // CreateStage names the step a creation was in when it stopped partway.

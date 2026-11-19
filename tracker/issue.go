@@ -115,8 +115,9 @@ func (i Issue) BlockedByRefs() []Ref { return i.blockedBy }
 func (i Issue) SubIssueRefs() []Ref { return i.subIssues }
 
 // issueFromModel converts an issue to the flat schema. Body and comments are only
-// carried when withDetail is set (show, and every snapshot read, which already
-// fetched the body).
+// carried when withDetail is set: the single-issue reads (Get, Detail and the
+// write results) and a snapshot's list reads when SnapshotOptions.Bodies asked
+// for them.
 func issueFromModel(i model.Issue, withDetail bool) Issue {
 	out := Issue{
 		Number:             i.Number,

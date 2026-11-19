@@ -31,16 +31,16 @@ const (
 // Warning is one advisory notice. The fields a kind uses are documented on
 // that kind; the rest stay zero.
 type Warning struct {
-	Kind WarningKind
+	Kind WarningKind `json:"kind"`
 	// Issue is the subject of WarnUnclaimed and WarnPrimaryTitle.
-	Issue int
+	Issue int `json:"issue"`
 	// Issues is the declared set, primary first, for WarnNoSectionDefaults.
-	Issues []int
+	Issues []int `json:"issues"`
 	// Branch is the head a WarnBranchPrefix is about.
-	Branch string
+	Branch string `json:"branch"`
 	// Assignees and Actor describe the claim WarnUnclaimed found.
-	Assignees []string
-	Actor     string
+	Assignees []string `json:"assignees"`
+	Actor     string   `json:"actor"`
 	// Groups partitions the declared set for WarnUnrelatedSet.
-	Groups [][]int
+	Groups [][]int `json:"groups"`
 }
