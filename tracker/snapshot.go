@@ -41,16 +41,16 @@ const (
 // Warning is one completeness or contradiction notice. A snapshot's query
 // methods keep the completeness kinds; Primer keeps every kind.
 type Warning struct {
-	Kind WarningKind
+	Kind WarningKind `json:"kind"`
 	// Issue names the subject; 0 for a cycle, which spans several.
-	Issue int
+	Issue int `json:"issue"`
 	// Cycle is the ordered member path for WarnDependencyCycle, ending with
 	// its first member again.
-	Cycle []int
+	Cycle []int `json:"cycle"`
 	// Total and Fetched are the server-side and fetched counts for the
 	// capped-connection kinds.
-	Total   int
-	Fetched int
+	Total   int `json:"total"`
+	Fetched int `json:"fetched"`
 }
 
 // Reader answers read queries over an already-open store. It is the read half

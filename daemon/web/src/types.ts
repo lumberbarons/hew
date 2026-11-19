@@ -1,5 +1,6 @@
-// Wire types for the daemon's REST API. They mirror daemon/dto.go and the
-// library's tracker.Issue JSON; the fixtures in src/fixtures are generated
+// Wire types for the daemon's REST API. They mirror the library's result types
+// (tracker, pr, migrate), which now carry their own JSON shape, plus the few
+// responses daemon/dto.go composes. The fixtures in src/fixtures are generated
 // from the real Go responses by the daemon's tests, and the UI tests consume
 // them, so a change to a Go response shape fails a test instead of the UI.
 
@@ -119,6 +120,12 @@ export interface CheckResult {
   findings: Finding[];
 }
 
+export interface AppliedEntry {
+  key: string;
+  issue: number;
+  created: boolean;
+}
+
 export interface ApplyResult {
   dryRun: boolean;
   created: number;
@@ -126,7 +133,9 @@ export interface ApplyResult {
   unwired: number;
   warnings: string[];
   mapping: Record<string, number>;
+  applied: AppliedEntry[];
   wouldCreate: unknown[];
+  alreadyCreated: Record<string, number>;
 }
 
 /** The body of every error response. */

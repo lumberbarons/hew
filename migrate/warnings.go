@@ -32,14 +32,14 @@ const (
 // Warning is one advisory notice. The fields a kind uses are documented on that
 // kind; the rest stay zero.
 type Warning struct {
-	Kind WarningKind
+	Kind WarningKind `json:"kind"`
 	// Key is the source item the warning is about.
-	Key string
+	Key string `json:"key"`
 	// Issue is the target issue number, when one was created or read.
-	Issue int
+	Issue int `json:"issue"`
 	// Message is the complete sentence a caller renders. It is what the CLI
 	// prints and what --json reports.
-	Message string
+	Message string `json:"message"`
 }
 
 // String returns the warning's sentence, so a caller can treat the value as

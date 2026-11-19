@@ -16,33 +16,33 @@ import (
 // ApplyResult is what ApplyPlan did, or — under DryRun — what it would do.
 type ApplyResult struct {
 	// DryRun reports which mode ran.
-	DryRun bool
+	DryRun bool `json:"dryRun"`
 	// Created, Wired and Unwired count the run's writes. Unwired is the
 	// number of edges that did not land; they are listed in Warnings and a
 	// rerun retries them.
-	Created int
-	Wired   int
-	Unwired int
+	Created int `json:"created"`
+	Wired   int `json:"wired"`
+	Unwired int `json:"unwired"`
 	// Warnings names the edges that did not land and the checkpoints that
 	// could not be saved.
-	Warnings []string
+	Warnings []string `json:"warnings"`
 	// Mapping is every entry key → issue number after the run.
-	Mapping map[string]int
+	Mapping map[string]int `json:"mapping"`
 	// Applied is each entry's outcome in plan order, for progress rendering.
-	Applied []AppliedEntry
+	Applied []AppliedEntry `json:"applied"`
 	// WouldCreate and AlreadyCreated are the dry run's plan and the entries
 	// its checkpoint already accounts for. They are empty otherwise.
-	WouldCreate    []PlannedEntry
-	AlreadyCreated map[string]int
+	WouldCreate    []PlannedEntry `json:"wouldCreate"`
+	AlreadyCreated map[string]int `json:"alreadyCreated"`
 }
 
 // AppliedEntry is one entry's outcome in a real run.
 type AppliedEntry struct {
-	Key   string
-	Issue int
+	Key   string `json:"key"`
+	Issue int    `json:"issue"`
 	// Created is false when the checkpoint already mapped the entry, so the
 	// run only reported it.
-	Created bool
+	Created bool `json:"created"`
 }
 
 // PlannedEntry is one issue a dry run would create, in the flat shape the

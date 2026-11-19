@@ -24,11 +24,6 @@ type epicIn struct {
 	Body     bodyIn `json:"body"`
 }
 
-type checkOut struct {
-	OK       bool         `json:"ok"`
-	Findings []findingOut `json:"findings"`
-}
-
 func (s *Server) create(q *request[createIn]) (reply, error) {
 	in := q.in
 	req := tracker.CreateRequest{
@@ -48,7 +43,7 @@ func (s *Server) create(q *request[createIn]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return created(createFrom(res)), nil
+	return created(res), nil
 }
 
 func (s *Server) createEpic(q *request[epicIn]) (reply, error) {
@@ -63,7 +58,7 @@ func (s *Server) createEpic(q *request[epicIn]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return created(createFrom(res)), nil
+	return created(res), nil
 }
 
 // dryRunResult is the answer to a valid dry run: the advice the body would
@@ -73,7 +68,7 @@ func dryRunResult(body tracker.Body) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(checkOut{OK: true, Findings: findingsOut(composed.Findings)}), nil
+	return ok(checkOut{OK: true, Findings: composed.Findings}), nil
 }
 
 type editIn struct {
@@ -98,7 +93,7 @@ func (s *Server) edit(q *request[editIn]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(map[string]any{"applied": orEmpty(res.Applied), "parentNoop": res.ParentNoop}), nil
+	return ok(res), nil
 }
 
 type startIn struct {
@@ -111,7 +106,7 @@ func (s *Server) start(q *request[startIn]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(map[string]any{"issue": res.Issue, "claimant": res.Claimant}), nil
+	return ok(res), nil
 }
 
 type releaseIn struct {
@@ -140,7 +135,7 @@ func (s *Server) closeIssue(q *request[closeIn]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(map[string]any{"stateReason": res.StateReason}), nil
+	return ok(res), nil
 }
 
 type reopenIn struct {
@@ -152,10 +147,7 @@ func (s *Server) reopen(q *request[reopenIn]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(map[string]any{
-		"reopened": res.Reopened, "releasedLabel": res.ReleasedLabel,
-		"releasedAssignees": orEmpty(res.ReleasedAssignees),
-	}), nil
+	return ok(res), nil
 }
 
 type blockIn struct {
@@ -168,7 +160,7 @@ func (s *Server) block(q *request[blockIn]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(map[string]any{"added": orEmpty(res.Added), "existing": orEmpty(res.Existing)}), nil
+	return ok(res), nil
 }
 
 func (s *Server) unblock(q *request[none]) (reply, error) {
@@ -176,7 +168,7 @@ func (s *Server) unblock(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(map[string]any{"removed": orEmpty(res.Removed), "missing": orEmpty(res.Missing)}), nil
+	return ok(res), nil
 }
 
 type composeIn struct {
@@ -189,7 +181,7 @@ func (s *Server) compose(q *request[composeIn]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(map[string]any{"body": res.Body, "findings": findingsOut(res.Findings)}), nil
+	return ok(res), nil
 }
 
 type checkIn struct {
@@ -201,7 +193,7 @@ func (s *Server) check(q *request[checkIn]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(checkOut{OK: true, Findings: findingsOut(res.Findings)}), nil
+	return ok(checkOut{OK: true, Findings: res.Findings}), nil
 }
 
 type planRefIn struct {
@@ -284,15 +276,7 @@ func (s *Server) apply(q *request[applyIn]) (reply, error) {
 		return reply{}, err
 	}
 	finished = res.Unwired == 0
-	// A dry run has no mapping, and a nil map would marshal as null.
-	mapping := res.Mapping
-	if mapping == nil {
-		mapping = map[string]int{}
-	}
-	return ok(map[string]any{
-		"dryRun": res.DryRun, "created": res.Created, "wired": res.Wired, "unwired": res.Unwired,
-		"warnings": orEmpty(res.Warnings), "mapping": mapping, "wouldCreate": orEmpty(res.WouldCreate),
-	}), nil
+	return ok(res), nil
 }
 
 type prIn struct {
@@ -319,7 +303,7 @@ func (s *Server) prCreate(q *request[prIn]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return created(prFrom(res)), nil
+	return created(res), nil
 }
 
 type amendIn struct {
@@ -344,5 +328,5 @@ func (s *Server) prAmend(q *request[amendIn]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	return ok(prFrom(res)), nil
+	return ok(res), nil
 }

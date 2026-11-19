@@ -37,16 +37,16 @@ func (s *Snapshot) List(filter ListFilter) []Issue {
 // reject the text.
 type TextFinding struct {
 	// Issue is the issue the text belongs to.
-	Issue int
+	Issue int `json:"issue"`
 	// Source is TextFindingTitle, TextFindingBody or TextFindingComment.
-	Source string
+	Source string `json:"source"`
 	// Comment indexes Issue.Comments when Source is TextFindingComment: the
 	// comments actually fetched and displayed, not the server-side thread.
-	Comment     int
-	ZeroWidth   bool
-	BidiControl bool
-	UnicodeTags bool
-	Confusable  bool
+	Comment     int  `json:"comment"`
+	ZeroWidth   bool `json:"zeroWidth"`
+	BidiControl bool `json:"bidiControl"`
+	UnicodeTags bool `json:"unicodeTags"`
+	Confusable  bool `json:"confusable"`
 }
 
 // Sources a TextFinding can name.
@@ -61,20 +61,20 @@ const (
 // for its text, and the snapshot warnings that bear on the view.
 type IssueDetail struct {
 	// Issue is the subject, with body, comments and close reason.
-	Issue Issue
+	Issue Issue `json:"issue"`
 	// Children is an epic's full child set, oldest first, including closed
 	// and untriaged children: naming the epic is the explicit retrieval path.
 	// It is nil for a non-epic.
-	Children []Issue
+	Children []Issue `json:"children"`
 	// Next is the epic's next workable child, nil for a non-epic or when the
 	// sequence is dry.
-	Next *int
+	Next *int `json:"next"`
 	// TextFindings annotates the title, body and displayed comments. Comments
 	// are scanned because Detail is a live single-issue read and carries them.
-	TextFindings []TextFinding
+	TextFindings []TextFinding `json:"textFindings"`
 	// Warnings is the snapshot's completeness notices for an epic read; nil
 	// for a non-epic, which fetches no snapshot.
-	Warnings []Warning
+	Warnings []Warning `json:"warnings"`
 }
 
 // Detail is the show read: one live issue in any state, with body and recent
@@ -148,9 +148,9 @@ type SearchRequest struct {
 // relevance order, plus the backend's full match count and how many matches
 // it fetched. Total above Fetched means the result was capped.
 type SearchResult struct {
-	Issues  []Issue
-	Total   int
-	Fetched int
+	Issues  []Issue `json:"issues"`
+	Total   int     `json:"total"`
+	Fetched int     `json:"fetched"`
 }
 
 // Search is the dedup read: a repo-scoped text search over open and closed
@@ -190,10 +190,10 @@ type TriageRequest struct {
 // counts for a search (the queue form is uncapped, so its Total equals
 // Fetched), and the advisory text findings for each match.
 type TriageResult struct {
-	Issues       []Issue
-	Total        int
-	Fetched      int
-	TextFindings []TextFinding
+	Issues       []Issue       `json:"issues"`
+	Total        int           `json:"total"`
+	Fetched      int           `json:"fetched"`
+	TextFindings []TextFinding `json:"textFindings"`
 }
 
 // Triage lists issues missing their priority or type label — the deliberate

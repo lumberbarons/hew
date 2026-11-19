@@ -16,8 +16,8 @@ import (
 // reports a NoParent request on an issue that had no parent: the requested
 // state already held and nothing was written for it.
 type EditResult struct {
-	Applied    []string
-	ParentNoop bool
+	Applied    []string `json:"applied"`
+	ParentNoop bool     `json:"parentNoop"`
 }
 
 // Edit applies a partial edit to one issue. Fields the request leaves unset

@@ -31,16 +31,16 @@ type CreateRequest struct {
 // CreateResult is the pull request a create produced, with the advisory
 // warnings and findings that did not fail it.
 type CreateResult struct {
-	Number      int
-	URL         string
-	Draft       bool
-	Fixes       int
-	FixedIssues []int
-	Head        string
-	Base        string
-	Title       string
-	Warnings    []Warning
-	Findings    []tracker.Finding
+	Number      int               `json:"number"`
+	URL         string            `json:"url"`
+	Draft       bool              `json:"draft"`
+	Fixes       int               `json:"fixes"`
+	FixedIssues []int             `json:"fixedIssues"`
+	Head        string            `json:"head"`
+	Base        string            `json:"base"`
+	Title       string            `json:"title"`
+	Warnings    []Warning         `json:"warnings"`
+	Findings    []tracker.Finding `json:"findings"`
 }
 
 // Create opens the draft pull request the workflow prescribes: the linked

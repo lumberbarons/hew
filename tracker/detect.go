@@ -23,20 +23,20 @@ const (
 // caller gets before opening anything.
 type Target struct {
 	// Backend is the implementation that owns the repository.
-	Backend Backend
+	Backend Backend `json:"backend"`
 	// Repo is the GitHub repository as owner/name, resolved from the
 	// checkout's origin remote. It is empty for a local tracker and when the
 	// checkout has no github.com origin to read.
-	Repo string
+	Repo string `json:"repo"`
 	// Dir is the local tracker directory (the .hew directory) when Backend is
 	// BackendLocal; empty for GitHub.
-	Dir string
+	Dir string `json:"dir"`
 	// MainCheckout is the repository's main working tree, empty when the
 	// directory is not inside a git checkout.
-	MainCheckout string
+	MainCheckout string `json:"mainCheckout"`
 	// ID is the local tracker's stable identity from its config, the value
 	// batch checkpoints bind to. Empty on GitHub.
-	ID string
+	ID string `json:"id"`
 }
 
 // Detect reports which backend owns the repository containing dir and where

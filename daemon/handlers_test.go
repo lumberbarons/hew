@@ -433,8 +433,10 @@ func TestPullRequestRoutesMapRequestsAndResults(t *testing.T) {
 	if status != 201 || res["number"] != float64(12) || res["draft"] != false || res["url"] != "https://example.test/pull/12" {
 		t.Fatalf("create = %d %v", status, res)
 	}
-	if w := res["warnings"].([]any); len(w) != 1 || w[0] != "missing-testing" {
-		t.Errorf("warnings = %v, want [missing-testing]", w)
+	// Warnings are the library's typed values, so the client reads the kind
+	// instead of a pre-rendered string.
+	if w := res["warnings"].([]any); len(w) != 1 || w[0].(map[string]any)["kind"] != "missing-testing" {
+		t.Errorf("warnings = %v, want one missing-testing warning", w)
 	}
 	if res["findings"] == nil || res["fixedIssues"] == nil {
 		t.Errorf("create left a list null: %v", res)
