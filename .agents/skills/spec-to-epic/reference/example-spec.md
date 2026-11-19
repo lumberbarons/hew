@@ -37,7 +37,7 @@ and the current experience gives them no reason to.
 
 ## User Stories
 
-### US1 — Watch a product from search results (P1)
+### US1 — Watch a product from search results
 
 As a signed-in shopper, I want to add a bottle to my watchlist from wherever I
 see it so that I do not have to hunt for it again later
@@ -47,7 +47,7 @@ detail page, and reflects current state without a page reload. Adding the same
 product twice is a no-op rather than an error, since the control can be clicked
 from two places before the first result lands.
 
-### US2 — Review what I am watching and what changed (P2)
+### US2 — Review what I am watching and what changed
 
 As a signed-in shopper, I want one page listing everything I watch with its
 price then and now so that I can see at a glance what has moved
@@ -56,30 +56,64 @@ The list sorts by largest drop first, since that is the reason to open the page
 at all. A product that has gone out of stock still appears, marked unavailable,
 rather than vanishing — disappearing silently would read as a bug.
 
-## Tasks
+## Work Items
 
-### US1
+### WI1 — Store watchlist entries (P1)
 
-- [ ] T001 Add `watchlist_entries` table with a unique constraint on (user, product) — `api/internal/db/migrations`
-- [ ] T002 Add `watchProduct` and `unwatchProduct` mutations to the schema — `api/graph/schema.graphqls`
-- [ ] T003 Implement the mutation resolvers, treating a duplicate add as success — `api/internal/graph`, `api/internal/repository`
-- [ ] T004 Add the watch toggle to the product card and detail view — `webui/src/components`
+**Goal** Persist a shopper's saved products and the price at add time.
 
-### US2
+**Supports** US1, US2
 
-- [ ] T005 Add a `watchlist` query returning entries with added-at price and current price — `api/graph/schema.graphqls`, `api/internal/graph`
-- [ ] T006 Build the watchlist page, sorted by largest drop, with an unavailable badge — `webui/src/components`, `webui/src/App.tsx`
+**Where** `api/internal/db/migrations`
 
-### Cross-cutting
+**Approach**
+- Add a watchlist table keyed by user and product.
+- Store the price at add time on each entry.
 
-- [ ] T007 Restrict all watchlist operations to the requesting user's own rows — `api/internal/graph`
-- [ ] T008 Add the watchlist link to the signed-in navigation — `webui/src/components`
+**Done when**
+- The database rejects a second row for the same user and product.
+- A saved row retains its added-at price when the product's current price changes.
+
+### WI2 — Add watch and unwatch controls (P1)
+
+**Goal** Let signed-in shoppers manage saved products from search and product detail.
+
+**Supports** US1
+
+**Blocked by** WI1
+
+**Where** `api/graph/schema.graphqls`, `api/internal/graph`, `api/internal/repository`, `webui/src/components`
+
+**Approach**
+- Add watch and unwatch mutations scoped to the signed-in user's rows.
+- Show a watch control on product cards and detail pages and update it without reloading.
+
+**Done when**
+- A shopper can watch and unwatch from both views, and the state survives a reload.
+- Watching the same product twice reports success twice and leaves one row.
+- A mutation cannot change another user's entry.
+- An anonymous visitor sees a sign-in prompt in place of the watch control.
+
+### WI3 — Add the watchlist page and navigation (P2)
+
+**Goal** Give signed-in shoppers one place to see their saved products and price changes.
+
+**Supports** US2
+
+**Blocked by** WI1
+
+**Where** `api/graph/schema.graphqls`, `api/internal/graph`, `webui/src/components`, `webui/src/App.tsx`
+
+**Approach**
+- Add a query scoped to the signed-in user's rows.
+- List saved products by largest drop, show unavailable products, and link the page from signed-in navigation.
+
+**Done when**
+- The page shows added-at and current prices, largest drop first, and marks unavailable products.
+- A request cannot read another user's watchlist, verified by an integration test.
+- The signed-in navigation links to the watchlist.
 
 ## Done When
 
-- [ ] A signed-in user can watch and unwatch a product from both search results and the detail page, and the control survives a reload
-- [ ] Clicking watch twice on the same product leaves exactly one row and reports success both times
-- [ ] The watchlist page lists every watched product with its added-at price and current price, largest drop first
-- [ ] A watched product that goes out of stock still appears, marked unavailable
-- [ ] A request for another user's watchlist returns that user nothing, verified by an integration test
-- [ ] An anonymous visitor sees a sign-in prompt in place of the watch control
+- A shopper can watch a product from search and find it on the watchlist via signed-in navigation.
+- After the product's price changes, the watchlist shows the original and current prices.

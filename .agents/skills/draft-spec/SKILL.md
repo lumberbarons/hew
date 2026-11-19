@@ -1,6 +1,6 @@
 ---
 name: draft-spec
-description: Draft a lightweight feature spec — description, prior decisions, prioritised user stories, a task list, and a done-when checklist — into specs/NNN-slug/spec.md in a fixed format enforced by a checker script. Use whenever a feature should be specified before it is built — "spec this out", "write a spec for X", "scope this feature", "plan this feature", "turn this into a task list", or a feature description handed over for planning. Produces a spec at status Draft; approving one is the separate approve-spec skill. Not for a single bug fix or a one-file change.
+description: Draft a lightweight feature spec — description, prior decisions, user stories, issue-sized work items, and feature acceptance criteria — into specs/NNN-slug/spec.md in a fixed format enforced by a checker script. Use whenever a feature should be specified before it is built — "spec this out", "write a spec for X", "scope this feature", "plan this feature", "turn this into a task list", or a feature description handed over for planning. Produces a spec at status Draft; approving one is the separate approve-spec skill. Not for a single bug fix or a one-file change.
 argument-hint: Describe the feature to specify
 ---
 
@@ -124,8 +124,8 @@ to be imitated.
 | Out of Scope | What a reader would otherwise assume is included. This is where scope creep dies. |
 | Assumptions | Every place you guessed, stated so a reader can disagree with a specific line. |
 | User Stories | `As a <role>, I want <capability> so that <outcome>`, then 1-2 lines: the flow, the constraint that shapes it, the edge case that matters. |
-| Tasks | One line each, grouped under the story it serves, `Cross-cutting` for the rest, each naming real paths. |
-| Done When | Observable claims someone else could check without reading the diff. |
+| Work Items | One block per child issue. Give it a priority, goal, paths, approach, and observable acceptance criteria. Link to the stories it supports. |
+| Done When | Observable checks on the assembled feature. Use plain bullets. |
 
 The header above the sections is stamped for you. `**Status**` is the one field
 with a life after this skill: `new` writes `Draft`, and draft-spec never moves
@@ -143,14 +143,21 @@ the vocabulary closed so it cannot decay into free text.
 Nothing else passes the check, and only `Superseded` may carry text after the
 word: `**Status**: Superseded by [011 Watchlist v2](../011-watchlist-v2/spec.md)`.
 
-Priorities carry meaning: **P1** is what makes the feature worth shipping at
-all, **P2/P3** what makes it good. Order stories by priority, and write them at
-the altitude of the person using the software — "As a shopper, I want…", never
-"As a developer, I want a repository interface".
+Write stories from the perspective of the person using the software. Plan implementation
+under Work Items. The skeleton starts with one work item per story as a placeholder.
+Add, combine, or split items to match what can be reviewed in one issue. Give every
+deliverable, including migrations, wiring, documentation, and test changes, one owner.
+Use an existing item when the deliverable is part of its outcome. Give shared work its
+own item when it has a separately verifiable outcome.
 
-Done-when items are the acceptance test. "Clicking watch twice leaves exactly
-one row and reports success both times" — not "the watchlist works". Write them
-so a stranger could run them.
+Use `### WI<n> — <title> (P<0-4>)`. P1 is essential to shipping the feature.
+Use `**Goal**` for the outcome and `**Where**` for comma-separated backticked paths.
+`**Approach**` takes one line or plain bullets. Under `**Done when**`, use plain
+bullets for what a reviewer can verify. The issue tracks completion.
+
+`**Supports** US1, US2` links work to the stories it serves. Omit it for feature-wide
+work. Check that each story is covered by the work items. Use `**Blocked by** WI1`
+only for a hard prerequisite. List multiple references comma-separated.
 
 ## 7. Check
 
@@ -176,27 +183,27 @@ actually be verified by someone who did not write the code.
 
 ## 8. Report
 
-Give the path, the story and task counts, and anything you assumed that the user
+Give the path, the story and work item counts, and anything you assumed that the user
 should overturn. Say the spec is at `Draft`, that refine-spec can interview them
 about its rough edges, and that approve-spec is the next step if they want it reviewed and
 accepted. Then stop. Do not begin implementing,
-do not approve it yourself, and do not file the tasks anywhere unless asked.
+do not approve it yourself, and do not file the work items anywhere unless asked.
 
 ## Portability
 
 Nothing in the format is tied to a tracker. The vocabulary lines up with common
-issue-body conventions: one task is about one issue, `Done When` items drop
-straight into a done-when checklist, and P0–P4 matches the usual priority
+issue-body conventions: one work item maps to one issue, its acceptance criteria
+carry into the issue body, and P0–P4 matches the usual priority
 labels. If this repo uses an issue tracker, filing is the user's next step and
 their call, not something this skill does.
 
 ## Anti-patterns
 
-- Technology in the Description — it belongs in the tasks, or in an ADR
-- Done-when items that restate tasks; a task is work, a done-when is evidence
+- Technology in the Description — record it in Work Items or an ADR
+- Acceptance criteria that restate implementation steps
 - Empty Out of Scope or Assumptions when the request was genuinely ambiguous
 - Padding Prior Decisions with ADRs that do not actually constrain this feature
 - Citing research that is a draft, superseded, or unread, or citing a whole document
   where one finding is what the spec relies on
-- More than about eight stories or twenty-five tasks — that is two features
+- Work items too broad to review as one issue each
 - Cutting a branch, filing issues, or writing code from this skill

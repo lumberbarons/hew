@@ -1,172 +1,29 @@
 #!/usr/bin/env python3
-"""extract_spec - read a lightspec-format spec.md into structured JSON.
-
-    extract_spec.py specs/NNN-slug/spec.md
-
-Prints one JSON object to stdout: title, slug, status, the four framing
-sections (description, prior_decisions, out_of_scope, assumptions), each user
-story with its id/title/priority/story-sentence/narrative/tasks, any
-Cross-cutting tasks, and the epic-level done_when list.
-
-This exists so that turning a spec into hew issues never involves retyping a
-path or a task id by hand. A path transcribed by eye is a path that can drift
-from the one lightspec's own checker validated; a path read out of this
-script's JSON is the same string the spec author wrote. What the JSON does
-NOT contain is any judgment call - which done-when item belongs to which
-story, how a story's narrative becomes a goal, whether a story is really two.
-Those stay a job for whoever reads the JSON, human or agent, because they are
-exactly the calls a script should not make silently.
-
-Deliberately not a validator: it trusts the spec is already well-formed
-(lightspec check should have passed, and approve-spec should have moved it to
-Accepted before this script is ever run) and raises on the specific shapes it
-cannot parse rather than guessing. Run lightspec's own `check` first if there
-is any doubt.
-"""
+"""Read a lightspec spec or generate a hew JSONL plan for Accepted work items."""
 
 from __future__ import annotations
 
+import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
-# Mirrors lightspec.py's own DASH: agents drop em dashes for a plain double
-# hyphen, and the distinction carries no meaning worth rejecting on here.
-DASH = r"(?:—|--)"
-
-H1_RE = re.compile(r"^# (\S.*)$")
-H2_RE = re.compile(r"^## (\S.*)$")
-H3_RE = re.compile(r"^### (\S.*)$")
-SLUG_LINE_RE = re.compile(r"^\*\*Slug\*\*: `([^`]+)`$")
-STATUS_LINE_RE = re.compile(r"^\*\*Status\*\*: (\S+)")
-STORY_HEAD_RE = re.compile(r"^US(\d+) " + DASH + r" (\S.*?) \(P([0-4])\)$")
-TASK_GROUP_RE = re.compile(r"^US(\d+)$")
-CROSS_CUTTING = "Cross-cutting"
-TASK_RE = re.compile(
-    r"^- \[[ xX]\] (T\d{3}) (\S.*?) " + DASH + r" (`[^`]+`(?:, `[^`]+`)*)$"
-)
-CHECKBOX_RE = re.compile(r"^- \[[ xX]\] (\S.*)$")
-BULLET_RE = re.compile(r"^- (\S.*)$")
-PATH_RE = re.compile(r"`([^`]+)`")
+import lightspec
 
 
 class SpecFormatError(ValueError):
-    """The file does not look like a lightspec spec, in a specific way.
-
-    Raised rather than returning a partial result - a caller piping this into
-    an hew plan wants a loud failure over a JSON document quietly missing the
-    one story that failed to parse.
-    """
+    """The spec cannot be read or filed in the requested format."""
 
 
-def _sections(lines: list[str]) -> dict[str, list[str]]:
-    found: dict[str, list[str]] = {}
-    current: str | None = None
-    for line in lines:
-        match = H2_RE.match(line)
-        if match:
-            current = match.group(1)
-            found[current] = []
-            continue
-        if current is not None:
-            found[current].append(line)
-    return found
-
-
-def _blocks(body: list[str]) -> list[tuple[str, list[str]]]:
-    found: list[tuple[str, list[str]]] = []
-    for line in body:
-        match = H3_RE.match(line)
-        if match:
-            found.append((match.group(1), []))
-        elif found:
-            found[-1][1].append(line)
-    return found
-
-
-def _bullets(body: list[str]) -> list[str]:
-    return [
-        BULLET_RE.match(line).group(1)
-        for line in body
-        if line.strip() and BULLET_RE.match(line)
-    ]
-
-
-def _checklist(body: list[str]) -> list[str]:
-    return [
-        CHECKBOX_RE.match(line).group(1)
-        for line in body
-        if line.strip() and CHECKBOX_RE.match(line)
-    ]
-
-
-def _paragraphs(body: list[str]) -> list[str]:
-    found: list[str] = []
-    current: list[str] = []
-    for line in body:
-        if line.strip():
-            current.append(line.strip())
-        elif current:
-            found.append(" ".join(current))
-            current = []
-    if current:
-        found.append(" ".join(current))
-    return found
-
-
-def parse(text: str, path: Path) -> dict:
-    lines = [line.rstrip() for line in text.splitlines()]
-
-    title_line = next((line for line in lines if line.strip()), None)
-    title_match = title_line and H1_RE.match(title_line)
-    if not title_match:
-        raise SpecFormatError(f"{path}: first non-blank line is not an H1 title")
-    title = title_match.group(1)
-
-    slug_match = next(
-        (SLUG_LINE_RE.match(line) for line in lines if SLUG_LINE_RE.match(line)), None
-    )
-    status_match = next(
-        (STATUS_LINE_RE.match(line) for line in lines if STATUS_LINE_RE.match(line)),
-        None,
-    )
-    if not status_match:
-        raise SpecFormatError(f"{path}: no `**Status**:` line found")
-
-    sections = _sections(lines)
-    for required in ("Description", "Prior Decisions", "Out of Scope", "Assumptions",
-                      "User Stories", "Tasks", "Done When"):
-        if required not in sections:
-            raise SpecFormatError(f"{path}: missing `## {required}` section")
-
-    description = " ".join(_paragraphs(sections["Description"]))
-    prior_decisions = _bullets(sections["Prior Decisions"])
-    out_of_scope = _bullets(sections["Out of Scope"])
-    assumptions = _bullets(sections["Assumptions"])
-    done_when = _checklist(sections["Done When"])
-
-    stories: dict[int, dict] = {}
-    for heading, body in _blocks(sections["User Stories"]):
-        match = STORY_HEAD_RE.match(heading)
-        if not match:
-            raise SpecFormatError(f"{path}: unparseable story heading `{heading}`")
-        number = int(match.group(1))
-        paras = _paragraphs(body)
-        if not paras:
-            raise SpecFormatError(f"{path}: US{number} has no body")
-        stories[number] = {
-            "id": number,
-            "title": match.group(2),
-            "priority": f"P{match.group(3)}",
-            "story": paras[0],
-            "narrative": " ".join(paras[1:]),
-            "tasks": [],
-        }
-
+def parse_legacy_tasks(
+    tasks: list[tuple[int, str]],
+    fenced: frozenset[int],
+    stories: dict[int, dict],
+    path: Path,
+) -> list[dict]:
     cross_cutting_tasks: list[dict] = []
-    for heading, body in _blocks(sections["Tasks"]):
-        group_match = TASK_GROUP_RE.match(heading)
+    for heading, _, body in lightspec.blocks(tasks, fenced)[1]:
+        group_match = lightspec.TASK_GROUP_RE.match(heading)
         target = None
         if group_match:
             number = int(group_match.group(1))
@@ -175,59 +32,188 @@ def parse(text: str, path: Path) -> dict:
                     f"{path}: task group `US{number}` has no matching story"
                 )
             target = stories[number]["tasks"]
-        elif heading == CROSS_CUTTING:
+        elif heading == lightspec.CROSS_CUTTING:
             target = cross_cutting_tasks
         else:
             raise SpecFormatError(f"{path}: unrecognised task group `{heading}`")
 
-        for line in body:
-            if not line.strip():
-                continue
-            task_match = TASK_RE.match(line)
+        for _, line in lightspec.nonblank(body):
+            task_match = lightspec.TASK_RE.match(line)
             if not task_match:
                 raise SpecFormatError(f"{path}: unparseable task line `{line}`")
-            paths = PATH_RE.findall(task_match.group(3))
+            paths = lightspec.PATH_RE.findall(task_match.group(3))
             target.append(
-                {"id": task_match.group(1), "action": task_match.group(2), "paths": paths}
+                {"id": f"T{task_match.group(1)}", "action": task_match.group(2), "paths": paths}
             )
 
     for number, story in stories.items():
         if not story["tasks"]:
             raise SpecFormatError(f"{path}: US{number} has no tasks")
 
+    return cross_cutting_tasks
+
+
+def parse(text: str, path: Path) -> dict:
+    lines = [line.rstrip() for line in text.splitlines()]
+    title_line = next((line for line in lines if line.strip()), "")
+    title = lightspec.H1_RE.fullmatch(title_line)
+    if not title:
+        raise SpecFormatError(f"{path}: first non-blank line is not an H1 title")
+
+    slug = next((m for line in lines if (m := lightspec.SLUG_LINE_RE.match(line))), None)
+    status = next((m for line in lines if (m := lightspec.STATUS_LINE_RE.match(line))), None)
+    if not status:
+        raise SpecFormatError(f"{path}: no valid `**Status**:` line found")
+
+    fenced = lightspec.fenced_linenos(lines)
+    sections = {name: (lineno, body) for name, lineno, body in lightspec.sections(lines, fenced)}
+    legacy = "Tasks" in sections and "Work Items" not in sections
+    work_section = "Tasks" if legacy else "Work Items"
+    for name in lightspec.REQUIRED_SECTIONS:
+        name = work_section if name == "Work Items" else name
+        if name not in sections:
+            raise SpecFormatError(f"{path}: missing `## {name}` section")
+    if not legacy and "Tasks" in sections:
+        raise SpecFormatError(f"{path}: use either `## Tasks` or `## Work Items`")
+
+    story_pattern = lightspec.LEGACY_STORY_HEAD_RE if legacy else lightspec.STORY_HEAD_RE
+    stories: dict[int, dict] = {}
+    for heading, _, body in lightspec.blocks(sections["User Stories"][1], fenced)[1]:
+        match = story_pattern.fullmatch(heading)
+        if not match:
+            raise SpecFormatError(f"{path}: unparseable story heading `{heading}`")
+        number = int(match.group(1))
+        paras = [paragraph for _, paragraph in lightspec.paragraphs(body)]
+        if not paras:
+            raise SpecFormatError(f"{path}: US{number} has no body")
+        story = {
+            "id": number, "title": match.group(2), "story": paras[0],
+            "narrative": " ".join(paras[1:]),
+        }
+        if legacy:
+            story.update(priority=f"P{match.group(3)}", tasks=[])
+        stories[number] = story
+
+    problems = lightspec.Problems(path)
+    work_items = []
+    cross_cutting_tasks = []
+    done_lineno, done_body = sections["Done When"]
+    if legacy:
+        cross_cutting_tasks = parse_legacy_tasks(sections["Tasks"][1], fenced, stories, path)
+        done_when = [
+            match.group(1) for _, line in done_body
+            if (match := lightspec.CHECKBOX_RE.fullmatch(line))
+        ]
+    else:
+        work_lineno, work_body = sections["Work Items"]
+        work_items = lightspec.parse_work_items(
+            work_body, work_lineno, {n: s["title"] for n, s in stories.items()}, fenced, problems,
+        )
+        done_when = lightspec.parse_bullets(done_body, done_lineno, "Done When", problems)
+
+    framing = {}
+    for heading in ("Prior Decisions", "Research", "Out of Scope", "Assumptions"):
+        if heading in sections:
+            lineno, body = sections[heading]
+            framing[heading.lower().replace(" ", "_")] = lightspec.parse_bullets(
+                body, lineno, heading, problems,
+            )
+    if problems.items:
+        raise SpecFormatError("\n".join(
+            f"{path}:{lineno}: {message}" for lineno, message in sorted(problems.items)
+        ))
+
     return {
-        "title": title,
-        "slug": slug_match.group(1) if slug_match else None,
-        "status": status_match.group(1),
+        "title": title.group(1),
+        "slug": slug.group(1) if slug else None,
+        "status": status.group(1),
         "path": str(path),
-        "description": description,
-        "prior_decisions": prior_decisions,
-        "out_of_scope": out_of_scope,
-        "assumptions": assumptions,
+        "description": " ".join(text for _, text in lightspec.paragraphs(sections["Description"][1])),
+        **framing,
         "stories": [stories[number] for number in sorted(stories)],
+        "work_items": work_items,
         "cross_cutting_tasks": cross_cutting_tasks,
         "done_when": done_when,
     }
 
 
-def main(argv: list[str] | None = None) -> int:
-    argv = sys.argv[1:] if argv is None else argv
-    if len(argv) != 1:
-        print("usage: extract_spec.py <path/to/spec.md>", file=sys.stderr)
-        return 2
+def build_plan(data: dict) -> list[dict]:
+    if data["status"] != "Accepted":
+        raise SpecFormatError("only Accepted specs can be filed")
+    if data["cross_cutting_tasks"]:
+        ids = ", ".join(task["id"] for task in data["cross_cutting_tasks"])
+        raise SpecFormatError(
+            f"legacy cross-cutting tasks need owning work items before filing: {ids}"
+        )
+    items = data["work_items"]
+    if not items:
+        raise SpecFormatError("legacy story-only spec needs the mapping in REFERENCE.md")
 
-    path = Path(argv[0])
-    if not path.is_file():
-        print(f"extract_spec: {path} not found", file=sys.stderr)
-        return 2
+    path = Path(data["path"])
+    root = lightspec.repo_root_or_none(path.resolve().parent)
+    if root is not None:
+        path = path.resolve().relative_to(root)
+    directories = sorted({
+        f"{Path(path).parts[0]}/"
+        for item in items for path in item["paths"] if len(Path(path).parts) > 1
+    })
+    where = "\n\n".join(
+        "\n".join(f"`{entry}`" for entry in group)
+        for group in ([str(path)], directories) if group
+    )
+    framing = [
+        ("Prior Decisions", "prior_decisions"), ("Research", "research"),
+        ("Out of Scope", "out_of_scope"), ("Assumptions", "assumptions"),
+    ]
+    plan = [{
+        "id": "epic", "title": data["title"], "type": "epic",
+        "priority": min(item["priority"] for item in items),
+        "goal": data["description"], "where": where,
+        "approach": "\n\n".join(
+            f"**{label}**\n" + "\n".join(f"- {line}" for line in data[key])
+            for label, key in framing if key in data
+        ),
+        "done-when": data["done_when"],
+    }]
+    for item in items:
+        source = f"Work item `{item['id']}` in `{path}`."
+        if item["supports"]:
+            source += " Supports " + ", ".join(f"`{ref}`" for ref in item["supports"]) + "."
+        child = {
+            "id": item["id"], "title": item["title"], "type": "task",
+            "priority": item["priority"], "parent": "epic", "goal": item["goal"],
+            "where": "\n".join(f"`{path}`" for path in dict.fromkeys(item["paths"])),
+            "approach": f"{item['approach']}\n\n{source}",
+            "done-when": item["done_when"],
+        }
+        if item["blocked_by"]:
+            child["blocked-by"] = item["blocked_by"]
+        plan.append(child)
+    return plan
 
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("path", type=Path)
+    parser.add_argument("--plan", action="store_true", help="emit a hew JSONL plan for work items")
+    args = parser.parse_args()
     try:
-        data = parse(path.read_text(encoding="utf-8"), path)
-    except SpecFormatError as exc:
+        if args.plan:
+            problems = lightspec.check_file(args.path)
+            if problems.items:
+                raise SpecFormatError("\n".join(
+                    f"{args.path}:{lineno}: {message}"
+                    for lineno, message in sorted(problems.items)
+                ))
+        data = parse(args.path.read_text(encoding="utf-8"), args.path)
+        if args.plan:
+            for entry in build_plan(data):
+                print(json.dumps(entry))
+        else:
+            print(json.dumps(data, indent=2))
+    except (OSError, SpecFormatError) as exc:
         print(f"extract_spec: {exc}", file=sys.stderr)
         return 1
-
-    print(json.dumps(data, indent=2))
     return 0
 
 

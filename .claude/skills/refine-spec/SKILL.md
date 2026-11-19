@@ -76,7 +76,7 @@ thin, or missing. Do not print the map.
 | Data and lifecycle | What are the entities, what makes one unique, what states can it be in, how much of it is there? |
 | Vague words | Which adjectives and adverbs ("fast", "simple", "recent", "large") carry weight without a number or a rule? |
 | Assumptions | Which assumption, if wrong, rewrites the stories — and is it a guess the author made or something confirmed? |
-| Agreement | Does every story have done-when evidence, every done-when trace to a story, every task serve a story? Do two sections contradict each other? |
+| Agreement | Does the plan cover each story? Does each deliverable have one owning work item and a check? Do two sections contradict each other? |
 | Falsifiability | Could a stranger fail each Done When item without reading the diff? |
 | Terms | Is one thing called two names, or two things one? |
 | Decisions | Does the spec quietly choose something that deserves a recorded decision, or lean on a `Low`-confidence finding? |
@@ -147,8 +147,8 @@ the history is in version control.
 | A behaviour or an edge case | The story it belongs to — the detail paragraph carries the flow and the edge case that matters |
 | A vague word | Replace it with the number or rule, wherever it appears |
 | A guess that was listed | Remove it from Assumptions and put the fact where it applies; keep it only if still unconfirmed |
-| How to tell it works | A new or sharpened Done When item a stranger could falsify |
-| Work that follows from it | A task naming real paths, under the story it serves |
+| How to tell it works | A plain bullet the reviewer can verify, on the owning work item or in Done When for the assembled feature |
+| Work that follows from it | An implementation step in the owning work item or a new work item with paths and acceptance criteria |
 | A term | One name, everywhere, replacing the other |
 
 Three rules keep the edit honest:

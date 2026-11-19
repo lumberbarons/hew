@@ -4,7 +4,7 @@ dependencies:
 - repo_url: lumberbarons/lumber-mart
   name: critique
   host: github.com
-  resolved_commit: 0ce4871bd2fab0b9d3c68959a1974668860d8085
+  resolved_commit: b006e8cf6db6f2d2fcc8945c4ea5d2c255dc6ee4
   version: 6.1.0
   virtual_path: plugins/critique
   is_virtual: true
@@ -89,7 +89,7 @@ dependencies:
 - repo_url: lumberbarons/lumber-mart
   name: decisions
   host: github.com
-  resolved_commit: 0ce4871bd2fab0b9d3c68959a1974668860d8085
+  resolved_commit: b006e8cf6db6f2d2fcc8945c4ea5d2c255dc6ee4
   version: 1.6.1
   virtual_path: plugins/decisions
   is_virtual: true
@@ -138,7 +138,7 @@ dependencies:
 - repo_url: lumberbarons/lumber-mart
   name: hew
   host: github.com
-  resolved_commit: 0ce4871bd2fab0b9d3c68959a1974668860d8085
+  resolved_commit: b006e8cf6db6f2d2fcc8945c4ea5d2c255dc6ee4
   version: 2.11.2
   virtual_path: plugins/hew
   is_virtual: true
@@ -195,8 +195,8 @@ dependencies:
 - repo_url: lumberbarons/lumber-mart
   name: lightspec
   host: github.com
-  resolved_commit: 0ce4871bd2fab0b9d3c68959a1974668860d8085
-  version: 1.5.0
+  resolved_commit: b006e8cf6db6f2d2fcc8945c4ea5d2c255dc6ee4
+  version: 2.0.0
   virtual_path: plugins/lightspec
   is_virtual: true
   package_type: marketplace_plugin
@@ -234,36 +234,36 @@ dependencies:
   - .claude/skills/spec-to-epic/scripts/extract_spec.py
   - .claude/skills/spec-to-epic/scripts/lightspec.py
   deployed_file_hashes:
-    .agents/skills/approve-spec/SKILL.md: sha256:1e28fc50def9d7b4113e2cb8a602ab04efe223502b12ca858a52a78d07615dfa
-    .agents/skills/approve-spec/scripts/lightspec.py: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
-    .agents/skills/draft-spec/SKILL.md: sha256:f958badefc80dc2ea3566b8ead936eec407b1bb7158c96651482dfcaf15f7b13
-    .agents/skills/draft-spec/reference/example-spec.md: sha256:9782ff1e2bfdc78ee45734b56f1f27e5894a6de173ca0e00eec92fa9d9a8f2d2
-    .agents/skills/draft-spec/scripts/lightspec.py: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
-    .agents/skills/refine-spec/SKILL.md: sha256:0a3742e62efca7fe6159a9078234f09bee7dfed99e407e94aaf6977eb3f52daf
-    .agents/skills/refine-spec/scripts/lightspec.py: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
-    .agents/skills/spec-to-epic/REFERENCE.md: sha256:1bd2ca7703e31279172349b742e4c67efdb133957704050cab0672eb367783ec
-    .agents/skills/spec-to-epic/SKILL.md: sha256:ffbc36391df5562583c3c66309f70c1b9b32eba694028ec1d0879c4ba6948c66
-    .agents/skills/spec-to-epic/reference/example-spec.md: sha256:9782ff1e2bfdc78ee45734b56f1f27e5894a6de173ca0e00eec92fa9d9a8f2d2
-    .agents/skills/spec-to-epic/scripts/extract_spec.py: sha256:13380af41f7b8bc3c08e7f198f52926787259d4a896b05f3ca998cd22859022f
-    .agents/skills/spec-to-epic/scripts/lightspec.py: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
-    .claude/skills/approve-spec/SKILL.md: sha256:1e28fc50def9d7b4113e2cb8a602ab04efe223502b12ca858a52a78d07615dfa
-    .claude/skills/approve-spec/scripts/lightspec.py: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
-    .claude/skills/draft-spec/SKILL.md: sha256:f958badefc80dc2ea3566b8ead936eec407b1bb7158c96651482dfcaf15f7b13
-    .claude/skills/draft-spec/reference/example-spec.md: sha256:9782ff1e2bfdc78ee45734b56f1f27e5894a6de173ca0e00eec92fa9d9a8f2d2
-    .claude/skills/draft-spec/scripts/lightspec.py: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
-    .claude/skills/refine-spec/SKILL.md: sha256:0a3742e62efca7fe6159a9078234f09bee7dfed99e407e94aaf6977eb3f52daf
-    .claude/skills/refine-spec/scripts/lightspec.py: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
-    .claude/skills/spec-to-epic/REFERENCE.md: sha256:1bd2ca7703e31279172349b742e4c67efdb133957704050cab0672eb367783ec
-    .claude/skills/spec-to-epic/SKILL.md: sha256:ffbc36391df5562583c3c66309f70c1b9b32eba694028ec1d0879c4ba6948c66
-    .claude/skills/spec-to-epic/reference/example-spec.md: sha256:9782ff1e2bfdc78ee45734b56f1f27e5894a6de173ca0e00eec92fa9d9a8f2d2
-    .claude/skills/spec-to-epic/scripts/extract_spec.py: sha256:13380af41f7b8bc3c08e7f198f52926787259d4a896b05f3ca998cd22859022f
-    .claude/skills/spec-to-epic/scripts/lightspec.py: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
-  content_hash: sha256:3da97301686b9ee0fe86b16b7090e3587c3648698c132d6fce694927778cfb60
+    .agents/skills/approve-spec/SKILL.md: sha256:aeeaf7124ea577a82412537e08c48280ecd09a477ef18b7c414b93ee1e0908fd
+    .agents/skills/approve-spec/scripts/lightspec.py: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
+    .agents/skills/draft-spec/SKILL.md: sha256:909ff0d40e8185c13e5dfb4dc3500d14a2b5a19586febdfd82e665ce0d211f60
+    .agents/skills/draft-spec/reference/example-spec.md: sha256:e19cb31605fa8f24dc45ab8fed9e99cf267035ee7af72b90e698d0457cc65333
+    .agents/skills/draft-spec/scripts/lightspec.py: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
+    .agents/skills/refine-spec/SKILL.md: sha256:c3029dbcefee3e071a5e60b54bba465bb24b98280f0218f3d1375162d666d65b
+    .agents/skills/refine-spec/scripts/lightspec.py: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
+    .agents/skills/spec-to-epic/REFERENCE.md: sha256:5695283ea674966610fe8ef467fd8fe55eec635d63d8bb6100943ed1c51c2bb2
+    .agents/skills/spec-to-epic/SKILL.md: sha256:c3f529ff370a396b8161d72ecc7410c01752a10f24025f2ea83cb53ddd826abf
+    .agents/skills/spec-to-epic/reference/example-spec.md: sha256:e19cb31605fa8f24dc45ab8fed9e99cf267035ee7af72b90e698d0457cc65333
+    .agents/skills/spec-to-epic/scripts/extract_spec.py: sha256:b40c1887fe6b9c239bd642037f3db8d86a226c59e1edddda2a1691f4f870a84a
+    .agents/skills/spec-to-epic/scripts/lightspec.py: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
+    .claude/skills/approve-spec/SKILL.md: sha256:aeeaf7124ea577a82412537e08c48280ecd09a477ef18b7c414b93ee1e0908fd
+    .claude/skills/approve-spec/scripts/lightspec.py: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
+    .claude/skills/draft-spec/SKILL.md: sha256:909ff0d40e8185c13e5dfb4dc3500d14a2b5a19586febdfd82e665ce0d211f60
+    .claude/skills/draft-spec/reference/example-spec.md: sha256:e19cb31605fa8f24dc45ab8fed9e99cf267035ee7af72b90e698d0457cc65333
+    .claude/skills/draft-spec/scripts/lightspec.py: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
+    .claude/skills/refine-spec/SKILL.md: sha256:c3029dbcefee3e071a5e60b54bba465bb24b98280f0218f3d1375162d666d65b
+    .claude/skills/refine-spec/scripts/lightspec.py: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
+    .claude/skills/spec-to-epic/REFERENCE.md: sha256:5695283ea674966610fe8ef467fd8fe55eec635d63d8bb6100943ed1c51c2bb2
+    .claude/skills/spec-to-epic/SKILL.md: sha256:c3f529ff370a396b8161d72ecc7410c01752a10f24025f2ea83cb53ddd826abf
+    .claude/skills/spec-to-epic/reference/example-spec.md: sha256:e19cb31605fa8f24dc45ab8fed9e99cf267035ee7af72b90e698d0457cc65333
+    .claude/skills/spec-to-epic/scripts/extract_spec.py: sha256:b40c1887fe6b9c239bd642037f3db8d86a226c59e1edddda2a1691f4f870a84a
+    .claude/skills/spec-to-epic/scripts/lightspec.py: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
+  content_hash: sha256:ecf1411f0f79a164d649047c4271b91ed34aa9977b840137f5bb00162aafe839
 - repo_url: lumberbarons/lumber-mart
   name: work-epic
   host: github.com
-  resolved_commit: 0ce4871bd2fab0b9d3c68959a1974668860d8085
-  version: 4.6.0
+  resolved_commit: b006e8cf6db6f2d2fcc8945c4ea5d2c255dc6ee4
+  version: 4.7.0
   virtual_path: plugins/work-epic
   is_virtual: true
   package_type: skill_bundle
@@ -303,15 +303,15 @@ dependencies:
   - .claude/skills/work-epic/scripts/resolve_ready.py
   - .claude/skills/work-epic/scripts/work_epic.py
   deployed_file_hashes:
-    .agents/skills/work-epic/REFERENCE.md: sha256:f403fd9a9e9dcda6171d93192d39a0005da8fb4132768a13042fd994cba2300d
-    .agents/skills/work-epic/SKILL.md: sha256:60858b5bade5854770a347da0bc92c02c8d036a845ef21892144c83f00f70b15
+    .agents/skills/work-epic/REFERENCE.md: sha256:e1ae135ae97e31d3f1bf8d09f8e50b1b5ac65edd32ea3ac79ece3fdc73817e26
+    .agents/skills/work-epic/SKILL.md: sha256:0f51ad8be8df4e5cd20a20d3a0b38732ee0deba1d446a1b331d4d7e7ce1b41da
     .agents/skills/work-epic/prompts/repairer.md: sha256:aa7368018d9e41f052d8adc4dd3fbdde4c4a1119b2d11a90590933ebb427738b
     .agents/skills/work-epic/prompts/repairer_local.md: sha256:314fba84bcee05aefe0eccda6bd9d3fe43f2872029de9206fab16d520ab7f4fd
-    .agents/skills/work-epic/prompts/reviewer.md: sha256:656565b592f73729a72eda48d8c7dd52c3744849b2df6a42c4af2d85978eaac5
-    .agents/skills/work-epic/prompts/reviewer_local.md: sha256:a889772bf9d8ee43a5a2eadbbc602493fdedcccfe07b65f6a04befecc0597558
+    .agents/skills/work-epic/prompts/reviewer.md: sha256:0cc1767e51452eb8b3ec2f294817828bb49af0bcffdea3deac617ab72ebdf5ac
+    .agents/skills/work-epic/prompts/reviewer_local.md: sha256:8ded4e3c3b4f576a57ddb6e87ebd7079f14ef54bbae58235d6a0306588786bb3
     .agents/skills/work-epic/prompts/worker.md: sha256:5cede0233131ae2030479e55a53f2cb98956d6b768017fcec1829d2e60e22d47
     .agents/skills/work-epic/prompts/worker_local.md: sha256:32afeb3413d289a7eac9431647c2a91469958893853071b6d623014199ba9eda
-    .agents/skills/work-epic/scripts/findings.py: sha256:3d4586d18d9b0abb417b3fa8a1bb80f6884fcd74f2d62374f9adef1e8893a172
+    .agents/skills/work-epic/scripts/findings.py: sha256:7ebd945f2679346f48c226b579fc2f659caa7ec38ad85103f74511c4a195d502
     .agents/skills/work-epic/scripts/local_state.py: sha256:798ec5cba2a80d499941d1ef0716af64ecaf96649e74712abc2787a5d33a98a5
     .agents/skills/work-epic/scripts/orca_api.py: sha256:e694bead146cba762f248c31e0424ccc8ee211d824e2a2639ff4f6a00d8e804a
     .agents/skills/work-epic/scripts/pr_state.py: sha256:30881a453b8f84b5a6e82b80100ce963b4d22c73960b8e9504d48511e9bcd82b
@@ -319,15 +319,15 @@ dependencies:
     .agents/skills/work-epic/scripts/repo_state.py: sha256:eb32354c2b6288c06c7b42c20355f1dbd9b86e5049f45f4550556ae0667c2766
     .agents/skills/work-epic/scripts/resolve_ready.py: sha256:2bd3b087d53a1ff80ab46ab7fca2a8f19c72ca6932ff6c3d26fa452314adeb8a
     .agents/skills/work-epic/scripts/work_epic.py: sha256:7e2d5ad95ff7cf46eb0d2a8afb2b20a415ae47b251f3497b72ede2ec2fc2475f
-    .claude/skills/work-epic/REFERENCE.md: sha256:f403fd9a9e9dcda6171d93192d39a0005da8fb4132768a13042fd994cba2300d
-    .claude/skills/work-epic/SKILL.md: sha256:60858b5bade5854770a347da0bc92c02c8d036a845ef21892144c83f00f70b15
+    .claude/skills/work-epic/REFERENCE.md: sha256:e1ae135ae97e31d3f1bf8d09f8e50b1b5ac65edd32ea3ac79ece3fdc73817e26
+    .claude/skills/work-epic/SKILL.md: sha256:0f51ad8be8df4e5cd20a20d3a0b38732ee0deba1d446a1b331d4d7e7ce1b41da
     .claude/skills/work-epic/prompts/repairer.md: sha256:aa7368018d9e41f052d8adc4dd3fbdde4c4a1119b2d11a90590933ebb427738b
     .claude/skills/work-epic/prompts/repairer_local.md: sha256:314fba84bcee05aefe0eccda6bd9d3fe43f2872029de9206fab16d520ab7f4fd
-    .claude/skills/work-epic/prompts/reviewer.md: sha256:656565b592f73729a72eda48d8c7dd52c3744849b2df6a42c4af2d85978eaac5
-    .claude/skills/work-epic/prompts/reviewer_local.md: sha256:a889772bf9d8ee43a5a2eadbbc602493fdedcccfe07b65f6a04befecc0597558
+    .claude/skills/work-epic/prompts/reviewer.md: sha256:0cc1767e51452eb8b3ec2f294817828bb49af0bcffdea3deac617ab72ebdf5ac
+    .claude/skills/work-epic/prompts/reviewer_local.md: sha256:8ded4e3c3b4f576a57ddb6e87ebd7079f14ef54bbae58235d6a0306588786bb3
     .claude/skills/work-epic/prompts/worker.md: sha256:5cede0233131ae2030479e55a53f2cb98956d6b768017fcec1829d2e60e22d47
     .claude/skills/work-epic/prompts/worker_local.md: sha256:32afeb3413d289a7eac9431647c2a91469958893853071b6d623014199ba9eda
-    .claude/skills/work-epic/scripts/findings.py: sha256:3d4586d18d9b0abb417b3fa8a1bb80f6884fcd74f2d62374f9adef1e8893a172
+    .claude/skills/work-epic/scripts/findings.py: sha256:7ebd945f2679346f48c226b579fc2f659caa7ec38ad85103f74511c4a195d502
     .claude/skills/work-epic/scripts/local_state.py: sha256:798ec5cba2a80d499941d1ef0716af64ecaf96649e74712abc2787a5d33a98a5
     .claude/skills/work-epic/scripts/orca_api.py: sha256:e694bead146cba762f248c31e0424ccc8ee211d824e2a2639ff4f6a00d8e804a
     .claude/skills/work-epic/scripts/pr_state.py: sha256:30881a453b8f84b5a6e82b80100ce963b4d22c73960b8e9504d48511e9bcd82b
@@ -335,7 +335,7 @@ dependencies:
     .claude/skills/work-epic/scripts/repo_state.py: sha256:eb32354c2b6288c06c7b42c20355f1dbd9b86e5049f45f4550556ae0667c2766
     .claude/skills/work-epic/scripts/resolve_ready.py: sha256:2bd3b087d53a1ff80ab46ab7fca2a8f19c72ca6932ff6c3d26fa452314adeb8a
     .claude/skills/work-epic/scripts/work_epic.py: sha256:7e2d5ad95ff7cf46eb0d2a8afb2b20a415ae47b251f3497b72ede2ec2fc2475f
-  content_hash: sha256:b48dfe56f2d682dd150ff928725a0e65a8e73b6a1c463b6d25a558024b0ca21f
+  content_hash: sha256:a866f8ce9e0ff9e140eb5c5310d9de22f4f6b67099c66a589b506d521226c2c2
 deployments:
 - kind: project-relative
   target: claude
@@ -354,7 +354,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:1e28fc50def9d7b4113e2cb8a602ab04efe223502b12ca858a52a78d07615dfa
+  content_hash: sha256:aeeaf7124ea577a82412537e08c48280ecd09a477ef18b7c414b93ee1e0908fd
 - kind: project-relative
   target: claude
   value: .claude/skills/approve-spec/scripts/lightspec.py
@@ -363,7 +363,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
+  content_hash: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
 - kind: project-relative
   target: claude
   value: .claude/skills/create-adr
@@ -453,7 +453,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:f958badefc80dc2ea3566b8ead936eec407b1bb7158c96651482dfcaf15f7b13
+  content_hash: sha256:909ff0d40e8185c13e5dfb4dc3500d14a2b5a19586febdfd82e665ce0d211f60
 - kind: project-relative
   target: claude
   value: .claude/skills/draft-spec/reference/example-spec.md
@@ -462,7 +462,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:9782ff1e2bfdc78ee45734b56f1f27e5894a6de173ca0e00eec92fa9d9a8f2d2
+  content_hash: sha256:e19cb31605fa8f24dc45ab8fed9e99cf267035ee7af72b90e698d0457cc65333
 - kind: project-relative
   target: claude
   value: .claude/skills/draft-spec/scripts/lightspec.py
@@ -471,7 +471,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
+  content_hash: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
 - kind: project-relative
   target: claude
   value: .claude/skills/finish-issue
@@ -579,7 +579,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:0a3742e62efca7fe6159a9078234f09bee7dfed99e407e94aaf6977eb3f52daf
+  content_hash: sha256:c3029dbcefee3e071a5e60b54bba465bb24b98280f0218f3d1375162d666d65b
 - kind: project-relative
   target: claude
   value: .claude/skills/refine-spec/scripts/lightspec.py
@@ -588,7 +588,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
+  content_hash: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
 - kind: project-relative
   target: claude
   value: .claude/skills/review-code
@@ -813,7 +813,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:1bd2ca7703e31279172349b742e4c67efdb133957704050cab0672eb367783ec
+  content_hash: sha256:5695283ea674966610fe8ef467fd8fe55eec635d63d8bb6100943ed1c51c2bb2
 - kind: project-relative
   target: claude
   value: .claude/skills/spec-to-epic/SKILL.md
@@ -822,7 +822,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:ffbc36391df5562583c3c66309f70c1b9b32eba694028ec1d0879c4ba6948c66
+  content_hash: sha256:c3f529ff370a396b8161d72ecc7410c01752a10f24025f2ea83cb53ddd826abf
 - kind: project-relative
   target: claude
   value: .claude/skills/spec-to-epic/reference/example-spec.md
@@ -831,7 +831,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:9782ff1e2bfdc78ee45734b56f1f27e5894a6de173ca0e00eec92fa9d9a8f2d2
+  content_hash: sha256:e19cb31605fa8f24dc45ab8fed9e99cf267035ee7af72b90e698d0457cc65333
 - kind: project-relative
   target: claude
   value: .claude/skills/spec-to-epic/scripts/extract_spec.py
@@ -840,7 +840,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:13380af41f7b8bc3c08e7f198f52926787259d4a896b05f3ca998cd22859022f
+  content_hash: sha256:b40c1887fe6b9c239bd642037f3db8d86a226c59e1edddda2a1691f4f870a84a
 - kind: project-relative
   target: claude
   value: .claude/skills/spec-to-epic/scripts/lightspec.py
@@ -849,7 +849,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
+  content_hash: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
 - kind: project-relative
   target: claude
   value: .claude/skills/work-epic
@@ -867,7 +867,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/work-epic
   active_owner: lumberbarons/lumber-mart/plugins/work-epic
-  content_hash: sha256:f403fd9a9e9dcda6171d93192d39a0005da8fb4132768a13042fd994cba2300d
+  content_hash: sha256:e1ae135ae97e31d3f1bf8d09f8e50b1b5ac65edd32ea3ac79ece3fdc73817e26
 - kind: project-relative
   target: claude
   value: .claude/skills/work-epic/SKILL.md
@@ -876,7 +876,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/work-epic
   active_owner: lumberbarons/lumber-mart/plugins/work-epic
-  content_hash: sha256:60858b5bade5854770a347da0bc92c02c8d036a845ef21892144c83f00f70b15
+  content_hash: sha256:0f51ad8be8df4e5cd20a20d3a0b38732ee0deba1d446a1b331d4d7e7ce1b41da
 - kind: project-relative
   target: claude
   value: .claude/skills/work-epic/prompts/repairer.md
@@ -903,7 +903,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/work-epic
   active_owner: lumberbarons/lumber-mart/plugins/work-epic
-  content_hash: sha256:656565b592f73729a72eda48d8c7dd52c3744849b2df6a42c4af2d85978eaac5
+  content_hash: sha256:0cc1767e51452eb8b3ec2f294817828bb49af0bcffdea3deac617ab72ebdf5ac
 - kind: project-relative
   target: claude
   value: .claude/skills/work-epic/prompts/reviewer_local.md
@@ -912,7 +912,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/work-epic
   active_owner: lumberbarons/lumber-mart/plugins/work-epic
-  content_hash: sha256:a889772bf9d8ee43a5a2eadbbc602493fdedcccfe07b65f6a04befecc0597558
+  content_hash: sha256:8ded4e3c3b4f576a57ddb6e87ebd7079f14ef54bbae58235d6a0306588786bb3
 - kind: project-relative
   target: claude
   value: .claude/skills/work-epic/prompts/worker.md
@@ -939,7 +939,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/work-epic
   active_owner: lumberbarons/lumber-mart/plugins/work-epic
-  content_hash: sha256:3d4586d18d9b0abb417b3fa8a1bb80f6884fcd74f2d62374f9adef1e8893a172
+  content_hash: sha256:7ebd945f2679346f48c226b579fc2f659caa7ec38ad85103f74511c4a195d502
 - kind: project-relative
   target: claude
   value: .claude/skills/work-epic/scripts/local_state.py
@@ -1047,7 +1047,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:1e28fc50def9d7b4113e2cb8a602ab04efe223502b12ca858a52a78d07615dfa
+  content_hash: sha256:aeeaf7124ea577a82412537e08c48280ecd09a477ef18b7c414b93ee1e0908fd
 - kind: project-relative
   target: codex
   value: .agents/skills/approve-spec/scripts/lightspec.py
@@ -1056,7 +1056,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
+  content_hash: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
 - kind: project-relative
   target: codex
   value: .agents/skills/create-adr
@@ -1146,7 +1146,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:f958badefc80dc2ea3566b8ead936eec407b1bb7158c96651482dfcaf15f7b13
+  content_hash: sha256:909ff0d40e8185c13e5dfb4dc3500d14a2b5a19586febdfd82e665ce0d211f60
 - kind: project-relative
   target: codex
   value: .agents/skills/draft-spec/reference/example-spec.md
@@ -1155,7 +1155,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:9782ff1e2bfdc78ee45734b56f1f27e5894a6de173ca0e00eec92fa9d9a8f2d2
+  content_hash: sha256:e19cb31605fa8f24dc45ab8fed9e99cf267035ee7af72b90e698d0457cc65333
 - kind: project-relative
   target: codex
   value: .agents/skills/draft-spec/scripts/lightspec.py
@@ -1164,7 +1164,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
+  content_hash: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
 - kind: project-relative
   target: codex
   value: .agents/skills/finish-issue
@@ -1272,7 +1272,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:0a3742e62efca7fe6159a9078234f09bee7dfed99e407e94aaf6977eb3f52daf
+  content_hash: sha256:c3029dbcefee3e071a5e60b54bba465bb24b98280f0218f3d1375162d666d65b
 - kind: project-relative
   target: codex
   value: .agents/skills/refine-spec/scripts/lightspec.py
@@ -1281,7 +1281,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
+  content_hash: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
 - kind: project-relative
   target: codex
   value: .agents/skills/review-code
@@ -1506,7 +1506,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:1bd2ca7703e31279172349b742e4c67efdb133957704050cab0672eb367783ec
+  content_hash: sha256:5695283ea674966610fe8ef467fd8fe55eec635d63d8bb6100943ed1c51c2bb2
 - kind: project-relative
   target: codex
   value: .agents/skills/spec-to-epic/SKILL.md
@@ -1515,7 +1515,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:ffbc36391df5562583c3c66309f70c1b9b32eba694028ec1d0879c4ba6948c66
+  content_hash: sha256:c3f529ff370a396b8161d72ecc7410c01752a10f24025f2ea83cb53ddd826abf
 - kind: project-relative
   target: codex
   value: .agents/skills/spec-to-epic/reference/example-spec.md
@@ -1524,7 +1524,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:9782ff1e2bfdc78ee45734b56f1f27e5894a6de173ca0e00eec92fa9d9a8f2d2
+  content_hash: sha256:e19cb31605fa8f24dc45ab8fed9e99cf267035ee7af72b90e698d0457cc65333
 - kind: project-relative
   target: codex
   value: .agents/skills/spec-to-epic/scripts/extract_spec.py
@@ -1533,7 +1533,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:13380af41f7b8bc3c08e7f198f52926787259d4a896b05f3ca998cd22859022f
+  content_hash: sha256:b40c1887fe6b9c239bd642037f3db8d86a226c59e1edddda2a1691f4f870a84a
 - kind: project-relative
   target: codex
   value: .agents/skills/spec-to-epic/scripts/lightspec.py
@@ -1542,7 +1542,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/lightspec
   active_owner: lumberbarons/lumber-mart/plugins/lightspec
-  content_hash: sha256:253e9dcd6a54a50e6119f16bd20178bf31e26b92c4970ff8ba6b1c2cad402bf4
+  content_hash: sha256:ec90ddef09a4dc19fd1f0367522358bda4cef07519d2308bd5dec78b0fc3ab93
 - kind: project-relative
   target: codex
   value: .agents/skills/work-epic
@@ -1560,7 +1560,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/work-epic
   active_owner: lumberbarons/lumber-mart/plugins/work-epic
-  content_hash: sha256:f403fd9a9e9dcda6171d93192d39a0005da8fb4132768a13042fd994cba2300d
+  content_hash: sha256:e1ae135ae97e31d3f1bf8d09f8e50b1b5ac65edd32ea3ac79ece3fdc73817e26
 - kind: project-relative
   target: codex
   value: .agents/skills/work-epic/SKILL.md
@@ -1569,7 +1569,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/work-epic
   active_owner: lumberbarons/lumber-mart/plugins/work-epic
-  content_hash: sha256:60858b5bade5854770a347da0bc92c02c8d036a845ef21892144c83f00f70b15
+  content_hash: sha256:0f51ad8be8df4e5cd20a20d3a0b38732ee0deba1d446a1b331d4d7e7ce1b41da
 - kind: project-relative
   target: codex
   value: .agents/skills/work-epic/prompts/repairer.md
@@ -1596,7 +1596,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/work-epic
   active_owner: lumberbarons/lumber-mart/plugins/work-epic
-  content_hash: sha256:656565b592f73729a72eda48d8c7dd52c3744849b2df6a42c4af2d85978eaac5
+  content_hash: sha256:0cc1767e51452eb8b3ec2f294817828bb49af0bcffdea3deac617ab72ebdf5ac
 - kind: project-relative
   target: codex
   value: .agents/skills/work-epic/prompts/reviewer_local.md
@@ -1605,7 +1605,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/work-epic
   active_owner: lumberbarons/lumber-mart/plugins/work-epic
-  content_hash: sha256:a889772bf9d8ee43a5a2eadbbc602493fdedcccfe07b65f6a04befecc0597558
+  content_hash: sha256:8ded4e3c3b4f576a57ddb6e87ebd7079f14ef54bbae58235d6a0306588786bb3
 - kind: project-relative
   target: codex
   value: .agents/skills/work-epic/prompts/worker.md
@@ -1632,7 +1632,7 @@ deployments:
   owners:
   - lumberbarons/lumber-mart/plugins/work-epic
   active_owner: lumberbarons/lumber-mart/plugins/work-epic
-  content_hash: sha256:3d4586d18d9b0abb417b3fa8a1bb80f6884fcd74f2d62374f9adef1e8893a172
+  content_hash: sha256:7ebd945f2679346f48c226b579fc2f659caa7ec38ad85103f74511c4a195d502
 - kind: project-relative
   target: codex
   value: .agents/skills/work-epic/scripts/local_state.py
