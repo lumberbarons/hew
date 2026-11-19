@@ -70,17 +70,15 @@ func classify(err error) (int, problem) {
 	case errors.As(err, &tooLarge):
 		return set(http.StatusRequestEntityTooLarge, "too_large", map[string]any{"limit": tooLarge.Limit})
 	case errors.As(err, &claimed):
-		// The CLI's exit 5 (yours: resume) versus exit 3 (theirs: pick next).
-		kind := "claimed_by_other"
-		if claimed.ByActor {
-			kind = "claimed_by_you"
-		}
-		return set(http.StatusConflict, kind, map[string]any{
+		// The kind is the library's start outcome: the CLI's exit 5 (yours:
+		// resume) versus exit 3 (theirs: pick next), under its recorded names.
+		outcome, _ := tracker.StartOutcomeOf(err)
+		return set(http.StatusConflict, string(outcome), map[string]any{
 			"issue": claimed.Issue, "assignees": orEmpty(claimed.Assignees), "actor": claimed.Actor,
 		})
 	case errors.As(err, &blocked):
-		// The CLI's exit 6.
-		return set(http.StatusConflict, "blocked", map[string]any{
+		// StartBlocked is the library's name for the CLI's exit 6.
+		return set(http.StatusConflict, string(tracker.StartBlocked), map[string]any{
 			"issue": blocked.Issue, "openBlockers": orEmpty(blocked.OpenBlockers),
 		})
 	case errors.As(err, &invalid):
