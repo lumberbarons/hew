@@ -50,7 +50,7 @@ jobs:
         run: go test -race -coverpkg=github.com/lumberbarons/hew/... -coverprofile=../coverage-consumer.out ./...
         working-directory: consumer
       - name: coverage gate
-        uses: vladopajic/go-test-coverage@f94bcf0d6b9fa5fb8b783830b22648f6c17475e2 # v2.19.0
+        uses: vladopajic/go-test-coverage@6890500b00a7e5862e54662c04ea9fa7c799ce1e # v2.23.0
         with:
           config: ./.testcoverage.yml
 
@@ -236,7 +236,7 @@ jobs:
       # from the repository root, so the config's profile path is relative to
       # it and source-dir points at the module whose import path to strip.
       - name: coverage gate
-        uses: vladopajic/go-test-coverage@f94bcf0d6b9fa5fb8b783830b22648f6c17475e2 # v2.19.0
+        uses: vladopajic/go-test-coverage@6890500b00a7e5862e54662c04ea9fa7c799ce1e # v2.23.0
         with:
           config: ./daemon/.testcoverage.yml
           source-dir: ./daemon
