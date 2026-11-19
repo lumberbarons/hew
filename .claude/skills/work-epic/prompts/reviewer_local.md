@@ -13,7 +13,9 @@ Then:
    `--report-only` is required: the fix step below is the repair phase, and review-code must not
    edit the tree itself, or its edits would be committed under the wrong finding or undone by a
    failed gate.
-3. For each finding at P1 or P2 in the file that you have not yet attempted, in order, try to fix it:
+3. For each finding in the file that you have not yet attempted, in order, try to fix it — every
+   P1 and P2, and each P3 whose fix is small and local (a rename, a clarified name or comment, an
+   added assertion, a dead branch removed):
    - make the smallest change that resolves it, inside the files this branch already changes or
      their direct tests;
    - run every check the project gates on — tests, linters, type checks, builds — as step 6 of
@@ -22,9 +24,10 @@ Then:
      "fixedIn": "<short sha>" on that finding in the file;
    - otherwise undo the change entirely (`git restore --staged --worktree .`) and set
      "fixed": false and "unfixedReason": "<why>" on that finding.
-   Leave a finding unfixed, with the reason, when the fix needs a design decision, reaches outside
-   this branch's files, would be large, or conflicts with another finding. Never weaken or delete a
-   test to make a gate pass. Leave P3 findings alone.
+   Leave a finding unfixed, with "fixed": false and its reason in "unfixedReason", when the fix
+   needs a design decision, reaches outside this branch's files, would be large, or conflicts with
+   another finding. Apply that bar earlier for a P3: leave it unless the fix is clearly smaller than
+   the problem it removes. Never weaken or delete a test to make a gate pass.
 4. Test review, after the fixes above so it reads the branch as it now stands. The pump decided
    this branch's lens: **${tests_lens}**. On `skip` the branch changes only documentation, so go
    to step 5. On `run`:
@@ -34,8 +37,8 @@ Then:
       to step 5. A `no_scope` status means there is nothing to merge; continue.
    c. Append each of its findings to the main file's `findings`, adding `"skill": "tests"` to each
       so it files under its own review key. Leave the main file's top-level `skill` as it is.
-   d. Fix the appended P1 and P2 findings by the procedure in step 3. A test review repairs
-      tests: a finding that needs a production change is left unfixed, with that as the reason.
+   d. Fix the appended findings by the procedure in step 3. A test review repairs tests: a
+      finding that needs a production change is left unfixed, with that as the reason.
 5. Leave what you committed on the branch. Never push, never rebase, never force anything.
 6. Add to the file's top level "head": "<`git rev-parse HEAD`>" and "gate": "<command and result>".
    Create `.work-epic/` if needed; do not commit the file.

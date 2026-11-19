@@ -20,6 +20,7 @@ import datetime
 import re
 import sys
 import unicodedata
+from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
 
 REQUIRED_SECTIONS = (
@@ -28,7 +29,7 @@ REQUIRED_SECTIONS = (
     "Out of Scope",
     "Assumptions",
     "User Stories",
-    "Tasks",
+    "Work Items",
     "Done When",
 )
 # Research is optional so specs written before it existed still pass: when
@@ -57,7 +58,14 @@ STATUS_VALUES = ("Draft", "Accepted", "Implemented", "Superseded")
 STATUS_LINE_RE = re.compile(
     r"^\*\*Status\*\*: (" + "|".join(STATUS_VALUES) + r")(?:\s+(\S.*))?$"
 )
-STORY_HEAD_RE = re.compile(r"^US(\d+) " + DASH + r" (\S.*?) \(P([0-4])\)$")
+STORY_HEAD_RE = re.compile(r"^US(\d+) " + DASH + r" (\S.*?)$")
+LEGACY_STORY_HEAD_RE = re.compile(r"^US(\d+) " + DASH + r" (\S.*?) \(P([0-4])\)$")
+WORK_ITEM_HEAD_RE = re.compile(r"^(WI[1-9]\d*) " + DASH + r" (\S.*?) \((P[0-4])\)$")
+PATHS_RE = re.compile(r"`[^`]+`(?:, `[^`]+`)*")
+PATH_RE = re.compile(r"`([^`]+)`")
+WORK_FIELD_RE = re.compile(
+    r"^\*\*(Goal|Supports|Blocked by|Where|Approach|Done when)\*\*(?: (\S.*))?$"
+)
 TASK_GROUP_RE = re.compile(r"^US(\d+)$")
 TASK_RE = re.compile(
     r"^- \[[ xX]\] T(\d{3}) (\S.*?) " + DASH + r" (`[^`]+`(?:, `[^`]+`)*)$"
@@ -157,9 +165,8 @@ def skeleton(title: str, slug: str, created: str, stories: int) -> str:
         "",
     ]
     for index in range(1, stories + 1):
-        priority = "P1" if index == 1 else "P2"
         lines += [
-            f"### US{index} — <FILL: short title> ({priority})",
+            f"### US{index} — <FILL: short title>",
             "",
             "As a <FILL: role>, I want <FILL: capability> so that <FILL: outcome>",
             "",
@@ -168,27 +175,29 @@ def skeleton(title: str, slug: str, created: str, stories: int) -> str:
             "",
         ]
 
-    lines += ["## Tasks", ""]
-    task_id = 1
+    lines += ["## Work Items", ""]
     for index in range(1, stories + 1):
+        priority = "P1" if index == 1 else "P2"
         lines += [
-            f"### US{index}",
+            f"### WI{index} — <FILL: short issue title> ({priority})",
             "",
-            f"- [ ] T{task_id:03d} <FILL: action> — `<FILL: path/to/file>`",
+            "**Goal** <FILL: outcome that can be delivered in one issue>",
+            "",
+            f"**Supports** US{index}",
+            "",
+            "**Where** `<FILL: path/to/file>`",
+            "",
+            "**Approach**",
+            "- <FILL: implementation step>",
+            "",
+            "**Done when**",
+            "- <FILL: evidence this work item is complete>",
             "",
         ]
-        task_id += 1
     lines += [
-        f"### {CROSS_CUTTING}",
-        "",
-        f"- [ ] T{task_id:03d} <FILL: action serving no single story> —"
-        " `<FILL: path/to/file>`",
-        "",
         "## Done When",
         "",
-        "- [ ] <FILL: an observable claim someone else could check without reading"
-        " the diff>",
-        "- [ ] <FILL: another one>",
+        "- <FILL: an observable check on the assembled feature>",
         "",
     ]
     return "\n".join(lines)
@@ -469,6 +478,8 @@ def check_stories(
     heading_lineno: int,
     fenced: frozenset[int],
     problems: Problems,
+    *,
+    legacy: bool,
 ) -> dict[int, str]:
     preamble, story_blocks = blocks(body, fenced)
     for lineno, _ in nonblank(preamble):
@@ -478,12 +489,12 @@ def check_stories(
         return {}
 
     titles: dict[int, str] = {}
+    pattern = LEGACY_STORY_HEAD_RE if legacy else STORY_HEAD_RE
     for position, (heading, lineno, story_body) in enumerate(story_blocks, start=1):
-        match = STORY_HEAD_RE.match(heading)
+        match = pattern.match(heading)
         if not match:
-            problems.add(
-                lineno, "story heading must read `### US<n> — <title> (P<0-4>)`"
-            )
+            suffix = " (P<0-4>)" if legacy else ""
+            problems.add(lineno, f"story heading must read `### US<n> — <title>{suffix}`")
             continue
         number = int(match.group(1))
         if number != position:
@@ -560,7 +571,134 @@ def check_tasks(
         problems.add(heading_lineno, f"US{number} has no tasks")
 
 
-def check_done_when(
+def parse_bullets(
+    body: list[tuple[int, str]], heading_lineno: int, name: str, problems: Problems
+) -> list[str]:
+    items: list[str] = []
+    for lineno, line in nonblank(body):
+        match = BULLET_RE.fullmatch(line)
+        if match:
+            items.append(match.group(1))
+        elif items and line.startswith((" ", "\t")):
+            items[-1] += " " + line.strip()
+        else:
+            problems.add(lineno, f"{name} takes only `- ` bullets")
+    if not items:
+        problems.add(heading_lineno, f"{name} needs at least one `- ` bullet")
+    return items
+
+
+def parse_references(value: str, prefix: str, lineno: int, problems: Problems) -> list[str]:
+    refs = value.split(", ") if value else []
+    if not refs or any(not re.fullmatch(prefix + r"[1-9]\d*", ref) for ref in refs):
+        problems.add(lineno, f"expected comma-separated {prefix} ids")
+    if len(refs) != len(set(refs)):
+        problems.add(lineno, f"duplicate {prefix} reference")
+    return refs
+
+
+def parse_work_item(
+    item_id: str,
+    lineno: int,
+    body: list[tuple[int, str]],
+    problems: Problems,
+) -> dict:
+    fields: dict[str, Block] = {}
+    current: Block | None = None
+    for field_lineno, line in nonblank(body):
+        match = WORK_FIELD_RE.fullmatch(line)
+        if match:
+            label, value = match.groups()
+            current = (value or "", field_lineno, [])
+            if label in fields:
+                problems.add(field_lineno, f"{item_id} repeats `**{label}**`")
+            fields[label] = current
+        elif current is None:
+            problems.add(field_lineno, f"{item_id} needs a field label before its content")
+        else:
+            current[2].append((field_lineno, line))
+
+    for label in ("Goal", "Where", "Approach", "Done when"):
+        if label not in fields:
+            problems.add(lineno, f"{item_id} needs `**{label}**`")
+
+    item = {"supports": [], "blocked_by": []}
+    for label, (value, field_lineno, content) in fields.items():
+        if label not in ("Approach", "Done when") and content:
+            problems.add(content[0][0], f"`**{label}**` takes a single line")
+        if label == "Goal":
+            if not value:
+                problems.add(field_lineno, "`**Goal**` needs an outcome")
+            item["goal"] = value
+        elif label == "Where":
+            if not PATHS_RE.fullmatch(value):
+                problems.add(field_lineno, "`**Where**` needs comma-separated backticked paths")
+            item["paths"] = PATH_RE.findall(value)
+        elif label == "Supports":
+            item["supports"] = parse_references(value, "US", field_lineno, problems)
+        elif label == "Blocked by":
+            item["blocked_by"] = parse_references(value, "WI", field_lineno, problems)
+        elif label == "Approach":
+            steps = []
+            if content or not value:
+                steps = parse_bullets(content, field_lineno, "Approach", problems)
+            item["approach"] = "\n\n".join(
+                part for part in (value, "\n".join(f"- {step}" for step in steps)) if part
+            )
+        else:
+            if value:
+                problems.add(field_lineno, "`**Done when**` needs bullets on the following lines")
+            item["done_when"] = parse_bullets(content, field_lineno, "Done when", problems)
+    return item
+
+
+def parse_work_items(
+    body: list[tuple[int, str]],
+    heading_lineno: int,
+    stories: dict[int, str],
+    fenced: frozenset[int],
+    problems: Problems,
+) -> list[dict]:
+    preamble, groups = blocks(body, fenced)
+    for lineno, _ in nonblank(preamble):
+        problems.add(lineno, "Work Items takes only `### WI<n> ...` blocks")
+    if not groups:
+        problems.add(heading_lineno, "needs at least one work item")
+
+    items: dict[str, dict] = {}
+    item_lines: dict[str, int] = {}
+    for heading, lineno, item_body in groups:
+        match = WORK_ITEM_HEAD_RE.fullmatch(heading)
+        if not match:
+            problems.add(lineno, "work item heading must read `### WI<n> — <title> (P<0-4>)`")
+            continue
+        item_id, title, priority = match.groups()
+        if item_id in items:
+            problems.add(lineno, f"duplicate work item `{item_id}`")
+            continue
+        item_lines[item_id] = lineno
+        items[item_id] = {
+            "id": item_id, "title": title, "priority": priority,
+            **parse_work_item(item_id, lineno, item_body, problems),
+        }
+
+    story_ids = {f"US{number}" for number in stories}
+    for item_id, item in items.items():
+        for ref in item["supports"]:
+            if ref not in story_ids:
+                problems.add(item_lines[item_id], f"{item_id} supports unknown story `{ref}`")
+        for ref in item["blocked_by"]:
+            if ref not in items:
+                problems.add(item_lines[item_id], f"{item_id} is blocked by unknown work item `{ref}`")
+    try:
+        TopologicalSorter({item_id: item["blocked_by"] for item_id, item in items.items()}).prepare()
+    except CycleError as exc:
+        cycle = exc.args[1]
+        problems.add(item_lines[cycle[0]], "work item dependency cycle: " + " → ".join(cycle))
+    return list(items.values())
+
+
+def check_legacy_done_when(
     body: list[tuple[int, str]], heading_lineno: int, problems: Problems
 ) -> None:
     content = nonblank(body)
@@ -587,7 +725,14 @@ def check_file(path: Path) -> Problems:
 
     found = sections(lines, fenced)
     names = [name for name, _, _ in found]
+    legacy = "Tasks" in names and "Work Items" not in names
     expected = list(REQUIRED_SECTIONS)
+    if legacy:
+        expected[expected.index("Work Items")] = "Tasks"
+    else:
+        for lineno, line in enumerate(lines, start=1):
+            if lineno not in fenced and CHECKBOX_RE.match(line.lstrip()):
+                problems.add(lineno, "use a plain bullet instead of a checkbox")
     if RESEARCH_SECTION in names:
         expected.insert(expected.index("Prior Decisions") + 1, RESEARCH_SECTION)
     if names != expected:
@@ -632,13 +777,19 @@ def check_file(path: Path) -> Problems:
             check_bulleted(name, body, lineno, problems)
     if "User Stories" in by_name:
         lineno, body = by_name["User Stories"]
-        stories = check_stories(body, lineno, fenced, problems)
-    if "Tasks" in by_name:
+        stories = check_stories(body, lineno, fenced, problems, legacy=legacy)
+    if legacy:
         lineno, body = by_name["Tasks"]
         check_tasks(body, lineno, stories, fenced, problems)
+    elif "Work Items" in by_name:
+        lineno, body = by_name["Work Items"]
+        parse_work_items(body, lineno, stories, fenced, problems)
     if "Done When" in by_name:
         lineno, body = by_name["Done When"]
-        check_done_when(body, lineno, problems)
+        if legacy:
+            check_legacy_done_when(body, lineno, problems)
+        else:
+            parse_bullets(body, lineno, "Done When", problems)
 
     return problems
 

@@ -101,8 +101,9 @@ doing its job — not whether it could be worded better.
 | Research | Does a story rest on a claim the cited research does not support, or rates `Low`? | A cited finding that says less than the spec assumes; a `draft` or `superseded` document; a factual premise in the Description that no research backs. `- None` is fine unless the spec turns on a fact nobody established. |
 | Out of Scope | Is the boundary defensible, or drawn to make the spec easy? | Something excluded that the feature does not work without. |
 | Assumptions | Which assumption, if wrong, invalidates the spec — and is it written down? | The load-bearing guess is missing while three harmless ones are listed. |
-| User Stories | Is P1 actually what makes this worth shipping? Is a story secretly three? | A P1 nobody would ship alone; a story whose "and" hides a second feature. |
-| Done When | Could a stranger falsify each line without reading the diff? | An item that restates a task, or that only its author could evaluate. |
+| User Stories | Does each story describe a user outcome that the work items cover? | A story whose “and” hides a second feature, or a promised behavior with no owning work item. |
+| Work Items | Can each be reviewed as one issue, with a goal and observable acceptance criteria? Does each deliverable have one owner? | Shared work filed twice, an unowned migration or documentation change, or a dependency that only expresses preferred ordering. |
+| Done When | Do the feature-level criteria verify the assembled feature? | An item that only its author could evaluate or that implies implementation with no owning work item. |
 
 Two rules keep this honest. **A finding you would not hold up the work for is
 not a finding** — you are deciding whether to start, not polishing prose, and a

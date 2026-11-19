@@ -2,9 +2,10 @@
 
 The reviewer's outcome file is review-code's findings file plus `fixed`/`fixedIn`
 per finding. Filing runs raise-issues' converter and dedup helper, then
-`hew apply`; every finding the reviewer fixed is closed `--completed` with its
+`hew apply`; every filed finding the reviewer fixed is closed `--completed` with its
 commit, so the tracker keeps the paper trail and only an unfixed finding stays
-open. Findings are filed with no parent: they are never part of the scope.
+open. Only findings at P2 or above are filed; they are filed with no parent, so
+they are never part of the scope.
 
 Dedup is deterministic here. dedup_candidates.py only finds leads; the skill's
 agent flow reads each body. A driver has no reader, so a plan line is dropped
@@ -148,7 +149,7 @@ def round_comment(records, gate=None):
         filed = (f"Filed as #{number}" + (" and closed" if f.get("fixed") else "")) if number else "Not filed"
         if f.get("fixed"):
             status = f"Fixed in {f.get('fixedIn', '?')}. {filed}."
-        elif f.get("priority") in ("P0", "P1", "P2"):
+        elif f.get("unfixedReason") or f.get("priority") in ("P0", "P1", "P2"):
             status = f"Not fixed: {(f.get('unfixedReason') or 'no reason given').strip().rstrip('.')}. {filed}."
         else:
             status = f"{_sentence('Fix: ' + str(f.get('fix', '?')))} {filed}."
