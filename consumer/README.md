@@ -37,7 +37,7 @@ run against a real `.hew` tracker created with `tracker.Init`.
   GitHub client, under the race detector.
 - **Boundaries** — the public production dependency graph excludes
   `internal/cli`, `internal/render` and `cmd/hew`; this module imports nothing
-  internal; the names DESIGN.md and README.md promise are exported; and the
+  internal; the names DESIGN.md promises are exported; and the
   module declares the same `go` directive as the root.
 
 ## Adding a scenario
