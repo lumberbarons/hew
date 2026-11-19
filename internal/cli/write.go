@@ -295,9 +295,12 @@ func closedState(reason string) string {
 // agent loops branch on and to the message text the CLI has always printed:
 // someone else's claim is exit 3 (pick the next ready item), your own is exit
 // 5 (resume the work you already claimed), open blockers are exit 6 (pick the
-// next ready item). Everything else keeps the exit code it had: closed and
-// epic are generic, a missing priority is usage.
+// next ready item). The three decisions themselves are the library's
+// (tracker.StartOutcomeOf), so a consumer branching on the same error makes
+// the same call; this function only spells them. Everything else keeps the
+// exit code it had: closed and epic are generic, a missing priority is usage.
 func (a *App) startRefusal(err error) error {
+	outcome, _ := tracker.StartOutcomeOf(err)
 	var claimed *tracker.ClaimedError
 	var blocked *tracker.BlockedError
 	var closed *tracker.ClosedError
@@ -316,11 +319,14 @@ func (a *App) startRefusal(err error) error {
 			return &ExitError{Code: ExitClaimed, Message: fmt.Sprintf("#%d already claimed (in-progress); pick the next ready item or --force", claimed.Issue)}
 		}
 		who := "assigned to @" + render.SanitizeInline(strings.Join(claimed.Assignees, " @"))
-		if claimed.ByActor {
+		// A *ClaimedError is one of the two claim outcomes; which one is the
+		// library's call, not a second reading of ByActor here.
+		if outcome == tracker.StartClaimedByYou {
 			return &ExitError{Code: ExitClaimedByYou, Message: fmt.Sprintf("#%d is already claimed by you (%s); resume that work or --force to re-claim", claimed.Issue, who)}
 		}
 		return &ExitError{Code: ExitClaimed, Message: fmt.Sprintf("#%d already claimed (%s); pick the next ready item or --force", claimed.Issue, who)}
 	case errors.As(err, &blocked):
+		// StartBlocked is this type's outcome; the sentence names the blockers.
 		refs := make([]string, len(blocked.OpenBlockers))
 		for i, n := range blocked.OpenBlockers {
 			refs[i] = fmt.Sprintf("#%d", n)

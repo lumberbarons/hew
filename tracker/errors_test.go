@@ -119,3 +119,55 @@ func TestTranslatedErrorsKeepTheirCause(t *testing.T) {
 		t.Error("ClaimedError did not expose the auth failure behind it")
 	}
 }
+
+// TestStartOutcomeOfNamesTheThreeDecisions pins the classification an agent
+// loop branches on: the typed errors keep the facts, and this names the
+// decision they ask for. Everything else a Start can refuse with is reported
+// as itself instead of being folded into one of the three.
+func TestStartOutcomeOfNamesTheThreeDecisions(t *testing.T) {
+	cases := []struct {
+		name    string
+		err     error
+		outcome StartOutcome
+		ok      bool
+	}{
+		{"somebody else's claim", &ClaimedError{Issue: 1, Assignees: []string{"bob"}, Actor: "alice"}, StartClaimedByOther, true},
+		{"the acting identity's claim", &ClaimedError{Issue: 1, Assignees: []string{"alice"}, Actor: "alice", ByActor: true}, StartClaimedByYou, true},
+		{"label-only claim", &ClaimedError{Issue: 1}, StartClaimedByOther, true},
+		{"claimant could not be read", &ClaimedError{Issue: 1, Assignees: []string{"bob"}, Err: errors.New("no viewer")}, StartClaimedByOther, true},
+		{"open blockers", &BlockedError{Issue: 1, OpenBlockers: []int{2}}, StartBlocked, true},
+		{"closed target", &ClosedError{Issue: 1}, "", false},
+		{"epic target", &EpicError{Issue: 1}, "", false},
+		{"untriaged target", &UntriagedError{Issue: 1}, "", false},
+		{"invalid input", &InvalidInputError{Field: "priority"}, "", false},
+		{"an unrelated failure", errors.New("disk on fire"), "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Refusals arrive wrapped in the operation that produced them.
+			wrapped := fmt.Errorf("start failed: %w", tc.err)
+			outcome, ok := StartOutcomeOf(wrapped)
+			if outcome != tc.outcome || ok != tc.ok {
+				t.Errorf("StartOutcomeOf(%v) = %q, %t; want %q, %t", tc.err, outcome, ok, tc.outcome, tc.ok)
+			}
+		})
+	}
+	if outcome, ok := StartOutcomeOf(nil); outcome != "" || ok {
+		t.Errorf("StartOutcomeOf(nil) = %q, %t; want no outcome", outcome, ok)
+	}
+}
+
+// TestStartOutcomeIsAStableName keeps the values the CLI, the daemon and a
+// consumer key on from drifting: they are the recorded names of the three
+// decisions, not just whatever the constants happen to hold.
+func TestStartOutcomeIsAStableName(t *testing.T) {
+	for outcome, want := range map[StartOutcome]string{
+		StartClaimedByOther: "claimed_by_other",
+		StartClaimedByYou:   "claimed_by_you",
+		StartBlocked:        "blocked",
+	} {
+		if string(outcome) != want {
+			t.Errorf("StartOutcome = %q, want %q", outcome, want)
+		}
+	}
+}
