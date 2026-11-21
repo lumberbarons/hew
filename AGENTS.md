@@ -96,3 +96,11 @@ ADRs live in `docs/adr/`. Read the relevant ADRs before proposing architectural 
 | ADR | When this applies |
 |---|---|
 | [ADR-0001](docs/adr/0001-add-discovery-issue-type.md) | Changes to issue types, discovery claims, implementation selection, PR inference, or epic membership |
+
+## Specs
+
+Feature specs live in `specs/`. Each spec records its status, work items, and acceptance criteria.
+
+| Spec | Scope |
+|---|---|
+| [001 — Idea Issues](specs/001-idea-issues/spec.md) | The `idea` issue type, discovery claims, readiness, and the hewd Ideas page |
