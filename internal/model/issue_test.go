@@ -340,6 +340,7 @@ func TestEpicNext(t *testing.T) {
 		{"nested epic skipped", []Issue{nested, ok(30, "P3", "task")}, 30, true},
 		{"idea skipped", []Issue{ok(1, "P0", "idea"), ok(30, "P3", "task")}, 30, true},
 		{"only an idea", []Issue{ok(1, "P0", "idea")}, 0, false},
+		{"legacy idea label beside task is still next", []Issue{ok(30, "P3", "idea", "task")}, 30, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
