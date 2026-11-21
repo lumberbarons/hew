@@ -482,6 +482,36 @@ func TestStartClaims(t *testing.T) {
 	}
 }
 
+// An idea is claimable only for investigation: a plain or forced start is a
+// usage error that names --for-discovery and leaves the issue untouched, and
+// the flag itself claims it as usual.
+func TestStartIdeaRequiresDiscoveryIntent(t *testing.T) {
+	f := newFake(issue(1, "Consider a cache", "P2", "idea"))
+	app, out, _ := newApp(f)
+
+	err := app.Start(ctx, 1, StartOpts{})
+	exitCode(t, err, ExitUsage)
+	if !strings.Contains(err.Error(), "--for-discovery") {
+		t.Errorf("refusal = %q, want it to name --for-discovery", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("refused start wrote to stdout: %q", out.String())
+	}
+	one := f.byNumber(1)
+	if len(one.Assignees) != 0 || slices.Contains(one.Labels, "in-progress") {
+		t.Errorf("refused start mutated the idea: labels=%v assignees=%v", one.Labels, one.Assignees)
+	}
+	exitCode(t, app.Start(ctx, 1, StartOpts{Force: true}), ExitUsage)
+
+	if err := app.Start(ctx, 1, StartOpts{ForDiscovery: true}); err != nil {
+		t.Fatalf("discovery start: %v", err)
+	}
+	one = f.byNumber(1)
+	if !slices.Contains(one.Assignees, "me") || !slices.Contains(one.Labels, "in-progress") {
+		t.Errorf("discovery claim not applied: labels=%v assignees=%v", one.Labels, one.Assignees)
+	}
+}
+
 // start --show is the claim-and-read path: the claim confirmation followed by
 // the same detail `show` renders, taken from the post-claim re-read rather
 // than a further fetch.

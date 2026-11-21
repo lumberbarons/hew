@@ -32,6 +32,10 @@ type StartOptions struct {
 	Priority string
 	// Force replaces an existing claim and permits open blockers.
 	Force bool
+	// ForDiscovery declares that the caller is claiming an idea to investigate
+	// it. An idea is refused without it, forced or not: capture is not
+	// implementation work.
+	ForDiscovery bool
 }
 
 // ReleaseOptions configures claim release. The zero value requires the

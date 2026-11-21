@@ -55,8 +55,9 @@ func (e *BlockedError) Error() string {
 // The three values are the whole vocabulary: the CLI's exit codes, the
 // daemon's error kinds and a consumer's own branch points are spellings of
 // them, so no caller re-derives the decision from ClaimedError.ByActor.
-// Every other Start refusal — a closed target, an epic, an untriaged issue, a
-// bad priority, a write failure — is not a start outcome.
+// Every other Start refusal — a closed target, an epic, an idea claimed
+// without discovery intent, an untriaged issue, a bad priority, a write
+// failure — is not a start outcome.
 type StartOutcome string
 
 const (
@@ -139,6 +140,17 @@ type EpicError struct{ Issue int }
 
 func (e *EpicError) Error() string {
 	return fmt.Sprintf("issue #%d is an epic; epics are never worked directly", e.Issue)
+}
+
+// DiscoveryIntentError reports a claim on an idea without explicit discovery
+// intent. An idea captures a possible improvement; claiming it is a decision to
+// investigate, which the caller has to declare (StartOptions.ForDiscovery, the
+// CLI's --for-discovery, the REST request's forDiscovery) rather than stumble
+// into from an ordinary work queue.
+type DiscoveryIntentError struct{ Issue int }
+
+func (e *DiscoveryIntentError) Error() string {
+	return fmt.Sprintf("issue #%d is an idea; claiming it requires explicit discovery intent (set forDiscovery)", e.Issue)
 }
 
 // UntriagedError reports a claim on an issue with no priority. Claiming an

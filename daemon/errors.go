@@ -39,6 +39,7 @@ func classify(err error) (int, problem) {
 		auth         *tracker.AuthError
 		closed       *tracker.ClosedError
 		epic         *tracker.EpicError
+		discovery    *tracker.DiscoveryIntentError
 		notClaimed   *tracker.NotClaimedError
 		notOwner     *tracker.NotOwnerError
 		openChildren *tracker.OpenChildrenError
@@ -93,6 +94,10 @@ func classify(err error) (int, problem) {
 		return set(http.StatusConflict, "closed", map[string]any{"issue": closed.Issue, "reason": closed.Reason})
 	case errors.As(err, &epic):
 		return set(http.StatusConflict, "epic", map[string]any{"issue": epic.Issue})
+	case errors.As(err, &discovery):
+		// The CLI's usage refusal: the client has to declare intent by setting
+		// forDiscovery, which the error's own message names.
+		return set(http.StatusConflict, "discovery_intent", map[string]any{"issue": discovery.Issue})
 	case errors.As(err, &notClaimed):
 		return set(http.StatusConflict, "not_claimed", map[string]any{"issue": notClaimed.Issue})
 	case errors.As(err, &notOwner):

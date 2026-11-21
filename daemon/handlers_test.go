@@ -510,6 +510,36 @@ func TestAnActorTooLongToUseIsRefusedNotReplaced(t *testing.T) {
 	}
 }
 
+// An idea is claimable only for investigation: the REST refusal names the
+// field that grants it and leaves the issue untouched, and the same route
+// claims once forDiscovery is set.
+func TestAnIdeaIsClaimedOnlyForDiscovery(t *testing.T) {
+	e := newEnv(t, false)
+	n := e.create("Consider a cache", map[string]any{"type": "idea"})
+	path := fmt.Sprintf("/api/issues/%d/start", n)
+
+	status, res := e.call("POST", path, "daemon", map[string]any{})
+	if status != http.StatusConflict || res["error"] != "discovery_intent" {
+		t.Fatalf("start idea = %d %v, want 409 discovery_intent", status, res)
+	}
+	if msg, _ := res["message"].(string); !strings.Contains(msg, "forDiscovery") {
+		t.Errorf("message = %q, want it to explain how to claim for investigation", msg)
+	}
+	if fields, _ := res["fields"].(map[string]any); fields["issue"] != float64(n) {
+		t.Errorf("fields = %v, want issue #%d", res["fields"], n)
+	}
+	_, d := e.call("GET", fmt.Sprintf("/api/issues/%d", n), "", nil)
+	i := d["issue"].(map[string]any)
+	if len(i["assignees"].([]any)) != 0 || i["inProgress"] != false {
+		t.Errorf("refused start mutated the idea: %v", i)
+	}
+
+	status, res = e.call("POST", path, "daemon", map[string]any{"forDiscovery": true})
+	if status != http.StatusOK || res["claimant"] != "daemon" {
+		t.Errorf("discovery start = %d %v, want 200 claimed as daemon", status, res)
+	}
+}
+
 func TestEpicDryRunGivesTheSameAdviceAsAnIssue(t *testing.T) {
 	e := newEnv(t, false)
 	body := map[string]any{"goal": "Edit internal/cli/pr.go", "doneWhen": []string{"x"}}

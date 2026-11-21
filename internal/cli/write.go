@@ -297,8 +297,10 @@ func closedState(reason string) string {
 // 5 (resume the work you already claimed), open blockers are exit 6 (pick the
 // next ready item). The three decisions themselves are the library's
 // (tracker.StartOutcomeOf), so a consumer branching on the same error makes
-// the same call; this function only spells them. Everything else keeps the
-// exit code it had: closed and epic are generic, a missing priority is usage.
+// the same call; this function only spells them. An undeclared idea claim is
+// usage — the caller fixes the call with --for-discovery — and everything else
+// keeps the exit code it had: closed and epic are generic, a missing priority
+// is usage.
 func (a *App) startRefusal(err error) error {
 	outcome, _ := tracker.StartOutcomeOf(err)
 	var claimed *tracker.ClaimedError
@@ -306,6 +308,7 @@ func (a *App) startRefusal(err error) error {
 	var closed *tracker.ClosedError
 	var epic *tracker.EpicError
 	var untriaged *tracker.UntriagedError
+	var discovery *tracker.DiscoveryIntentError
 	var invalid *tracker.InvalidInputError
 	switch {
 	case errors.As(err, &claimed):
@@ -336,6 +339,8 @@ func (a *App) startRefusal(err error) error {
 		return genericErr("#%d is closed%s", closed.Issue, closedState(closed.Reason))
 	case errors.As(err, &epic):
 		return genericErr("#%d is an epic; epics are never worked directly — start one of its sub-issues", epic.Issue)
+	case errors.As(err, &discovery):
+		return usageErr("#%d is an idea; start --for-discovery to claim it for investigation", discovery.Issue)
 	case errors.As(err, &untriaged):
 		return usageErr("#%d is untriaged; start requires --priority (claiming is triage)", untriaged.Issue)
 	case errors.As(err, &invalid) && invalid.Field == "priority":
@@ -351,6 +356,9 @@ type StartOpts struct {
 	// Force steals an already-claimed issue and claims one that has open
 	// blockers.
 	Force bool
+	// ForDiscovery declares that an idea is being claimed to investigate it;
+	// an idea that is not declared this way is refused.
+	ForDiscovery bool
 	// Show follows the claim confirmation with the issue's detail view, so
 	// claiming and reading are one call. --json already includes the body
 	// (as every mutation's JSON does, without text findings), so it ignores
@@ -363,14 +371,17 @@ type StartOpts struct {
 // the guard's refusals map to exit 3 for someone else's claim (pick the next
 // ready item), exit 5 when the claim is already yours (resume), and exit 6 for
 // open blockers ready would have hidden; --force overrides both. Claiming an
-// untriaged issue requires --priority — claiming forces triage.
+// untriaged issue requires --priority — claiming forces triage. An idea needs
+// --for-discovery even under --force: the flag declares the caller's intent to
+// investigate, which is a usage decision rather than a claim outcome.
 func (a *App) Start(ctx context.Context, number int, opts StartOpts) error {
 	// No actor: tracker.Start resolves the store's Viewer when the claim needs
 	// it, so a closed or already-claimed target is refused without paying for
 	// the lookup.
 	result, err := tracker.WrapAs(a.Client, a.backend(), "").Start(ctx, number, tracker.StartOptions{
-		Priority: opts.Priority,
-		Force:    opts.Force,
+		Priority:     opts.Priority,
+		Force:        opts.Force,
+		ForDiscovery: opts.ForDiscovery,
 	})
 	if err != nil {
 		return a.startRefusal(err)

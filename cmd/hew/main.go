@@ -535,10 +535,13 @@ func startCmd() *ucli.Command {
 		ArgsUsage: "<n>",
 		Description: "Claim and read in one call: --show follows the claim with the issue's detail (body,\n" +
 			"dependencies, recent comments, text-findings annotations); --json also includes the\n" +
-			"body, without the annotations. Either replaces a separate `hew show <n>` after claiming.",
+			"body, without the annotations. Either replaces a separate `hew show <n>` after claiming.\n\n" +
+			"An issue typed idea is refused unless --for-discovery is given: ideas are captured for\n" +
+			"later investigation, not implementation, and the flag records the caller's intent.",
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{Name: "priority", Usage: "P0..P4; required when the issue is untriaged"},
 			&ucli.BoolFlag{Name: "force", Usage: "steal an already-claimed issue, or claim one with open blockers"},
+			&ucli.BoolFlag{Name: "for-discovery", Usage: "claim an idea to investigate it; an idea is refused without this, forced or not"},
 			&ucli.BoolFlag{Name: "show", Usage: "print the claimed issue's detail after the claim, as show would (--json includes the body but no annotations)"},
 		},
 		Before: fixedArgs(1, 1),
@@ -552,9 +555,10 @@ func startCmd() *ucli.Command {
 				return err
 			}
 			return app.Start(ctx, n, appcli.StartOpts{
-				Priority: cmd.String("priority"),
-				Force:    cmd.Bool("force"),
-				Show:     cmd.Bool("show"),
+				Priority:     cmd.String("priority"),
+				Force:        cmd.Bool("force"),
+				ForDiscovery: cmd.Bool("for-discovery"),
+				Show:         cmd.Bool("show"),
 			})
 		},
 	}
