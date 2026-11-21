@@ -59,6 +59,9 @@ func TestIssueType(t *testing.T) {
 		{"single", []string{"task", "P2"}, "task", false},
 		{"multiple first of order wins", []string{"task", "bug"}, "bug", true},
 		{"enhancement+task", []string{"task", "enhancement"}, "enhancement", true},
+		{"idea alone", []string{"idea", "P2"}, "idea", false},
+		{"idea after the existing types", []string{"idea", "task"}, "task", true},
+		{"idea loses to every existing type", []string{"idea", "task", "enhancement", "bug"}, "bug", true},
 	}
 	for _, tt := range tests {
 		typ, multi := Issue{Labels: tt.labels}.Type()
@@ -75,6 +78,16 @@ func TestAreas(t *testing.T) {
 	}
 	if got := (Issue{Labels: []string{"P1", "bug"}}).Areas(); got != nil {
 		t.Errorf("Areas() = %v, want nil", got)
+	}
+	// idea is a type label after upgrade, not an area, even when the issue
+	// carries it beside another type: reading must not hide the stored label
+	// from the raw label list.
+	idea := Issue{Labels: []string{"P1", "task", "idea", "web-ui"}}
+	if got := idea.Areas(); !reflect.DeepEqual(got, []string{"web-ui"}) {
+		t.Errorf("Areas() = %v, want only web-ui", got)
+	}
+	if !reflect.DeepEqual(idea.Labels, []string{"P1", "task", "idea", "web-ui"}) {
+		t.Errorf("Labels = %v, want the stored labels untouched", idea.Labels)
 	}
 }
 
@@ -427,6 +440,36 @@ func TestConventionLabelsAgreeOnCase(t *testing.T) {
 	}
 }
 
+// An issue a repository already used `idea` as a label on keeps both labels:
+// the existing type wins the normalization and the contradiction is a warning,
+// not a repair. With no other type, the same label is now the issue's type.
+func TestIdeaTypePrecedenceAndItsWarning(t *testing.T) {
+	mixed := Issue{Number: 9, State: "OPEN", Labels: []string{"P2", "task", "idea"}}
+	if typ, multi := mixed.Type(); typ != "task" || !multi {
+		t.Errorf("Type() = %q, %v; want task with the multiple-type warning", typ, multi)
+	}
+	if got := Warnings([]Issue{mixed}); !reflect.DeepEqual(got, []Warning{{Kind: WarnMultiType, Issue: 9}}) {
+		t.Errorf("Warnings() = %v, want the multiple-type warning", got)
+	}
+	if !reflect.DeepEqual(mixed.Labels, []string{"P2", "task", "idea"}) {
+		t.Errorf("Labels = %v, want both stored labels retained", mixed.Labels)
+	}
+
+	only := Issue{Number: 10, State: "OPEN", Labels: []string{"P2", "IDEa"}}
+	if typ, multi := only.Type(); typ != "idea" || multi {
+		t.Errorf("Type() = %q, %v; want idea alone", typ, multi)
+	}
+	if !reflect.DeepEqual(only.Labels, []string{"P2", "IDEa"}) {
+		t.Errorf("Labels = %v, want the stored spelling retained", only.Labels)
+	}
+	if got := Warnings([]Issue{only}); got != nil {
+		t.Errorf("Warnings() = %v, want none for a single idea type", got)
+	}
+	if only.Untriaged() {
+		t.Error("an idea with a priority read as untriaged")
+	}
+}
+
 func TestMixedCaseDuplicatesAreMulti(t *testing.T) {
 	i := Issue{Labels: []string{"P3", "p0", "task", "BUG"}}
 	if p, multi := i.Priority(); p != P0 || !multi {
@@ -444,11 +487,14 @@ func TestLabelRecognizers(t *testing.T) {
 	if typ, ok := LabelType("TASK"); !ok || typ != "task" {
 		t.Errorf("LabelType(TASK) = %q, %v", typ, ok)
 	}
+	if typ, ok := LabelType("IDEA"); !ok || typ != "idea" {
+		t.Errorf("LabelType(IDEA) = %q, %v", typ, ok)
+	}
 	if _, ok := LabelType("tasks"); ok {
 		t.Error("tasks recognized as a type")
 	}
-	if !IsConventionLabel("IN-PROGRESS") || IsConventionLabel("web-ui") {
-		t.Error("IsConventionLabel misjudged in-progress or an area")
+	if !IsConventionLabel("IN-PROGRESS") || !IsConventionLabel("idea") || IsConventionLabel("web-ui") {
+		t.Error("IsConventionLabel misjudged in-progress, idea or an area")
 	}
 	// Flag values are not label names: the parsers stay exact.
 	if _, ok := ParsePriority("p0"); ok {

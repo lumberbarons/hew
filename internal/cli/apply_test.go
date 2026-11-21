@@ -203,6 +203,84 @@ func TestApplyResume(t *testing.T) {
 	}
 }
 
+// A plan written before `idea` was a type can name it as an area on a task.
+// Its pre-upgrade checkpoint must resume unchanged: the task keeps its number
+// and labels, only the pending entry is created, and its pending edge is
+// wired. A fresh run of the same plan has nothing to resume and is refused.
+func TestApplyResumesAPreUpgradeIdeaAreaCheckpoint(t *testing.T) {
+	const fixture = `{"id":"legacy","title":"Legacy idea-area task","type":"task","areas":["idea"]}
+{"id":"pending","title":"Pending work","type":"task","blocked-by":["legacy"]}
+`
+	f, app, opts := applySetup(t, fixture)
+	digest := fileDigest([]byte(fixture))
+	legacy := issue(55, "Legacy idea-area task", "P2", "task", "idea")
+	legacy.ID = "ID55"
+	legacy.Body = "### Goal\n\nlegacy\n\n" + conventions.ProvenanceMarker(conventions.ProvenanceApply, "legacy", digest)
+	f.issues = append(f.issues, legacy)
+	stateJSON, _ := json.Marshal(batchState{
+		Version: batchStateVersion,
+		Repo:    "o/r",
+		Digest:  digest,
+		Mapping: map[string]int{"legacy": 55},
+	})
+	if err := os.WriteFile(opts.StatePath, stateJSON, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := app.Apply(ctx, opts); err != nil {
+		t.Fatalf("pre-upgrade checkpoint did not resume: %v", err)
+	}
+	if len(f.issues) != 3 { // #42, the legacy issue and the one pending entry
+		t.Fatalf("issues = %d, want the legacy issue kept and one created", len(f.issues))
+	}
+	kept := f.byNumber(55)
+	if kept == nil || !slices.Equal(kept.Labels, []string{"P2", "task", "idea"}) {
+		t.Errorf("legacy issue = %+v, want #55 with its stored labels", kept)
+	}
+	pending := f.byNumber(101)
+	if pending == nil || pending.Title != "Pending work" {
+		t.Fatalf("pending issue = %+v, want it created after the checkpointed entry", pending)
+	}
+	if len(pending.BlockedBy) != 1 || pending.BlockedBy[0].Number != 55 {
+		t.Errorf("pending blockers = %v, want the legacy issue", pending.BlockedBy)
+	}
+}
+
+func TestApplyRefusesAPreUpgradeIdeaAreaPlanWithoutACheckpoint(t *testing.T) {
+	const fixture = `{"id":"legacy","title":"Legacy idea-area task","type":"task","areas":["idea"]}` + "\n"
+	f, app, opts := applySetup(t, fixture)
+	err := app.Apply(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), `"idea" is a type label; use --type`) {
+		t.Fatalf("err = %v, want the reserved area refused", err)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("API calls made before the fresh plan was refused: %v", f.calls)
+	}
+	if len(f.issues) != 1 {
+		t.Errorf("issues = %d, want only the seeded issue", len(f.issues))
+	}
+}
+
+func TestApplyRejectsAMismatchedIdeaAreaCheckpoint(t *testing.T) {
+	const fixture = `{"id":"legacy","title":"Legacy idea-area task","type":"task","areas":["idea"]}` + "\n"
+	f, app, opts := applySetup(t, fixture)
+	digest := fileDigest([]byte(fixture))
+	stateJSON, _ := json.Marshal(batchState{
+		Version: batchStateVersion,
+		Repo:    "o/r",
+		Digest:  digest,
+		Mapping: map[string]int{"legacy": 42},
+	})
+	if err := os.WriteFile(opts.StatePath, stateJSON, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := app.Apply(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), "does not carry the hew provenance marker") {
+		t.Fatalf("err = %v, want the existing provenance rejection", err)
+	}
+	assertOnlyReads(t, f)
+}
+
 func TestApplyResumesAfterCreateFailure(t *testing.T) {
 	f, app, opts := applySetup(t, applyFixture)
 	// The API dies on the second create: the first entry's mapping must

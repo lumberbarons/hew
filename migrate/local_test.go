@@ -160,7 +160,7 @@ func TestLocalLabelsSkipsConventionLabelsAndRepeats(t *testing.T) {
 	snap := &local.Snapshot{
 		Labels: []gh.Label{{Name: "Area-X", Color: "111111"}, {Name: "P1", Color: "222222"}},
 		Issues: []local.Issue{
-			{Labels: []string{"area-x", "extra", "EXTRA", "P1", "bug"}},
+			{Labels: []string{"area-x", "extra", "EXTRA", "P1", "bug", "idea"}},
 			{Labels: []string{"extra"}},
 		},
 	}
@@ -203,10 +203,25 @@ func TestLocalItemsDropTheClaimFromClosedIssues(t *testing.T) {
 	}
 }
 
+// A local idea is an ordinary issue whose type is a label: the migration
+// carries it through as the type, not as an area, and the plan names it.
+func TestLocalItemsKeepTheIdeaTypeLabel(t *testing.T) {
+	snap := &local.Snapshot{Issues: []local.Issue{
+		{Number: 1, State: "OPEN", Labels: []string{"P2", "idea"}},
+	}}
+	items := localItems(snap)
+	if !slices.Equal(items[0].Labels, []string{"P2", "idea"}) {
+		t.Errorf("item labels = %v, want the idea type kept", items[0].Labels)
+	}
+	if step := plannedStep(items[0]); step.Type != model.IdeaType {
+		t.Errorf("plan type = %q, want idea", step.Type)
+	}
+}
+
 // A local tracker predating the comma rule may hold an area like "x,y"; it
 // migrates as "x-y" so it cannot read as two areas on GitHub.
 func TestAreaLabelsSkipConventionLabelsInAnyCase(t *testing.T) {
-	got := areaLabels([]string{"Bug", "p1", "IN-Progress", "web-ui"})
+	got := areaLabels([]string{"Bug", "p1", "IN-Progress", "IDEA", "web-ui"})
 	if !slices.Equal(got, []string{"web-ui"}) {
 		t.Errorf("areaLabels = %v, want only web-ui", got)
 	}

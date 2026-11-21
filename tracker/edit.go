@@ -27,8 +27,9 @@ type EditResult struct {
 // Every requested change is validated before the first write — the field
 // values, the area names, the parent target, and the closed-target guard — so
 // a refusal changes nothing. Priority and type swaps enforce the conventions'
-// one-label invariant; areas are normalized (trimmed, de-duplicated) and may
-// not name a convention label. An edit never touches a claim. A parent move or
+// one-label invariant over the whole type vocabulary, idea included; areas are
+// normalized (trimmed, de-duplicated) and may not name a convention label. An
+// edit never touches a claim. A parent move or
 // removal only rewires the edited issue's own parent link: its sub-issues and
 // its old parent's other children stay where they are.
 //

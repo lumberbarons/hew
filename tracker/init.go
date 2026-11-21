@@ -117,8 +117,11 @@ func Init(ctx context.Context, cfg InitConfig) (InitResult, error) {
 // Init makes sure an open tracker has the backend furniture its workflows
 // assume. On GitHub that is the convention labels: every missing one is
 // created, and the ones already present are left alone, so a second call
-// changes nothing. The local backend carries its labels in the tracker itself,
-// so a local tracker is already initialized and this reports it unchanged.
+// changes nothing. The set is conventions.Labels, which model.LabelVocabulary
+// derives from the type vocabulary, so a newly recognized type such as idea is
+// bootstrapped by the same call. The local backend carries its labels in the
+// tracker itself, so a local tracker is already initialized and this reports
+// it unchanged.
 //
 // A create that fails returns the labels created so far in CreatedLabels; a
 // rerun picks up the ones still missing, because the bootstrap is idempotent.

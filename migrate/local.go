@@ -171,9 +171,10 @@ func localNumbers(mapping map[string]int) map[int]int {
 }
 
 // localItems maps the tracker's issues onto engine items, in number order.
-// Labels carry over as written; assignees do not, because a local handle is not
-// a GitHub login — an open issue that was claimed is claimed by the person
-// migrating, and a closed one keeps no claim at all.
+// Labels carry over as written, so a local issue typed `idea` arrives on GitHub
+// with the type label the bootstrap defines; assignees do not, because a local
+// handle is not a GitHub login — an open issue that was claimed is claimed by
+// the person migrating, and a closed one keeps no claim at all.
 func localItems(snap *local.Snapshot) []Item {
 	items := make([]Item, 0, len(snap.Issues))
 	for _, i := range snap.Issues {

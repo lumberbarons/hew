@@ -93,8 +93,9 @@ func (a *App) Apply(ctx context.Context, opts ApplyOpts) error {
 	}
 	if err != nil {
 		// ApplyPlan owns the title and area rules now, including the check
-		// that an already-created entry is not re-gated. A rejected plan is
-		// bad input, so it keeps the apply command's usage exit code.
+		// that an already-created entry is not re-gated and the idea area
+		// reservation on pending entries. A rejected plan is bad input, so it
+		// keeps the apply command's usage exit code.
 		var invalid *tracker.InvalidInputError
 		if errors.As(err, &invalid) && invalid.Field == "plan" {
 			return usageErr("%s", invalid.Reason)

@@ -1,0 +1,216 @@
+// This file is the external-consumer scenario for the idea type: the public
+// create, edit, apply and local-migration workflows treat `idea` like the
+// implementation types, on both backends, with no internal imports.
+package consumer_test
+
+import (
+	"context"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/lumberbarons/hew/migrate"
+	"github.com/lumberbarons/hew/tracker"
+)
+
+// typeLabels returns the labels a consumer recognizes as issue types. The
+// vocabulary is part of the public contract, so the test spells it out rather
+// than importing the model's list.
+func typeLabels(labels []string) []string {
+	var out []string
+	for _, l := range labels {
+		switch strings.ToLower(l) {
+		case "bug", "enhancement", "task", "idea":
+			out = append(out, strings.ToLower(l))
+		}
+	}
+	return out
+}
+
+func priorityLabels(labels []string) []string {
+	var out []string
+	for _, l := range labels {
+		if len(l) == 2 && (l[0] == 'P' || l[0] == 'p') && l[1] >= '0' && l[1] <= '4' {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// assertOneTypeAndPriority is done-when's "exactly one type and one
+// priority": the write path leaves no stray second label of either kind.
+func assertOneTypeAndPriority(t *testing.T, labels []string, wantType string) {
+	t.Helper()
+	types := typeLabels(labels)
+	if !slices.Equal(types, []string{wantType}) {
+		t.Errorf("type labels = %v, want exactly %q (all labels: %v)", types, wantType, labels)
+	}
+	if priorities := priorityLabels(labels); len(priorities) != 1 {
+		t.Errorf("priority labels = %v, want exactly one (all labels: %v)", priorities, labels)
+	}
+}
+
+// TestExternalConsumerRecognizesIdeaAsAType drives create and edit through the
+// local backend, which is a real tracker on disk, and reads both back.
+func TestExternalConsumerRecognizesIdeaAsAType(t *testing.T) {
+	tr := externalTracker(t)
+	ctx := context.Background()
+
+	created, err := tr.Create(ctx, tracker.CreateRequest{Title: "Consider a cache", Type: "idea"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	read, err := tr.Get(ctx, created.Issue.Number)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if read.Type == nil || *read.Type != "idea" || read.Priority == nil || *read.Priority != "P2" {
+		t.Errorf("read = type %v priority %v, want idea/P2", read.Type, read.Priority)
+	}
+	assertOneTypeAndPriority(t, read.Labels(), "idea")
+
+	task := "task"
+	if _, err := tr.Edit(ctx, tracker.EditRequest{Issue: read.Number, Type: &task}); err != nil {
+		t.Fatalf("Edit to task: %v", err)
+	}
+	read, err = tr.Get(ctx, created.Issue.Number)
+	if err != nil {
+		t.Fatalf("Get after retype: %v", err)
+	}
+	if read.Type == nil || *read.Type != "task" {
+		t.Errorf("type = %v, want task after the swap", read.Type)
+	}
+	assertOneTypeAndPriority(t, read.Labels(), "task")
+
+	idea := "idea"
+	if _, err := tr.Edit(ctx, tracker.EditRequest{Issue: read.Number, Type: &idea}); err != nil {
+		t.Fatalf("Edit back to idea: %v", err)
+	}
+	read, err = tr.Get(ctx, created.Issue.Number)
+	if err != nil {
+		t.Fatalf("Get after the second swap: %v", err)
+	}
+	if read.Type == nil || *read.Type != "idea" {
+		t.Errorf("type = %v, want idea", read.Type)
+	}
+	assertOneTypeAndPriority(t, read.Labels(), "idea")
+}
+
+// TestExternalConsumerRecognizesIdeaAsATypeOnGitHub does the same over an
+// isolated transport, and pins the compatibility rule for an issue a
+// repository already labelled both task and idea: it reads as a task and
+// carries the multiple-type warning, with both labels left stored.
+func TestExternalConsumerRecognizesIdeaAsATypeOnGitHub(t *testing.T) {
+	fake := newGitHubFake()
+	tr := openGitHubTracker(t, fake)
+	ctx := context.Background()
+
+	created, err := tr.Create(ctx, tracker.CreateRequest{Title: "Consider a cache", Type: "idea", Priority: "P1"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	read, err := tr.Get(ctx, created.Issue.Number)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if read.Type == nil || *read.Type != "idea" || read.Priority == nil || *read.Priority != "P1" {
+		t.Errorf("read = type %v priority %v, want idea/P1", read.Type, read.Priority)
+	}
+	assertOneTypeAndPriority(t, read.Labels(), "idea")
+
+	seed(fake, 700, "Legacy mixed labels", "", "P2", "task", "idea")
+	legacy, err := tr.Get(ctx, 700)
+	if err != nil {
+		t.Fatalf("Get legacy: %v", err)
+	}
+	if legacy.Type == nil || *legacy.Type != "task" {
+		t.Errorf("legacy type = %v, want the existing task to win", legacy.Type)
+	}
+	if !slices.Equal(legacy.Labels(), []string{"P2", "task", "idea"}) {
+		t.Errorf("legacy labels = %v, want both stored labels retained", legacy.Labels())
+	}
+	primer, err := tr.Primer(ctx)
+	if err != nil {
+		t.Fatalf("Primer: %v", err)
+	}
+	warned := false
+	for _, w := range primer.Warnings {
+		if w.Kind == tracker.WarnMultiType && w.Issue == 700 {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("warnings = %v, want the multiple-type warning for #700", primer.Warnings)
+	}
+}
+
+// TestExternalConsumerAppliesAndMigratesAnIdea covers the plan and migration
+// halves: a dry run and a real apply both accept `idea`, and a local idea
+// keeps its type and its single-priority invariant when the tracker moves to
+// GitHub.
+func TestExternalConsumerAppliesAndMigratesAnIdea(t *testing.T) {
+	root, tr := localWork(t)
+	ctx := context.Background()
+	entries := []tracker.PlanEntry{
+		{ID: "idea", Title: "Consider a cache", Type: "idea", Priority: "P2"},
+		{ID: "work", Title: "Add a cache", Type: "task", Priority: "P3"},
+	}
+
+	dry, err := tr.ApplyPlan(ctx, entries, tracker.ApplyOptions{DryRun: true})
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if len(dry.WouldCreate) != 2 || dry.WouldCreate[0].Type != "idea" {
+		t.Fatalf("dry run plan = %+v, want the idea entry first", dry.WouldCreate)
+	}
+	snapshot, err := tr.Snapshot(ctx, tracker.SnapshotOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(snapshot.Issues()); got != 0 {
+		t.Fatalf("dry run wrote %d issue(s)", got)
+	}
+
+	applied, err := tr.ApplyPlan(ctx, entries, tracker.ApplyOptions{})
+	if err != nil {
+		t.Fatalf("ApplyPlan: %v", err)
+	}
+	ideaNumber := applied.Mapping["idea"]
+	if ideaNumber == 0 {
+		t.Fatalf("mapping = %v, want the idea entry created", applied.Mapping)
+	}
+	read, err := tr.Get(ctx, ideaNumber)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Type == nil || *read.Type != "idea" {
+		t.Errorf("applied type = %v, want idea", read.Type)
+	}
+	assertOneTypeAndPriority(t, read.Labels(), "idea")
+
+	fake := newGitHubFake()
+	transport := openFake(t, fake)
+	m, err := migrate.Open(ctx, migrateConfig(t, root, transport, false))
+	if err != nil {
+		t.Fatalf("migrate.Open: %v", err)
+	}
+	res, err := m.Local(ctx, migrate.LocalRequest{Dir: filepath.Join(root, ".hew")})
+	if err != nil {
+		t.Fatalf("Local: %v", err)
+	}
+	if res.Created != 2 {
+		t.Fatalf("created %d, want the idea and the task", res.Created)
+	}
+	fake.mu.Lock()
+	migrated := fake.issues[101]
+	var labels []string
+	if migrated != nil {
+		labels = slices.Clone(migrated.labels)
+	}
+	fake.mu.Unlock()
+	if migrated == nil {
+		t.Fatal("the idea was not migrated")
+	}
+	assertOneTypeAndPriority(t, labels, "idea")
+}

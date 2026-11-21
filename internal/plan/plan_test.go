@@ -67,6 +67,25 @@ func TestParseSections(t *testing.T) {
 	}
 }
 
+// A plan may type an entry `idea`, and it may carry the idea label as an area
+// on an entry a pre-upgrade checkpoint already created: the reservation is
+// ApplyPlan's to enforce against pending entries, not the file format's.
+func TestParseAcceptsIdeasAndTheirDeferredArea(t *testing.T) {
+	fixture := `{"title":"Consider a cache","type":"idea","problem":"writes are slow"}
+{"title":"Legacy","type":"task","areas":["idea"]}
+`
+	entries, err := Parse(strings.NewReader(fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries[0].Type != model.IdeaType {
+		t.Errorf("type = %q, want idea", entries[0].Type)
+	}
+	if len(entries[1].Areas) != 1 || entries[1].Areas[0] != model.IdeaType {
+		t.Errorf("areas = %v, want the stored idea area kept for the checkpoint pass", entries[1].Areas)
+	}
+}
+
 func TestParseEmpty(t *testing.T) {
 	for _, in := range []string{"", "\n\n"} {
 		entries, err := Parse(strings.NewReader(in))
@@ -95,7 +114,7 @@ func TestParseErrors(t *testing.T) {
 		{"malformed json", "{not json\n", "line 1"},
 		{"unknown field", task(`,"blockedby":[1]`), "unknown field"},
 		{"missing title", `{"type":"task"}` + "\n", "title is required"},
-		{"missing type", `{"title":"x"}` + "\n", "type must be one of bug|enhancement|task|epic"},
+		{"missing type", `{"title":"x"}` + "\n", "type must be one of bug|enhancement|task|idea|epic"},
 		{"bad type", `{"title":"x","type":"feature"}` + "\n", "type must be"},
 		{"bad priority", task(`,"priority":"P9"`), "priority must be P0..P4"},
 		{"negative discovered-from", task(`,"discovered-from":-1`), "discovered-from"},

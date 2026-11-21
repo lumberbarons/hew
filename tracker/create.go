@@ -19,7 +19,8 @@ import (
 // tracker untouched.
 type CreateRequest struct {
 	Title string
-	// Type is bug, enhancement or task. Use CreateEpic for a parent issue.
+	// Type is bug, enhancement, task or idea. Use CreateEpic for a parent
+	// issue.
 	Type string
 	// Priority is P0..P4; empty means P2.
 	Priority string
