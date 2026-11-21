@@ -164,7 +164,7 @@ hew prime                      # session-start context for agents
 hew ready [--limit N]          # open, non-epic, non-idea, triaged, zero open blockers;
                                   # P0→P4, capped at 30 by default (0 for all);
                                   # truncation warns
-hew list [--label X] [--epic N] [--state open|closed|all]
+hew list [--label X] [--type T] [--epic N] [--state open|closed|all]
             [--limit N]          # prints all by default; truncation warns, like ready
             [--bodies]           # with --json: body on every line, dedup in one call;
                                    # untriaged issues are omitted — hew triage holds them
@@ -175,6 +175,7 @@ hew search <terms> [--state open|closed] [--limit N]
                                    # best-match order — check for an existing issue before filing one
 hew create --type bug|enhancement|task|idea --title "..."
               [--where X] [--problem|--goal "..."] [--fix|--approach "..."]
+              [--open-questions "..."]... # optional discovery questions
               [--done-when "..."]...   # section flags compose the body template
               [--priority P0..P4] [--area X] [--blocked-by N] [--parent N]
               [--discovered-from N]
@@ -267,6 +268,7 @@ An unclaimed issue is refused. Use `hew release <n> --force` to clear another
 owner's claim, including a local claim stranded by `git worktree remove` or
 `git worktree move`. From a surviving checkout, find the issue with `hew list`,
 release it with `--force`, then use `hew start <n>` when ready to claim it.
+For an idea, reclaim with `hew start <n> --for-discovery`.
 A label-only claim or a claim with several assignees also requires `--force`.
 
 Output is one compact line per issue, annotated with whatever keeps it from
@@ -304,10 +306,20 @@ ready queue, the primer's Ready section and hewd's Ready view leave it alone, so
 agent working the queue never starts on one by accident:
 
 ```sh
-hew create --type idea --title "Consider caching repeated reads" --problem "..."
+hew create --type idea --title "Consider caching repeated reads" \
+  --problem "Repeated reads add latency." --open-questions "Which reads repeat?"
 hew list --type idea                # browse what is captured
 hew start 42 --for-discovery --show # the explicit claim, once you decide to investigate
 ```
+
+Use the issue number returned by `hew create` or selected from `hew list` in place of
+`42`. `--type idea` matches the normalized issue type. `--label idea` matches the
+literal label, including tasks that carry it. If your repository already uses
+that label, an issue with a priority and `idea` as its only recognized type
+becomes a triaged idea and leaves Ready. An issue with both `idea` and an
+implementation type keeps the implementation type and reports a multiple-type
+warning. The stored labels stay intact. New area assignments reserve `idea`
+for the issue type.
 
 Investigation produces evidence or a decision — research, an ADR, a spec — and
 approved implementation is handed off as separate work issues filed with
@@ -317,10 +329,14 @@ Referencing the idea from an epic (or the epic from the idea) associates the two
 without making the idea an epic child, so it stays out of the epic's progress and
 next-child sequence.
 
+See [Recording an idea’s outcome](#recording-an-ideas-outcome) for completion and closure.
+
 ### Writing a PR body
 
 `hew pr` composes `### What` / `### Why` / `### Testing`, plus `### Risk` when you pass
 `--risk`. What and Why default to the issue's `Fix`/`Approach` and `Problem`/`Goal`.
+Automatic selection skips ideas. To close an idea through a documentation PR,
+push the branch and run `hew pr --for <n>` with the idea's number.
 Lay each section out one claim per line, repeating the flag once per line, so it reads as
 a list on GitHub rather than a dense paragraph:
 
@@ -436,7 +452,7 @@ dry-run it, apply it. One JSON object per line:
 {"title":"Wire the collector","type":"task","parent":"epic1","blocked-by":["scaffold",42],"areas":["ble"]}
 ```
 
-`type` is `bug|enhancement|task`, or `epic` for a parent issue (no type label,
+`type` is `bug|enhancement|task|idea`, or `epic` for a parent issue (no type label,
 `epic` label, `Epic: ` title prefix). `priority` defaults to P2. `parent` and `blocked-by`
 take either a local `id` — a string, resolved to the created issue's number,
 so entries can reference each other before numbers exist — or an existing
@@ -480,7 +496,11 @@ hew set 42 --outcome 'Pursued as epic #57. See `docs/adr/0002-another-backend.md
 ```
 
 Hew adds the note under `### Outcome` and preserves the original problem, open questions,
-and other sections. To add a note to a closed idea from the CLI, pass `--closed`.
+and other sections. Use `####` or deeper for headings in a note. Underlined
+headings are rejected. Close Markdown code fences and HTML comments.
+If an unclosed fence or comment in the existing body blocks the append, close
+that block before retrying. To add a note to a closed idea from the CLI, pass
+`--closed`.
 
 Point the implementation issue back at the idea with an ordinary `#n` reference. An epic for the
 follow-on work can carry it in its body from the start; an existing epic gets it the same way, by
@@ -501,6 +521,9 @@ when the idea is not being pursued:
 hew close 42 --completed --reason "Pursued as #57; decision and artifacts are in the body."
 hew close 42 --reason "Parked: not this year; the backend work is deferred."
 ```
+
+On GitHub, if the outcome lives in a documentation PR, use `hew pr --for 42`
+to link the idea for closure on merge.
 
 `hew show 42` reads the body and comments together, so the decision, the artifact paths, and the
 close reason are all on the closed issue, and `hew list --state closed` finds it once it leaves the

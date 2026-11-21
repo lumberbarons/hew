@@ -1,0 +1,23 @@
+#171 P2 task  Write the 1.0 compatibility policy
+state: open  created: 2026-10-14 EDT
+parent: #170 Epic: 1.0 readiness
+
+### Where
+
+`DESIGN.md`, `README.md`
+
+### Problem
+
+AGENTS.md names exit codes, the `--json` schema and the output format as contracts, and #167 will add the flag surface, but nothing states what 1.0 guarantees or what counts as a breaking change. Without that, neither maintainers nor agent-loop authors know what they can rely on.
+
+### Approach
+
+Add a compatibility section to `DESIGN.md` covering commands, flags and aliases, exit codes, the `--json` schema (additive fields only), NDJSON list shape, and which parts of `prime` output are contract versus prose. Reuse the rename policy from #167: a rename keeps the old spelling as an alias, a removal waits for a major. Link it from the README.
+
+### Done when
+
+- [ ] `DESIGN.md` lists each stable surface and what counts as breaking for it
+- [ ] the policy says how a deprecation is announced and for how long an alias lives
+- [ ] the README links to the policy
+
+<!-- hew:apply key=policy digest=sha256:c43046332a7f30e66724a443d85c9c8a8a604e54caf2a8170d6acb83e3cd9fd8 -->

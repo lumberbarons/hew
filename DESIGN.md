@@ -49,8 +49,12 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
 - **Priority labels**, every issue gets exactly one: `P0` (critical) → `P4` (backlog).
   Default `P2`.
 - **Type labels**, exactly one: `bug`, `enhancement`, `task`, or `idea` for
-  discovery work. `idea` sits last in the normalization precedence, so an older
-  issue that already carried it as an area label keeps its previous reading.
+  discovery work. `idea` sits last in the normalization precedence. A legacy
+  issue with a priority and `idea` as its only recognized type now reads as a
+  triaged idea. If it also carries an implementation type, that type wins and
+  the read reports the usual multiple-type warning. Existing labels stay
+  intact, but normalized areas omit `idea` and new area writes reserve it for
+  the type.
 - **Area labels**, zero or more, flat names (`tests`, `web-ui`, ...). Created
   sparingly.
 - **No title prefixes** — type/priority/area live in labels. Exception: `Epic: ` on
@@ -439,17 +443,18 @@ agents pass `--body` directly, which bypasses templates entirely.
 `pr` is composition and guards, not a reimplementation of `gh pr`. Reviews,
 merges, checks and PR listing stay where they are.
 
-- **Which issue.** The claim is the primary signal — it's tracker state, not a
-  naming guess: exactly one open non-epic issue assigned to you is the answer.
+- **Which issue.** Inference excludes epics and issues whose normalized type is
+  `idea`. Among the remaining open issues, a lone claim assigned to you is the
+  primary signal.
   A number in the branch name (`feat/30-pr-command`) breaks ties when several
   are claimed and stands in when none is, but only as a whole `-`/`/`-delimited
-  segment, so `fix/http500-retries` doesn't link `#500`. It also vetoes a lone
-  claim it contradicts: a branch naming a *different* open issue is two signals
-  disagreeing, and preferring the claim would close the other issue on merge
-  with nothing in the output saying so. Anything still
-  ambiguous is a usage error naming the candidates; `--for <n>` settles it. The
-  cost of guessing wrong is closing the wrong issue on merge, so guessing is
-  not on the menu.
+  segment, so `fix/http500-retries` doesn't link `#500`. Hew refuses to infer a
+  target when a lone claim and a branch number point to different eligible
+  issues. Ambiguity also produces a usage error naming the candidates.
+  Discovery has its own
+  completion workflow, so an idea's claim and branch number are ignored in
+  inference, including in the conflict check. Use `--for <n>` to name an idea
+  explicitly when merging a documentation PR should close it.
 - **Exactly one `Fixes #n`.** The composed body always writes one, plus
   `Part of #<epic>` when the issue is a sub-issue. A `--body-file` gets
   whichever of those links it doesn't already make, so the escape hatch can't
@@ -1030,6 +1035,7 @@ mapping lives in `internal/cli` alone:
 | claimed by someone else (carries the claimant) | 3 | pick the next ready item |
 | claimed by the acting identity (carries the actor) | 5 | resume that work |
 | open blockers (carries the blockers) | 6 | pick the next ready item |
+| discovery intent required (`DiscoveryIntentError`) | 2 | use `StartOptions.ForDiscovery` in the library or `--for-discovery` in the CLI |
 | authentication failure | 4 | `gh auth login` |
 | invalid input: a malformed argument, or a plan entry whose own fields are invalid | 2 | fix the call |
 | not found, a closed target, a dependency cycle (a self-block included), a plan that fails to parse or resolve, anything unclassified | 1 | report it |
@@ -1047,11 +1053,13 @@ item) — and reports whether the error is one of them. The facts stay on
 The CLI maps the outcome to exits 3, 5 and 6, and the daemon maps it to its
 `claimed_by_other`, `claimed_by_you` and `blocked` kinds, so a consumer does not
 re-derive it from `ByActor`.
+The separate `DiscoveryIntentError` maps to HTTP 409 with kind
+`discovery_intent` in the daemon.
 
 `tracker` owns the vocabulary every package shares: `AuthError`,
 `InvalidInputError`, `NotFoundError`, `ClosedError`, `ClaimedError`,
 `BlockedError`, `CycleError`, `UnverifiableCycleError`, `NotOpenError`,
-`EpicError`, `UntriagedError`, `NotClaimedError`, `NotOwnerError`,
+`EpicError`, `UntriagedError`, `DiscoveryIntentError`, `NotClaimedError`, `NotOwnerError`,
 `OpenChildrenError`, `PartialWriteError`, `PartialReleaseError`,
 `PartialCloseError`, `LockTimeoutError`, `MigratedError`,
 `InitializedElsewhereError`. A workflow in another
@@ -1300,7 +1308,7 @@ any product code.
   blocker, so a cycle silently excludes all its members from `ready` forever.
   `prime` and `ready` warn when they see one.
 
-## Token efficiency (measured 2026-10-29)
+## Token efficiency (measured 2026-11-21)
 
 The token-lean claim, measured rather than asserted. The harness lives in
 [evals/](evals/): `capture` records both sides' raw output from a live repo into
@@ -1327,17 +1335,17 @@ lumberbarons/solar-controller — 14 open issues:
 | `hew ready` | 324 | 1969 | 6.1x | gh issue list --json † |
 | `hew list` | 353 | 1172 | 3.3x | gh api graphql (open issues) |
 | `hew list --json` | 1607 | 1172 | 0.7x | gh api graphql (open issues) |
-| `hew prime` | 1122 | 1172 | 1.0x | gh api graphql (open issues) |
+| `hew prime` | 1163 | 1172 | 1.0x | gh api graphql (open issues) |
 | `hew show #119` | 431 | 590 | 1.4x | gh issue view --json + gh api graphql |
 
 Findings, including the ones that don't flatter the tool:
 
 - **The claim holds for the reads an agent actually loops on.** `ready` and
-  `list` cost 18–25 tokens per open issue against 75–84 for the equivalent
-  GraphQL and 106–141 for `gh issue list --json` — 3.3x–4.3x and 5.1x–6.1x
+  `list` cost 16–25 tokens per open issue against 76–84 for the equivalent
+  GraphQL and 107–141 for `gh issue list --json` — 3.3x–4.8x and 5.4x–6.8x
   respectively across both fixtures. This is the whole-tracker read that
   happens every iteration, so it is where the saving compounds.
-- **`show` saves less: 1.3x–1.5x.** Bodies dominate `show` and both sides carry
+- **`show` saves less: 1.4x–1.5x.** Bodies dominate `show` and both sides carry
   them verbatim; the value there is the deps line, not the token count. Worth
   saying plainly rather than averaging into a headline.
 - **`list --json` currently costs *more* than the raw GraphQL it replaces
@@ -1345,16 +1353,10 @@ Findings, including the ones that don't flatter the tool:
   empty arrays, derived booleans, `createdAt` — where the lean query writes seven
   fields. The schema's stability is deliberate (agents parse it), but the token
   cost is a real regression against the tool's own claim, filed as #62.
-- **`prime` measures 1122–1138 tokens against its ~1200 target, restated in
-  #63.** The ~600 target came from the mock, not from output: the static
-  conventions half alone measures ~940 tokens under o200k_base, and the live
-  sections add ~180–200 on the fixtures. Every command and flag of the cheatsheet
-  is documented by design (`TestPrimerMatchesCommandSurface` pins that
-  surface), so the original target was unreachable without gutting the tool's
-  core teaching — the budget moved to the measured number instead, and the
-  harness's `primeBudget` (evals) moved with it. The live sections are each
-  capped at five with pointers, so the ~1200 bound holds for repos larger than
-  the fixtures too.
+- **`prime` measures 1163 tokens on solar-controller and 1178 on hew.**
+  Both fit the ~1200-token target tracked by the eval harness. The primer
+  combines workflow guidance and a command cheatsheet with capped live
+  sections. The exact count varies with the tracker state and issue titles.
 
 ## Milestones
 

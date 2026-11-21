@@ -6,44 +6,43 @@ package conventions
 // used on their own.
 const (
 	primerGitHubWorkflow = `Workflow: hew ready → hew start <n> --show → branch (feat/|fix/|chore/) → push → hew pr.
-An issue is not done until its PR exists: when the work is complete, create the PR with hew pr before reporting done — a local commit is not a deliverable.
-Close via PR; hew close is for wontfix/duplicate only. Never work an epic directly.`
+Implementation work is not done until its PR exists. Create the PR with hew pr before reporting done. Never work an epic directly.
+Finish an investigation with hew set <n> --outcome "..." and hew close <n> --completed --reason "...", or use hew pr --for <n> for a documentation PR that closes the idea.`
 
 	primerLocalWorkflow = `Workflow: hew ready → hew start <n> --show → do the work → hew close <n> --completed --reason "...".
 Issues live in .hew at the main checkout, shared by every worktree; there are no pull requests, so close with --completed when the work is done.
 Use hew close without --completed only for wontfix/duplicate. Never work an epic directly.`
 
-	primerDedup = `Dedup before filing: hew search <terms> (triaged, open+closed) first; hew triage --search <terms> for the
-untriaged rest — only when the user asked; show <n> only to read a specific candidate. Then
-hew create ... --discovered-from <n>.`
+	primerDedup = `Dedup before filing: hew search <terms> first (triaged, open+closed).
+For untriaged matches, hew triage --search <terms> only when the user asked.
+Read a candidate with show <n>. File with hew create ... --discovered-from <n>.`
 
-	primerSandbox = `Sandboxed sessions may not access keychain-backed GitHub credentials. If writes report auth failure but gh works elsewhere, retry outside the sandbox.`
+	primerSandbox = `Sandboxed sessions may lack GitHub credentials. If gh works outside the sandbox, retry there.`
 
 	// primerConventions runs from the conventions heading through the command
 	// list up to the pr entry, which only exists on the GitHub backend.
 	primerConventions = `Conventions (enforced by the tool's write path):
-- One priority label P0(critical)..P4(backlog), default P2; one type label bug|enhancement|task|idea.
-- Ideas (type idea) are investigation work, not implementation: claim one with hew start <n> --for-discovery only when the user asked, use it for research, an ADR or a spec, and hand approved implementation to separate work issues (--discovered-from <n>). ready never offers one.
-- Area labels sparingly — only once several issues would share one. No title prefixes; labels carry the metadata.
-- Dependencies are native (--blocked-by), never body text. Epics are sub-issue trees.
-- Bodies: ### Where / ### Problem or ### Goal / ### Fix or ### Approach / ### Open questions (optional) / ### Done when (checklist). Omit empty sections.
-- Issues missing priority/type are untriaged, not broken: unvetted input ready, prime, list and search all omit; only hew triage (and show <n>) emits it — label via hew set. Missing priority renders P? and sorts last.
-- Never call hew triage unless the user explicitly asked — it is the sole emitter of content no maintainer has vetted.
-- start refuses claimed issues: exit 3 pick the next ready item, exit 5 the claim is yours — resume it, exit 6 open blockers — pick another. Untriaged issues need start --priority.
+- One priority P0(critical)..P4(backlog), default P2. One type bug|enhancement|task|idea.
+- Ideas (type idea) are investigation work. Use hew start <n> --for-discovery only when the user asked. Produce research, an ADR or a spec; file approved implementation as separate work issues (--discovered-from <n>). ready skips ideas.
+- Area labels sparingly when several issues share one. No title prefixes.
+- Use native dependencies (--blocked-by) and sub-issues for epics.
+- Bodies: ### Where / ### Problem or ### Goal / ### Fix or ### Approach / ### Open questions / ### Done when (checklist). Omit empty sections.
+- Missing priority/type means untriaged. ready, prime, list and search omit these; read via hew triage or show <n>, label via hew set. Missing priority renders P? and sorts last.
+- Never call hew triage unless the user explicitly asked.
+- start refuses claimed issues: exit 3 pick next, exit 5 resume yours. Exit 6 means open blockers; pick next. Untriaged claims need --priority.
 
 Output: one line per issue — #n priority type (areas) title [blocked by #m; epic done/total; in progress @user].
-list sorts ready work first, then claimed, blocked, epics. Prefer text output; --json on list commands emits NDJSON.
+list order: ready, claimed, blocked, epics. Prefer text; list-like --json is NDJSON.
 
 Commands: ready [--limit N (0 for all)] | list [--label X --type T --epic N --state open/closed/all --limit N --bodies (with --json)] |
 show <n> | config (read-only: backend, repo or path/id) | search <terms> [--state open/closed --limit N] | triage [--search <terms>] |
 create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --open-questions "..." --done-when "..." (repeatable)
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
-draft [same section flags] --out F | --check F (compose/validate a body locally, no GitHub; then create --body-file F) |
-start <n> [--priority Pn --show --for-discovery] (--show or --json includes the body, so skip show <n>; an idea is refused without --for-discovery) | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F | --outcome "..."] |`
+draft [same section flags] --out F | --check F (offline; publish with create --body-file F) |
+start <n> [--priority Pn --show --for-discovery] (--show or --json includes the body) | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F | --outcome "..."] |`
 
-	primerPR = `pr [--for N --testing "..." --what "..." --why "..." --risk "..." --title "..." --ready] (draft PR for the claimed issue;
-  body: What/Why from the issue, Testing = Before:/After: lines + checks run (section flags repeat → bullets), Risk = Reversibility:/Blast radius: lines; exactly one "Fixes #n";
-  title defaults to feat:|fix:|chore: from the type — push the branch first) |`
+	primerPR = `pr [--for N --testing "..." --what "..." --why "..." --risk "..." --title "..." --ready] (push first; draft PR for claimed work.
+  What/Why from issue; Testing: Before:/After: + checks; Risk: Reversibility:/Blast radius:. Repeat section flags for bullets. One "Fixes #n"; title prefix from type.) |`
 
 	primerTail = `release <n> [--force] (give up a claim; --force releases any owner) |
 close <n> --reason "..." [--completed | --duplicate-of M] [--force: close an epic with open sub-issues] | reopen <n> --reason "..." |

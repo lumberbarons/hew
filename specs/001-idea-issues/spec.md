@@ -10,7 +10,7 @@ A maintainer can capture a possible improvement as an idea and return to it when
 
 ## Prior Decisions
 
-- [ADR-0001 Add a discovery issue type](docs/adr/0001-add-discovery-issue-type.md) — Ideas require explicit discovery claims, stay outside implementation selection and automatic PR inference, and use references to associate with epics. Hew preserves existing relationships on reads and leaves completion policy to each workflow.
+- [ADR-0001 Add a discovery issue type](../../docs/adr/0001-add-discovery-issue-type.md) — Ideas require explicit discovery claims, stay outside implementation selection and automatic PR inference, and use references to associate with epics. Hew preserves existing relationships on reads and leaves completion policy to each workflow.
 
 ## Research
 

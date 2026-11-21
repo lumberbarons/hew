@@ -198,7 +198,7 @@ function OutcomeEditor({ d, reload }: { d: Detail; reload: () => void }) {
       <summary>Record outcome</summary>
       <Field
         label="Outcome note"
-        hint="Markdown is supported. Use # followed by an issue number to link follow-up work."
+        hint="Use #### or deeper for Markdown headings. Close code fences and HTML comments. Use # followed by an issue number to link follow-up work."
       >
         <textarea
           rows={4}
