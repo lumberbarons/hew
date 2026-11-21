@@ -605,6 +605,28 @@ func TestListTypeQueryAndIdeaCapture(t *testing.T) {
 	}
 }
 
+// An apply plan entry carries open questions through to the composed body, the
+// same as the create route: a batch of ideas is shaped like a single one.
+func TestApplyComposesOpenQuestions(t *testing.T) {
+	e := newEnv(t, false)
+	plan := map[string]any{"entries": []map[string]any{
+		{"id": "a", "title": "Batch idea", "type": "idea", "sections": map[string]any{
+			"problem":       "Ideas get lost.",
+			"openQuestions": []string{"Which command filters ideas?"},
+		}},
+	}}
+	if status, res := e.call("POST", "/api/apply", "", plan); status != 200 || res["created"] != float64(1) {
+		t.Fatalf("apply = %d %v", status, res)
+	}
+	_, d := e.call("GET", "/api/issues/1", "", nil)
+	body := d["issue"].(map[string]any)["body"].(string)
+	for _, want := range []string{"### Problem", "### Open questions", "- Which command filters ideas?"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("applied idea body %q missing %q", body, want)
+		}
+	}
+}
+
 func TestEpicDryRunGivesTheSameAdviceAsAnIssue(t *testing.T) {
 	e := newEnv(t, false)
 	body := map[string]any{"goal": "Edit internal/cli/pr.go", "doneWhen": []string{"x"}}
