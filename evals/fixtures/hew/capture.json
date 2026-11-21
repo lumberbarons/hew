@@ -1,8 +1,8 @@
 {
   "repo": "lumberbarons/hew",
-  "capturedAt": "2026-10-29T22:55:45Z",
+  "capturedAt": "2026-11-21T15:02:17Z",
   "hewVersion": "hew version dev",
-  "openIssues": 32,
+  "openIssues": 23,
   "truncated": false,
   "entries": [
     {
@@ -10,7 +10,7 @@
       "perIssue": true,
       "hew": {
         "argv": [
-          "hew-235",
+          "hew",
           "ready",
           "--repo",
           "lumberbarons/hew"
@@ -69,7 +69,7 @@
       "perIssue": true,
       "hew": {
         "argv": [
-          "hew-235",
+          "hew",
           "list",
           "--repo",
           "lumberbarons/hew"
@@ -128,7 +128,7 @@
       "perIssue": true,
       "hew": {
         "argv": [
-          "hew-235",
+          "hew",
           "list",
           "--json",
           "--repo",
@@ -188,7 +188,7 @@
       "perIssue": false,
       "hew": {
         "argv": [
-          "hew-235",
+          "hew",
           "prime",
           "--repo",
           "lumberbarons/hew"
@@ -220,17 +220,17 @@
       ]
     },
     {
-      "command": "show #61",
+      "command": "show #171",
       "perIssue": false,
       "hew": {
         "argv": [
-          "hew-235",
+          "hew",
           "show",
-          "61",
+          "171",
           "--repo",
           "lumberbarons/hew"
         ],
-        "file": "hew-show-61.txt"
+        "file": "hew-show-171.txt"
       },
       "baselines": [
         {
@@ -243,13 +243,13 @@
                 "gh",
                 "issue",
                 "view",
-                "61",
+                "171",
                 "--repo",
                 "lumberbarons/hew",
                 "--json",
                 "number,title,body,state,stateReason,createdAt,labels,assignees,comments"
               ],
-              "file": "gh-issue-view-61.json"
+              "file": "gh-issue-view-171.json"
             },
             {
               "argv": [
@@ -263,9 +263,9 @@
                 "-F",
                 "query=@cmd/tokens/queries/issue-deps.graphql",
                 "-F",
-                "number=61"
+                "number=171"
               ],
-              "file": "gh-graphql-issue-deps-61.json"
+              "file": "gh-graphql-issue-deps-171.json"
             }
           ]
         },
@@ -279,13 +279,13 @@
                 "gh",
                 "issue",
                 "view",
-                "61",
+                "171",
                 "--repo",
                 "lumberbarons/hew",
                 "--json",
                 "number,title,body,state,stateReason,createdAt,labels,assignees,comments"
               ],
-              "file": "gh-issue-view-61.json"
+              "file": "gh-issue-view-171.json"
             }
           ]
         }

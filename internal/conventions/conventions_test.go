@@ -274,9 +274,18 @@ func TestPrimerStaticForbidsAutonomousTriage(t *testing.T) {
 // existing, not as the code compiling.
 func TestPrimerStaticDefinesDoneAsPR(t *testing.T) {
 	line := primerLineContaining(t, "not done until its PR exists")
-	for _, want := range []string{"when the work is complete", "create the PR with hew pr", "not a deliverable"} {
+	for _, want := range []string{"Implementation work", "Create the PR with hew pr", "before reporting done"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("definition of done missing %q:\n%s", want, line)
+		}
+	}
+}
+
+func TestPrimerStaticExplainsIdeaCompletion(t *testing.T) {
+	line := primerLineContaining(t, "Finish an investigation")
+	for _, want := range []string{"hew set <n> --outcome", "hew close <n> --completed --reason", "hew pr --for <n>", "documentation PR"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("idea completion missing %q:\n%s", want, line)
 		}
 	}
 }
