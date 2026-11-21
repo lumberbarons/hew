@@ -88,3 +88,19 @@ API strategy: one GraphQL query per command where possible. `ready`/`prime` fetc
 - **Exit codes are contract.** Agent loops branch on them: `3` = claimed by someone else (pick next ready item), `5` = claimed by you (resume that work), `6` = open blockers (pick the next ready item), `4` = auth failure (`gh auth login`), `2` = usage. Defined in `internal/cli/app.go`.
 - **Output is agent-facing.** One compact line per issue, no URLs, no ANSI when not a TTY, stable sort. `--json` is a stable flat schema (deps as number arrays, GraphQL shapes hidden); list-shaped output is NDJSON so truncation degrades gracefully. The `prime` output has a token budget (~1200 tokens) — don't add prose to it casually.
 - **Epic-ness = has sub-issues, or carries the `epic` label the tool puts on every epic it creates.** The label is what keeps a childless epic triaged and listed; the `Epic: ` title prefix is cosmetic. `ready` excludes every epic.
+
+## Architectural Decisions
+
+ADRs live in `docs/adr/`. Read the relevant ADRs before proposing architectural changes. Accepted ADRs record constraints and alternatives. Specs cite the ADRs they rely on. An ADR's `research` field identifies the evidence to consult before revisiting it.
+
+| ADR | When this applies |
+|---|---|
+| [ADR-0001](docs/adr/0001-add-discovery-issue-type.md) | Changes to issue types, discovery claims, implementation selection, PR inference, or epic membership |
+
+## Specs
+
+Feature specs live in `specs/`. Each spec records its status, work items, and acceptance criteria.
+
+| Spec | Scope |
+|---|---|
+| [001 — Idea Issues](specs/001-idea-issues/spec.md) | The `idea` issue type, discovery claims, readiness, and the hewd Ideas page |
