@@ -60,7 +60,7 @@ If the status is anything other than `Draft`, report it and stop.
 After the gates pass, start one read-only reviewer in a fresh context with no
 inherited conversation. Give it only the absolute spec path, repository root,
 and this skill's path with instructions to perform steps 3–5 and return the
-report described in step 7. It is the reviewer, not another invocation of the
+verdict and findings described at the end of step 5. It is the reviewer, not another invocation of the
 calling workflow: it must not delegate again or run steps 1–2 or 6.
 
 Do not pass the drafting/refinement conversation, a parent-written summary,
@@ -152,11 +152,6 @@ uv run --no-project "$LIGHTSPEC" status specs/NNN-slug/spec.md Accepted
 The script refuses this on a spec that fails `check`, so a slip in step 2 cannot
 become an approval. If it refuses, believe it.
 
-Do not edit the spec as part of approving. Fixing the objections you just raised
-makes you the author again, and then nobody has reviewed the result. If the user
-wants those changes made, that is a separate ask, and re-approving is a fresh
-invocation of this skill.
-
 ## 7. Report — calling agent
 
 Relay the reviewer's report. Lead with the verdict. Then the findings, each
@@ -164,6 +159,19 @@ quoting its line, ordered by how much they change what gets built. Then what
 the reviewer checked it against — which ADRs and research it read, what code
 it looked at — so the user can judge whether its grounding was thin. If you
 recorded approval, say the status moved.
+
+## Follow-up after a rejection — calling agent
+
+Revise the draft in a separate authoring step only if the user asks for fixes.
+If they explicitly ask to fix and retry, run at most one follow-up approval
+from step 1 on the revised draft, even if they ask you to keep going until it
+passes. Use a fresh reviewer and keep the earlier findings in the calling context.
+
+Stop for the user's decision before revising if a blocker requires a scope
+change, a new ADR, or feasibility evidence. If the follow-up still blocks,
+stop and report which objections were resolved, which recur, and which are new.
+State what remains necessary for approval. Leave the spec at `Draft` and wait
+for further direction before making more edits or dispatching another review.
 
 ## Anti-patterns
 
@@ -173,7 +181,7 @@ recorded approval, say the status moved.
 - Approving with a list of caveats attached; if the caveats matter, send it back
 - Sending back over something the Assumptions section already discloses — the
   author flagged it, which is the system working
-- Editing the spec, cutting a branch, filing issues, or starting the work
+- Editing the spec during a review, cutting a branch, filing issues, or starting the work
 - Running as a step after draft-spec rather than because a person asked
 - Reviewing in the drafting conversation, or forwarding that conversation to
   the reviewer through inheritance or a summary
