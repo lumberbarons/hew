@@ -55,19 +55,21 @@ var omittedFlags = map[string]bool{
 	"pr --base":        true, // the repo default is right outside release branches
 	// epic create's body flags mirror create's exactly; the primer shows the
 	// epic-typical --goal/--done-when form and the long-form escape hatch.
-	"epic create --where":    true,
-	"epic create --problem":  true,
-	"epic create --fix":      true,
-	"epic create --approach": true,
-	"epic create --edit":     true, // interactive, not for agents
+	"epic create --where":          true,
+	"epic create --problem":        true,
+	"epic create --fix":            true,
+	"epic create --approach":       true,
+	"epic create --open-questions": true,
+	"epic create --edit":           true, // interactive, not for agents
 	// draft takes create's section flags verbatim; the primer entry says
 	// "same section flags" rather than restating them.
-	"draft --where":     true,
-	"draft --problem":   true,
-	"draft --goal":      true,
-	"draft --fix":       true,
-	"draft --approach":  true,
-	"draft --done-when": true,
+	"draft --where":          true,
+	"draft --problem":        true,
+	"draft --goal":           true,
+	"draft --fix":            true,
+	"draft --approach":       true,
+	"draft --open-questions": true,
+	"draft --done-when":      true,
 }
 
 type leaf struct {
@@ -429,6 +431,37 @@ func TestDoneWhenTakesItemsVerbatim(t *testing.T) {
 	}
 	if want := []int{1, 2}; !slices.Equal(children, want) {
 		t.Errorf("epic create children = %v, want %v (comma lists must still split)", children, want)
+	}
+}
+
+// TestOpenQuestionsFlowFromTheFlagToTheSections pins the wiring no library
+// test reaches: --open-questions is prose like --done-when, so a comma inside
+// one question is punctuation, and sectionsFromFlags must hand the items to the
+// shared composer on both create and draft.
+func TestOpenQuestionsFlowFromTheFlagToTheSections(t *testing.T) {
+	app := root()
+	var got conventions.Sections
+	capture := func(_ context.Context, cmd *ucli.Command) error {
+		got = sectionsFromFlags(cmd)
+		return nil
+	}
+	findCommand(t, app, "create").Action = capture
+	findCommand(t, app, "draft").Action = capture
+
+	want := []string{"Which command, if any, filters ideas?", "How does hewd browse them?"}
+	for _, args := range [][]string{
+		{"hew", "create", "--type", "idea", "--title", "t", "--problem", "p",
+			"--open-questions", want[0], "--open-questions", want[1]},
+		{"hew", "draft", "--problem", "p",
+			"--open-questions", want[0], "--open-questions", want[1]},
+	} {
+		got = conventions.Sections{}
+		if err := app.Run(context.Background(), args); err != nil {
+			t.Fatalf("run %v: %v", args, err)
+		}
+		if !slices.Equal(got.OpenQuestions, want) {
+			t.Errorf("%s open-questions = %q, want %q", args[1], got.OpenQuestions, want)
+		}
 	}
 }
 

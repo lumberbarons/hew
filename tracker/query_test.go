@@ -97,6 +97,49 @@ func TestSnapshotListAppliesTheCommandsFiltersInListOrder(t *testing.T) {
 	}
 }
 
+// The type filter answers "what kind of issue is this?" from the normalized
+// type, not from a literal label: a legacy task carrying an idea label stays a
+// task, an epic stays a container, and an untriaged issue stays behind triage.
+// The state filter still narrows what the snapshot fetched.
+func TestSnapshotListFiltersByNormalizedType(t *testing.T) {
+	idea := fixture(1, "An idea", "P2", "idea")
+	legacy := fixture(2, "Legacy task", "P2", "task", "idea")
+	closedIdea := fixture(3, "Closed idea", "P2", "idea")
+	closedIdea.State = "CLOSED"
+	epicIdea := fixture(4, "Epic idea", "P2", "idea", "epic")
+	epicIdea.SubIssues = []model.Ref{{Number: 5, State: "OPEN"}}
+	epicIdea.SubIssuesTotal = 1
+	untriaged := fixture(5, "Untriaged idea", "idea")
+	store := &fakeClient{issues: []model.Issue{idea, legacy, closedIdea, epicIdea, untriaged}}
+
+	open, err := Wrap(store).Snapshot(context.Background(), SnapshotOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := numbers(open.List(ListFilter{Type: "idea"})), []int{1}; !slices.Equal(got, want) {
+		t.Errorf("List(type=idea) = %v, want %v", got, want)
+	}
+	if got, want := numbers(open.List(ListFilter{Label: "idea"})), []int{1, 2, 4}; !slices.Equal(got, want) {
+		t.Errorf("List(label=idea) = %v, want the literal-label matches %v", got, want)
+	}
+
+	both, err := Wrap(store).Snapshot(context.Background(), SnapshotOptions{States: []State{StateOpen, StateClosed}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := numbers(both.List(ListFilter{Type: "idea"})), []int{1, 3}; !slices.Equal(got, want) {
+		t.Errorf("all-states List(type=idea) = %v, want %v", got, want)
+	}
+
+	var invalid *InvalidInputError
+	if err := (ListFilter{Type: "story"}).Validate(); !errors.As(err, &invalid) || invalid.Field != "type" {
+		t.Errorf("Validate(unknown type) = %v, want an invalid type refusal", err)
+	}
+	if err := (ListFilter{}).Validate(); err != nil {
+		t.Errorf("Validate(empty type) = %v, want nil", err)
+	}
+}
+
 // Detail is the show read: the explicit single-issue retrieval path, with
 // body, comments and advisory text findings attributed to the field they were
 // found in. A non-epic answers from one Get and fetches nothing else.

@@ -40,6 +40,28 @@ func TestComposeBodyOmitsUnsetSections(t *testing.T) {
 	}
 }
 
+// Open questions is the optional discovery section: an idea can carry only a
+// problem and its questions, without an approach or a done-when checklist.
+func TestComposeBodyWritesOpenQuestionsOnlyWhenSupplied(t *testing.T) {
+	composed, err := ComposeBody(Body{Sections: Sections{
+		Problem:       "Ideas get lost in the backlog.",
+		OpenQuestions: []string{"Which command filters ideas?", "How does hewd browse them?"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "### Problem\n\nIdeas get lost in the backlog.\n\n### Open questions\n\n- Which command filters ideas?\n- How does hewd browse them?"
+	if composed.Body != want {
+		t.Errorf("Body = %q, want %q", composed.Body, want)
+	}
+	if strings.Contains(composed.Body, "### Approach") || strings.Contains(composed.Body, "### Done when") {
+		t.Errorf("Body carried a section it was not given:\n%s", composed.Body)
+	}
+	if got, err := ComposeBody(Body{Sections: Sections{Problem: "no questions"}}); err != nil || strings.Contains(got.Body, "Open questions") {
+		t.Errorf("unset open questions = %q, %v; want no heading", got.Body, err)
+	}
+}
+
 func TestComposeBodyUsesSuppliedTextVerbatim(t *testing.T) {
 	const text = "freeform **body**\n\n- a list\n"
 	composed, err := ComposeBody(Body{Text: text})
@@ -77,7 +99,7 @@ func TestComposeBodyRefusesConflictingSources(t *testing.T) {
 	}{
 		"sections and text": {
 			Body{Sections: Sections{Goal: "g"}, Text: "t"},
-			"body and section fields (where/problem/goal/fix/approach/done-when) are mutually exclusive",
+			"body and section fields (where/problem/goal/fix/approach/open-questions/done-when) are mutually exclusive",
 		},
 		"issue and pull-request sections": {
 			Body{Sections: Sections{Goal: "g"}, PRSections: PRSections{What: "w"}},
@@ -129,6 +151,10 @@ func TestValidateSectionsRefusals(t *testing.T) {
 		"fix and approach": {
 			Sections{Fix: "f", Approach: "a"},
 			"fix", "fix and approach are mutually exclusive",
+		},
+		"empty open question": {
+			Sections{OpenQuestions: []string{"ok", "  "}},
+			"open-questions", "open questions cannot be empty",
 		},
 		"empty done-when": {
 			Sections{DoneWhen: []string{"ok", "  "}},

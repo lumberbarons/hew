@@ -350,6 +350,7 @@ func listCmd() *ucli.Command {
 		Usage: "list issues (open by default)",
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{Name: "label", Usage: "only issues with this label (case-insensitive)"},
+			&ucli.StringFlag{Name: "type", Usage: "only issues whose normalized type is `TYPE` (bug, enhancement, task or idea)"},
 			&ucli.IntFlag{Name: "epic", Usage: "only children of epic `N`"},
 			&ucli.StringFlag{Name: "state", Usage: "issue state: `open`, closed, or all"},
 			&ucli.BoolFlag{Name: "closed", Hidden: true, Usage: "deprecated: use --state closed"},
@@ -364,6 +365,7 @@ func listCmd() *ucli.Command {
 			}
 			return app.List(ctx, appcli.ListOpts{
 				Label:  cmd.String("label"),
+				Type:   cmd.String("type"),
 				Epic:   cmd.Int("epic"),
 				State:  cmd.String("state"),
 				Closed: cmd.Bool("closed"),
@@ -426,6 +428,7 @@ func sectionFlags() []ucli.Flag {
 		&ucli.StringFlag{Name: "goal", Usage: "body section: the goal (or use --problem)"},
 		&ucli.StringFlag{Name: "fix", Usage: "body section: the fix (or use --approach)"},
 		&ucli.StringFlag{Name: "approach", Usage: "body section: the approach (or use --fix)"},
+		&proseSliceFlag{Name: "open-questions", Usage: "optional discovery question (repeatable)"},
 		&proseSliceFlag{Name: "done-when", Usage: "acceptance checklist item (repeatable)"},
 	}
 }
@@ -442,12 +445,13 @@ func bodyFlags() []ucli.Flag {
 
 func sectionsFromFlags(cmd *ucli.Command) conventions.Sections {
 	return conventions.Sections{
-		Where:    cmd.String("where"),
-		Problem:  cmd.String("problem"),
-		Goal:     cmd.String("goal"),
-		Fix:      cmd.String("fix"),
-		Approach: cmd.String("approach"),
-		DoneWhen: cmd.StringSlice("done-when"),
+		Where:         cmd.String("where"),
+		Problem:       cmd.String("problem"),
+		Goal:          cmd.String("goal"),
+		Fix:           cmd.String("fix"),
+		Approach:      cmd.String("approach"),
+		OpenQuestions: cmd.StringSlice("open-questions"),
+		DoneWhen:      cmd.StringSlice("done-when"),
 	}
 }
 
@@ -458,7 +462,7 @@ func createCmd() *ucli.Command {
 		Description: conventions.CodeSpanGuidance + "\n\n" + draftPointer,
 		Flags: append([]ucli.Flag{
 			&ucli.StringFlag{Name: "title", Usage: "issue title (required)"},
-			&ucli.StringFlag{Name: "type", Usage: "bug|enhancement|task (required)"},
+			&ucli.StringFlag{Name: "type", Usage: "bug|enhancement|task|idea (required)"},
 			&ucli.StringFlag{Name: "priority", Usage: "P0..P4 (default P2)"},
 			&ucli.StringSliceFlag{Name: "area", Usage: "area label (repeatable; commas separate areas)"},
 			&ucli.IntSliceFlag{Name: "blocked-by", Usage: "blocking issue `N` (repeatable)"},
@@ -612,7 +616,7 @@ func setCmd() *ucli.Command {
 		ArgsUsage: "<n>",
 		Flags: []ucli.Flag{
 			&ucli.StringFlag{Name: "priority", Usage: "P0..P4"},
-			&ucli.StringFlag{Name: "type", Usage: "bug|enhancement|task"},
+			&ucli.StringFlag{Name: "type", Usage: "bug|enhancement|task|idea"},
 			&ucli.StringSliceFlag{Name: "add-area", Usage: "add area label (repeatable; commas separate areas)"},
 			&ucli.StringSliceFlag{Name: "remove-area", Usage: "remove area label (repeatable; commas separate areas)"},
 			&ucli.IntFlag{Name: "parent", Usage: "move under epic `N`"},
@@ -960,7 +964,7 @@ func applyCmd() *ucli.Command {
 
 Fields and their shapes:
   title            string, required
-  type             bug|enhancement|task|epic, required (epic means a parent
+  type             bug|enhancement|task|idea|epic, required (epic means a parent
                    issue — no type label, epic label, "Epic: " title prefix)
   priority         P0..P4, default P2
   areas            list of strings
