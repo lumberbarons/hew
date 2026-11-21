@@ -28,7 +28,7 @@ describe('Ideas', () => {
     );
   });
 
-  it('files a new idea through the New form, with Idea preselected', async () => {
+  it('shows the empty state and links New idea to the form with Idea preselected', async () => {
     mockApi({ 'GET /api/issues?state=open&type=idea': [] });
     renderView(<Ideas state="open" />);
     expect(await screen.findByText('No open ideas. Capture one above.')).toBeInTheDocument();
@@ -38,7 +38,7 @@ describe('Ideas', () => {
     );
   });
 
-  it('switches to closed ideas and marks the current state', async () => {
+  it('renders closed ideas and marks Closed as the current state', async () => {
     mockApi({ 'GET /api/issues?state=closed&type=idea': [idea({ state: 'closed' })] });
     renderView(<Ideas state="closed" />);
     expect(await screen.findByRole('heading', { name: /Closed ideas/ })).toBeInTheDocument();
