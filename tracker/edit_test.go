@@ -846,6 +846,7 @@ func TestEditAppendsIdeaOutcomeWithoutReformattingBody(t *testing.T) {
 		{"nested heading", "- Item\n  ### Outcome\n  Nested", "Actual.", "- Item\n  ### Outcome\n  Nested\n\n### Outcome\n\nActual."},
 		{"comment", "<!--\n### Outcome\n-->\n### Problem\n\nSlow.", "Actual.", "<!--\n### Outcome\n-->\n### Problem\n\nSlow.\n\n### Outcome\n\nActual."},
 		{"CRLF", "### Outcome\r\n\r\nFirst.\r\n", "Second.\nContinued.", "### Outcome\r\n\r\nFirst.\r\n\r\nSecond.\r\nContinued.\r\n"},
+		{"thematic break in note", "### Outcome\n\nFirst.\n\n### Notes\n\nNext.", "Second.\n\n---\n\nThird.", "### Outcome\n\nFirst.\n\nSecond.\n\n---\n\nThird.\n\n### Notes\n\nNext."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -875,6 +876,8 @@ func TestEditRefusesInvalidIdeaOutcomesBeforeChangingOtherFields(t *testing.T) {
 		{name: "unclosed fence in note", typ: "idea", body: "### Outcome\n\nFirst.\n\n### Follow-up\n\nKeep.", note: point("~~~md\nUnclosed")},
 		{name: "unclosed comment in note", typ: "idea", body: "### Outcome\n\nFirst.\n\n### Follow-up\n\nKeep.", note: point("<!--\nUnclosed")},
 		{name: "note creates peer section", typ: "idea", note: point("### Decision\n\nText")},
+		{name: "note creates setext section", typ: "idea", note: point("Decision\n---")},
+		{name: "note creates setext title", typ: "idea", note: point("Decision\n===")},
 		{name: "unfinished fence", typ: "idea", body: "~~~md\nUntitled", note: point("Note.")},
 	}
 	for _, tc := range cases {

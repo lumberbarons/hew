@@ -82,12 +82,6 @@ func classify(err error) (int, problem) {
 		return set(http.StatusConflict, string(tracker.StartBlocked), map[string]any{
 			"issue": blocked.Issue, "openBlockers": orEmpty(blocked.OpenBlockers),
 		})
-	case errors.As(err, &partialEdit):
-		return set(http.StatusInternalServerError, "partial_edit", map[string]any{
-			"issue": partialEdit.Issue, "applied": orEmpty(partialEdit.Applied), "failed": partialEdit.Failed,
-		})
-	case errors.As(err, &invalid):
-		return set(http.StatusBadRequest, "invalid_input", map[string]any{"field": invalid.Field, "reason": invalid.Reason})
 	case errors.As(err, &untriaged):
 		return set(http.StatusBadRequest, "untriaged", map[string]any{"issue": untriaged.Issue})
 	case errors.As(err, &auth):
@@ -131,6 +125,16 @@ func classify(err error) (int, problem) {
 		return set(http.StatusInternalServerError, "partial_create", map[string]any{
 			"issue": partialCreat.Issue.Number, "stage": string(partialCreat.Stage),
 		})
+	case errors.As(err, &partialEdit):
+		// A partial edit keeps its applied-field report only when the failure
+		// has no more specific classification; the cases above already took
+		// the actionable causes (auth, lock, closed), so an invalid field is
+		// the one this branch is really for.
+		return set(http.StatusInternalServerError, "partial_edit", map[string]any{
+			"issue": partialEdit.Issue, "applied": orEmpty(partialEdit.Applied), "failed": partialEdit.Failed,
+		})
+	case errors.As(err, &invalid):
+		return set(http.StatusBadRequest, "invalid_input", map[string]any{"field": invalid.Field, "reason": invalid.Reason})
 	case errors.As(err, &partialRel):
 		return set(http.StatusInternalServerError, "partial_release", map[string]any{"issue": partialRel.Issue})
 	case errors.As(err, &partialClose):

@@ -47,19 +47,35 @@ func AppendOutcome(body, note string) (string, error) {
 }
 
 func validateOutcomeNote(note string) error {
+	const headingRefusal = "use level-four or deeper headings within an outcome note"
 	var blocks outcomeBlocks
+	var prose bool
 	for line := range strings.SplitSeq(note, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if !blocks.consume(line, trimmed) {
+		inside := blocks.consume(line, trimmed)
+		if !inside {
 			if level, _ := outcomeHeading(trimmed); level > 0 && level <= 3 {
-				return errors.New("use level-four or deeper headings within an outcome note")
+				return errors.New(headingRefusal)
+			}
+			// A setext underline turns the preceding paragraph into a
+			// heading; after a blank line the same line is a thematic break.
+			if prose && isSetextUnderline(trimmed) {
+				return errors.New(headingRefusal)
 			}
 		}
+		level, _ := outcomeHeading(trimmed)
+		prose = !inside && trimmed != "" && level == 0 && !isSetextUnderline(trimmed)
 	}
 	if blocks.open() {
 		return errors.New("close the Markdown code fence or comment in the outcome note")
 	}
 	return nil
+}
+
+// isSetextUnderline reports whether the line is a setext heading underline:
+// one or more '=' or '-' characters and nothing else.
+func isSetextUnderline(line string) bool {
+	return line != "" && (strings.Trim(line, "=") == "" || strings.Trim(line, "-") == "")
 }
 
 func outcomeHeading(line string) (level int, title string) {

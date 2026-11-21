@@ -3170,4 +3170,12 @@ func TestSetReportsPartialOutcomeEdit(t *testing.T) {
 	if !strings.Contains(err.Error(), "partially updated (applied title)") {
 		t.Errorf("set error = %v, want the applied field", err)
 	}
+	closedErr := setError(&tracker.PartialEditError{
+		Issue: 1, Applied: []string{"title"}, Failed: "outcome",
+		Err: &tracker.ClosedError{Issue: 1, Reason: "completed"},
+	})
+	if !strings.Contains(closedErr.Error(), "partially updated (applied title)") ||
+		!strings.Contains(closedErr.Error(), "pass --closed to edit anyway") {
+		t.Errorf("set error = %v, want the applied field and the closed override", closedErr)
+	}
 }

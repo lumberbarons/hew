@@ -525,8 +525,15 @@ func setError(err error) error {
 		for i, field := range partial.Applied {
 			applied[i] = editFieldFlag(field)
 		}
-		return fmt.Errorf("#%d partially updated (applied %s); %s failed: %w",
-			partial.Issue, strings.Join(applied, ", "), editFieldFlag(partial.Failed), partial.Err)
+		// A partial edit can wrap the closed refusal, and the caller still
+		// needs the override that the dedicated branch would name.
+		var closed *tracker.ClosedError
+		hint := ""
+		if errors.As(partial.Err, &closed) {
+			hint = " — pass --closed to edit anyway"
+		}
+		return fmt.Errorf("#%d partially updated (applied %s); %s failed: %w%s",
+			partial.Issue, strings.Join(applied, ", "), editFieldFlag(partial.Failed), partial.Err, hint)
 	}
 	var invalid *tracker.InvalidInputError
 	if errors.As(err, &invalid) {
