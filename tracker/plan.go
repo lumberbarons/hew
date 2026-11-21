@@ -63,7 +63,7 @@ type PlanEntry struct {
 	// numbers exist. Empty means the entry is keyed by its Line.
 	ID       string
 	Title    string
-	Type     string // bug|enhancement|task, or PlanTypeEpic
+	Type     string // bug|enhancement|task|idea, or PlanTypeEpic
 	Priority string // P0..P4; empty means P2
 	Areas    []string
 	// Body is the issue body. It is mutually exclusive with Sections.
@@ -162,6 +162,12 @@ func (e PlanEntry) ExistingRefs() []ExistingRef {
 // happens before wiring — but every local reference must resolve. Errors name
 // the source line when the entry carries one, its position otherwise.
 //
+// One area rule is not checked here: a plan built before `idea` was a type may
+// carry that label as an area on an entry a checkpoint already created, and a
+// resume has to accept it. ApplyPlan enforces the idea reservation on every
+// pending entry — which is every entry of a fresh plan — before its first
+// write (see validatePendingPlanFields).
+//
 // A rejection is an *InvalidInputError whose Reason names the entry and the
 // rule, so a caller branches on the type rather than the text.
 func ValidatePlan(entries []PlanEntry) error {
@@ -257,6 +263,12 @@ func ValidateAreaLabel(area string) error {
 // skipped: their source was checked when they were created, and re-gating it
 // would strand a checkpoint whose source digest cannot change to repair it.
 // The returned entries carry the normalized areas the create pass uses.
+//
+// This is where the idea reservation is enforced. ValidatePlan cannot check it
+// — it runs before the checkpoint — so an area an earlier build stored as
+// `idea` survives only on an entry the checkpoint already created; every
+// pending entry goes through NormalizeAreas, and a fresh plan has no created
+// entries at all.
 func validatePendingPlanFields(entries []PlanEntry, checkpoint Checkpoint) ([]PlanEntry, error) {
 	for i, e := range entries {
 		if _, created := checkpoint.Created(e.Key()); created {
@@ -285,6 +297,14 @@ func planFieldError(e PlanEntry, index int, err error) error {
 	return &InvalidInputError{Field: "plan", Reason: entryError(e, index, "%s", reason).Error()}
 }
 
+// isLegacyConventionLabel reports a convention label that predates the idea
+// type. The idea label is reserved like the others, but only ApplyPlan can
+// apply that rule: ValidatePlan has no checkpoint and so cannot tell a pending
+// entry from one an earlier release already created with `idea` as an area.
+func isLegacyConventionLabel(name string) bool {
+	return model.IsConventionLabel(name) && !strings.EqualFold(name, model.IdeaType)
+}
+
 func validatePlanEntry(e PlanEntry, index int) error {
 	if e.Title == "" {
 		return entryError(e, index, "title is required")
@@ -298,7 +318,7 @@ func validatePlanEntry(e PlanEntry, index int) error {
 		}
 	}
 	for _, area := range e.Areas {
-		if model.IsConventionLabel(area) {
+		if isLegacyConventionLabel(area) {
 			return entryError(e, index, "area %q collides with a convention label", area)
 		}
 	}

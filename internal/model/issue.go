@@ -58,9 +58,15 @@ func LabelPriority(label string) (Priority, bool) {
 	return PriorityUnknown, false
 }
 
+// IdeaType is the discovery type. It comes after the implementation types so
+// an existing issue that already used `idea` as a label beside one of them
+// keeps its old reading (and the multiple-type warning), while an issue whose
+// only type label is idea reads as an idea.
+const IdeaType = "idea"
+
 // Types lists the type labels in normalization precedence order: when an
 // issue carries more than one, the first of these wins.
-var Types = []string{"bug", "enhancement", "task"}
+var Types = []string{"bug", "enhancement", "task", IdeaType}
 
 // IsType reports whether a flag value is exactly one of the type names. Label
 // names go through LabelType, which ignores case.
@@ -199,8 +205,8 @@ func (i Issue) Priority() (p Priority, multi bool) {
 }
 
 // Type returns the effective type ("" when untyped). When an issue carries
-// multiple type labels the first of bug|enhancement|task wins and multi is
-// true.
+// multiple type labels the first of bug|enhancement|task|idea wins and multi
+// is true.
 func (i Issue) Type() (typ string, multi bool) {
 	n := 0
 	for _, l := range i.Labels {

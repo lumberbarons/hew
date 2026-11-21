@@ -110,6 +110,42 @@ func TestEditChangesEveryEditableField(t *testing.T) {
 	}
 }
 
+// Idea is a type swap like the others: the old type label goes, exactly one
+// type label remains, and the priority and areas are untouched.
+func TestEditSwapsToIdeaAndBack(t *testing.T) {
+	ctx, store, issue := startFixture(t, "P1", "task", "area")
+	tr := WrapAs(store, BackendLocal, "actor-a")
+	idea, task := model.IdeaType, "task"
+
+	if _, err := tr.Edit(ctx, EditRequest{Issue: issue.Number, Type: &idea}); err != nil {
+		t.Fatal(err)
+	}
+	got := storeIssue(t, ctx, store, issue.Number)
+	if typ, multi := got.Type(); typ != model.IdeaType || multi {
+		t.Errorf("type = %q (multi %v), want one idea", typ, multi)
+	}
+	if p, multi := got.Priority(); p != model.P1 || multi {
+		t.Errorf("priority = %v (multi %v), want one P1", p, multi)
+	}
+	if !got.HasLabel(model.IdeaType) || got.HasLabel("task") {
+		t.Errorf("labels = %v, want idea alone as the type", got.Labels)
+	}
+	if !slices.Equal(got.Areas(), []string{"area"}) {
+		t.Errorf("areas = %v, want the area untouched", got.Areas())
+	}
+
+	if _, err := tr.Edit(ctx, EditRequest{Issue: issue.Number, Type: &task}); err != nil {
+		t.Fatal(err)
+	}
+	got = storeIssue(t, ctx, store, issue.Number)
+	if typ, multi := got.Type(); typ != "task" || multi {
+		t.Errorf("type = %q (multi %v), want one task", typ, multi)
+	}
+	if got.HasLabel(model.IdeaType) {
+		t.Errorf("labels = %v, want the idea type label gone", got.Labels)
+	}
+}
+
 // An omitted request field is not a request to clear it: only the title moves.
 func TestEditLeavesOmittedFieldsAlone(t *testing.T) {
 	ctx, store, issue := startFixture(t, "P3", "bug", "area")

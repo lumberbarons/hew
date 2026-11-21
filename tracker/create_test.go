@@ -119,6 +119,52 @@ func (s *faultStore) AddSubIssue(ctx context.Context, parent, child int, replace
 	return s.Store.AddSubIssue(ctx, parent, child, replace)
 }
 
+// An idea is created through the same path as the implementation types: one
+// priority label, one type label, and a read-back that agrees. The default
+// priority applies when the request names none.
+func TestCreateFilesAnIdea(t *testing.T) {
+	ctx, tr, _ := createTracker(t)
+	result, err := tr.Create(ctx, CreateRequest{Title: "Consider a cache", Type: model.IdeaType})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Issue.Priority == nil || *result.Issue.Priority != "P2" ||
+		result.Issue.Type == nil || *result.Issue.Type != model.IdeaType {
+		t.Fatalf("Issue = %+v, want P2/idea", result.Issue)
+	}
+	if got, want := result.Issue.Labels(), []string{"P2", model.IdeaType}; !slices.Equal(got, want) {
+		t.Errorf("Labels = %v, want exactly %v", got, want)
+	}
+
+	read, err := tr.Get(ctx, result.Issue.Number)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Type == nil || *read.Type != model.IdeaType || read.Priority == nil || *read.Priority != "P2" {
+		t.Errorf("read back = %v/%v, want idea/P2", read.Type, read.Priority)
+	}
+	if got, want := read.Labels(), []string{"P2", model.IdeaType}; !slices.Equal(got, want) {
+		t.Errorf("read labels = %v, want exactly %v", got, want)
+	}
+	if len(read.Areas) != 0 {
+		t.Errorf("Areas = %v, want none: idea is a type, not an area", read.Areas)
+	}
+}
+
+// The new type is a reserved area name on every write, so a create cannot
+// manufacture a second type out of its areas.
+func TestCreateRefusesIdeaAsAnArea(t *testing.T) {
+	ctx, tr, store := createTracker(t)
+	_, err := tr.Create(ctx, CreateRequest{Title: "T", Type: "task", Areas: []string{model.IdeaType}})
+	var invalid *InvalidInputError
+	if !errors.As(err, &invalid) || invalid.Field != "areas" || !strings.Contains(invalid.Reason, "type label") {
+		t.Fatalf("err = %v, want an areas refusal naming the type label", err)
+	}
+	if got := allIssues(t, store); len(got) != 0 {
+		t.Errorf("refused create wrote %d issue(s)", len(got))
+	}
+}
+
 func TestCreateFilesAnIssueWithTheConventions(t *testing.T) {
 	ctx, tr, store := createTracker(t)
 	composed, err := ComposeBody(Body{Sections: Sections{

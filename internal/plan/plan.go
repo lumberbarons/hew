@@ -95,6 +95,11 @@ func (r *rawRef) UnmarshalJSON(data []byte) error {
 // exactly the failure mode a batch tool must not have). Validation is
 // tracker.ValidatePlan's: every local reference must resolve, and dependency
 // or parent cycles between entries are rejected.
+//
+// The idea type's area reservation is the one rule Parse cannot apply: a plan
+// written before `idea` was a type may carry it as an area on an entry a
+// pre-upgrade checkpoint already created. tracker.ApplyPlan enforces the
+// reservation on pending entries, which is every entry of a fresh plan.
 func Parse(r io.Reader) ([]Entry, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)

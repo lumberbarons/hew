@@ -71,9 +71,12 @@ type PlannedEntry struct {
 //
 // ApplyPlan validates the whole plan, verifies every existing-issue reference
 // and every checkpoint mapping before the first write, so a refused plan
-// leaves nothing behind. A create failure aborts with the checkpoint already
-// holding the issues created so far; edge failures warn and are retried by a
-// rerun, and are counted in ApplyResult.Unwired.
+// leaves nothing behind. The write path's title and area rules — including the
+// idea type's area reservation — are applied to pending entries only, so a
+// plan whose checkpoint already created a task with `idea` as an area can
+// still resume while a fresh plan is refused. A create failure aborts with the
+// checkpoint already holding the issues created so far; edge failures warn and
+// are retried by a rerun, and are counted in ApplyResult.Unwired.
 func (t *Tracker) ApplyPlan(ctx context.Context, entries []PlanEntry, opts ApplyOptions) (ApplyResult, error) {
 	entries = normalizePlan(entries)
 	if err := ValidatePlan(entries); err != nil {

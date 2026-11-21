@@ -24,6 +24,7 @@ var labelStyle = map[string]struct{ Color, Description string }{
 	"bug":                 {"d73a4a", "Something isn't working"},
 	"enhancement":         {"a2eeef", "New feature or improvement"},
 	"task":                {"bfdadc", "Chore, refactor, or process work"},
+	model.IdeaType:        {"d4c5f9", "Possible improvement to investigate"},
 	model.InProgressLabel: {"1d76db", "Actively being worked (claimed)"},
 	model.EpicLabel:       {"3e4b9e", "Container for sub-issues; never worked directly"},
 }

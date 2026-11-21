@@ -471,6 +471,11 @@ func TestApplyPlanRefusesInvalidPendingFields(t *testing.T) {
 		"padded type area":     {PlanEntry{Title: "x", Type: "task", Areas: []string{" bug "}}, "type label"},
 		"padded claim area":    {PlanEntry{Title: "x", Type: "task", Areas: []string{" in-progress "}}, "reserved convention label"},
 		"padded epic area":     {PlanEntry{Title: "x", Type: "task", Areas: []string{" epic "}}, "reserved convention label"},
+		// The idea reservation is enforced here rather than in ValidatePlan,
+		// so a fresh plan is refused before its first write like any other.
+		"idea area on a fresh plan": {PlanEntry{Title: "x", Type: "task", Areas: []string{"idea"}}, "type label"},
+		"padded idea area":          {PlanEntry{Title: "x", Type: "task", Areas: []string{" idea "}}, "type label"},
+		"mixed-case idea area":      {PlanEntry{Title: "x", Type: "task", Areas: []string{"IDEA"}}, "type label"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -552,6 +557,111 @@ func TestApplyPlanSkipsFieldValidationForCheckpointedEntries(t *testing.T) {
 	}
 }
 
+// A plan written before `idea` was a type could name it as an area on a task.
+// When the checkpoint maps that entry to the issue the earlier build created,
+// the reservation must not be re-gated: the task keeps its number and labels,
+// only pending entries are created, and pending edges are still wired.
+func TestApplyPlanResumesAPreUpgradeIdeaAreaCheckpoint(t *testing.T) {
+	store := newApplyStore(fixture(55, "Legacy idea-area task", "P2", "task", "idea"))
+	entries := normalizePlan([]PlanEntry{
+		{ID: "legacy", Title: "Legacy idea-area task", Type: "task", Areas: []string{"idea"}},
+		{ID: "pending", Title: "Pending work", Type: "task", BlockedBy: []PlanRef{{ID: "legacy"}}},
+	})
+	digest, err := planDigest(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := store.byTitle("Legacy idea-area task")
+	legacy.Body = PlanBodyWithProvenance(entries[0], digest)
+	checkpoint := NewMemoryCheckpoint()
+	if err := checkpoint.RecordCreated("legacy", legacy.Number); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := WrapAs(store, BackendGitHub, "").ApplyPlan(testCtx, entries, ApplyOptions{Checkpoint: checkpoint})
+	if err != nil {
+		t.Fatalf("pre-upgrade checkpoint did not resume: %v", err)
+	}
+	if result.Created != 1 || len(store.created) != 1 || store.created[0] != "Pending work" {
+		t.Errorf("created %d %v, want only the pending entry", result.Created, store.created)
+	}
+	if result.Mapping["legacy"] != 55 {
+		t.Errorf("mapping = %v, want the legacy issue kept", result.Mapping)
+	}
+	if got := store.byTitle("Legacy idea-area task"); got.Number != 55 || !slices.Equal(got.Labels, []string{"P2", "task", "idea"}) {
+		t.Errorf("legacy issue = #%d %v, want #55 with its stored labels", got.Number, got.Labels)
+	}
+	pending := store.byTitle("Pending work")
+	if pending == nil {
+		t.Fatal("pending entry was not created")
+	}
+	if len(pending.BlockedBy) != 1 || pending.BlockedBy[0].Number != 55 {
+		t.Errorf("pending blockers = %v, want the legacy issue", pending.BlockedBy)
+	}
+}
+
+// A checkpoint that does not carry this plan's provenance for the entry is
+// refused by the existing binding check, idea-area entry or not.
+func TestApplyPlanRejectsAMismatchedIdeaAreaCheckpoint(t *testing.T) {
+	store := newApplyStore(fixture(55, "Unrelated", "P2", "task"))
+	entries := normalizePlan([]PlanEntry{
+		{ID: "legacy", Title: "Legacy idea-area task", Type: "task", Areas: []string{"idea"}},
+	})
+	checkpoint := NewMemoryCheckpoint()
+	if err := checkpoint.RecordCreated("legacy", 55); err != nil {
+		t.Fatal(err)
+	}
+	_, err := WrapAs(store, BackendGitHub, "").ApplyPlan(testCtx, entries, ApplyOptions{Checkpoint: checkpoint})
+	if err == nil || !strings.Contains(err.Error(), "does not carry the hew provenance marker") {
+		t.Fatalf("err = %v, want the existing provenance rejection", err)
+	}
+	if store.createCalls != 0 {
+		t.Errorf("refused plan created %d issues", store.createCalls)
+	}
+}
+
+// preQuestionsPlanJSON is json.Marshal's output for the plan below with the
+// PlanEntry and Sections shapes that predate the optional questions field.
+// ApplyPlan derives a code-built plan's digest by marshaling the normalized
+// entries, so that optional field must be omitted when unset: a checkpoint
+// whose provenance markers were written before the field existed has to keep
+// resuming after the upgrade.
+const preQuestionsPlanJSON = `[{"ID":"one","Title":"One","Type":"task","Priority":"P2","Areas":null,"Body":"","Sections":{"Where":"","Problem":"","Goal":"","Fix":"","Approach":"","DoneWhen":null},"Parent":null,"BlockedBy":null,"DiscoveredFrom":0,"Line":1},{"ID":"two","Title":"Two","Type":"task","Priority":"P3","Areas":null,"Body":"","Sections":{"Where":"","Problem":"","Goal":"","Fix":"","Approach":"","DoneWhen":null},"Parent":null,"BlockedBy":null,"DiscoveredFrom":0,"Line":2}]`
+
+func TestApplyPlanDerivedDigestMatchesAPreQuestionsPlan(t *testing.T) {
+	entries := []PlanEntry{
+		{ID: "one", Title: "One", Type: "task", Priority: "P2"},
+		{ID: "two", Title: "Two", Type: "task", Priority: "P3"},
+	}
+	// Nothing here supplies a digest: the plan's derived one is under test.
+	want := FileDigest([]byte(preQuestionsPlanJSON))
+	derived, err := planDigest(normalizePlan(entries))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if derived != want {
+		t.Fatalf("derived digest = %s, want the pre-questions plan's %s; an optional unset field changed the plan's identity", derived, want)
+	}
+
+	store := newApplyStore(fixture(55, "One", "P2", "task"))
+	one := store.byTitle("One")
+	one.Body = PlanBodyWithProvenance(normalizePlan(entries)[0], want)
+	checkpoint := NewMemoryCheckpoint()
+	if err := checkpoint.RecordCreated("one", one.Number); err != nil {
+		t.Fatal(err)
+	}
+	result, err := WrapAs(store, BackendGitHub, "").ApplyPlan(testCtx, entries, ApplyOptions{Checkpoint: checkpoint})
+	if err != nil {
+		t.Fatalf("pre-upgrade checkpoint did not resume: %v", err)
+	}
+	if result.Created != 1 || len(store.created) != 1 || store.created[0] != "Two" {
+		t.Errorf("created %d %v, want only the pending entry", result.Created, store.created)
+	}
+	if result.Mapping["one"] != one.Number {
+		t.Errorf("mapping = %v, want the pre-upgrade issue kept", result.Mapping)
+	}
+}
+
 func TestValidatePlan(t *testing.T) {
 	valid := PlanEntry{Title: "x", Type: "task"}
 	tests := map[string]struct {
@@ -559,7 +669,9 @@ func TestValidatePlan(t *testing.T) {
 		want    string
 	}{
 		"title":                     {[]PlanEntry{{Type: "task"}}, "title is required"},
-		"type":                      {[]PlanEntry{{Title: "x"}}, "type must be one of bug|enhancement|task|epic"},
+		"type":                      {[]PlanEntry{{Title: "x"}}, "type must be one of bug|enhancement|task|idea|epic"},
+		"idea is a type":            {[]PlanEntry{{Title: "x", Type: model.IdeaType}}, ""},
+		"idea area is deferred":     {[]PlanEntry{{Title: "x", Type: "task", Areas: []string{"idea"}}}, ""},
 		"bad type":                  {[]PlanEntry{{Title: "x", Type: "feature"}}, "type must be"},
 		"priority":                  {[]PlanEntry{{Title: "x", Type: "task", Priority: "P9"}}, "priority must be P0..P4"},
 		"convention area":           {[]PlanEntry{{Title: "x", Type: "task", Areas: []string{"P1"}}}, `area "P1" collides`},
