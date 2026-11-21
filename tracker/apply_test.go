@@ -790,29 +790,32 @@ func TestApplyPlanTypesItsFailuresAtTheBoundary(t *testing.T) {
 // or as a parent, through a local id or an existing issue number — and the
 // refusal names the plan line before anything is created.
 func TestApplyPlanRefusesFreshIdeaHierarchyPlans(t *testing.T) {
-	tests := map[string][]PlanEntry{
-		"idea child": {
+	tests := map[string]struct {
+		entries []PlanEntry
+		want    string // the rule the refusal names
+	}{
+		"idea child": {[]PlanEntry{
 			{ID: "epic", Title: "Voltgo support", Type: PlanTypeEpic},
 			{ID: "idea", Title: "Consider a cache", Type: model.IdeaType, Parent: &PlanRef{ID: "epic"}},
-		},
-		"idea parent": {
+		}, "an idea cannot be an epic child"},
+		"idea parent": {[]PlanEntry{
 			{ID: "idea", Title: "Consider a cache", Type: model.IdeaType},
 			{ID: "work", Title: "Add a cache", Type: "task", Parent: &PlanRef{ID: "idea"}},
-		},
-		"existing idea parent": {
+		}, "an idea cannot be an epic parent"},
+		"existing idea parent": {[]PlanEntry{
 			{ID: "work", Title: "Add a cache", Type: "task", Parent: &PlanRef{Number: 55}},
-		},
+		}, "#55 is an idea; an idea cannot be an epic parent"},
 	}
-	for name, entries := range tests {
+	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			store := newApplyStore(fixture(55, "Consider a cache", "P2", model.IdeaType))
-			_, err := WrapAs(store, BackendGitHub, "").ApplyPlan(testCtx, entries, ApplyOptions{})
+			_, err := WrapAs(store, BackendGitHub, "").ApplyPlan(testCtx, tc.entries, ApplyOptions{})
 			var invalid *InvalidInputError
 			if !errors.As(err, &invalid) || invalid.Field != "plan" {
 				t.Fatalf("err = %v, want an *InvalidInputError naming the plan", err)
 			}
-			if !strings.Contains(invalid.Reason, "idea") || !strings.Contains(invalid.Reason, "line ") {
-				t.Errorf("reason = %q, want the plan line and the idea rule", invalid.Reason)
+			if !strings.Contains(invalid.Reason, tc.want) || !strings.Contains(invalid.Reason, "line ") {
+				t.Errorf("reason = %q, want the plan line and %q", invalid.Reason, tc.want)
 			}
 			if strings.Contains(invalid.Reason, "#0") {
 				t.Errorf("reason = %q, names an uncreated parent as #0", invalid.Reason)
