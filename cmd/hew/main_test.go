@@ -434,6 +434,37 @@ func TestDoneWhenTakesItemsVerbatim(t *testing.T) {
 	}
 }
 
+// TestOpenQuestionsFlowFromTheFlagToTheSections pins the wiring no library
+// test reaches: --open-questions is prose like --done-when, so a comma inside
+// one question is punctuation, and sectionsFromFlags must hand the items to the
+// shared composer on both create and draft.
+func TestOpenQuestionsFlowFromTheFlagToTheSections(t *testing.T) {
+	app := root()
+	var got conventions.Sections
+	capture := func(_ context.Context, cmd *ucli.Command) error {
+		got = sectionsFromFlags(cmd)
+		return nil
+	}
+	findCommand(t, app, "create").Action = capture
+	findCommand(t, app, "draft").Action = capture
+
+	want := []string{"Which command, if any, filters ideas?", "How does hewd browse them?"}
+	for _, args := range [][]string{
+		{"hew", "create", "--type", "idea", "--title", "t", "--problem", "p",
+			"--open-questions", want[0], "--open-questions", want[1]},
+		{"hew", "draft", "--problem", "p",
+			"--open-questions", want[0], "--open-questions", want[1]},
+	} {
+		got = conventions.Sections{}
+		if err := app.Run(context.Background(), args); err != nil {
+			t.Fatalf("run %v: %v", args, err)
+		}
+		if !slices.Equal(got.OpenQuestions, want) {
+			t.Errorf("%s open-questions = %q, want %q", args[1], got.OpenQuestions, want)
+		}
+	}
+}
+
 // TestCreateAndApplyComposeIdenticalBodies pins the other half of #47: the
 // same checklist input must produce the same body whichever path files the
 // issue. done-when is a JSON array in a plan, so apply never split it; create
