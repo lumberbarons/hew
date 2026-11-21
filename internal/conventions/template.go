@@ -7,10 +7,14 @@ import (
 
 // TemplateSections returns the body-template section headers for a type, in
 // order. Bugs describe a problem and a fix; enhancements and tasks a goal
-// and an approach.
+// and an approach; an idea a problem and its open questions, with no approach
+// or checklist to fill in.
 func TemplateSections(issueType string) []string {
-	if issueType == "bug" {
+	switch issueType {
+	case "bug":
 		return []string{"### Where", "### Problem", "### Fix", "### Done when"}
+	case "idea":
+		return []string{"### Problem", "### Open questions"}
 	}
 	return []string{"### Where", "### Goal", "### Approach", "### Done when"}
 }

@@ -70,6 +70,9 @@ func TestTemplateSections(t *testing.T) {
 			t.Errorf("%s sections = %v", typ, s)
 		}
 	}
+	if idea := TemplateSections("idea"); len(idea) != 2 || idea[0] != "### Problem" || idea[1] != "### Open questions" {
+		t.Errorf("idea sections = %v", idea)
+	}
 }
 
 func TestTemplateSkeleton(t *testing.T) {
@@ -83,6 +86,12 @@ func TestTemplateSkeleton(t *testing.T) {
 	wantTask := "### Where\n\n### Goal\n\n### Approach\n\n### Done when\n\n- [ ] \n"
 	if got := TemplateSkeleton("task"); got != wantTask {
 		t.Errorf("task skeleton = %q, want %q", got, wantTask)
+	}
+	// An idea is captured as a problem and questions: no approach to invent and
+	// no checklist seeded.
+	wantIdea := "### Problem\n\n### Open questions\n"
+	if got := TemplateSkeleton("idea"); got != wantIdea {
+		t.Errorf("idea skeleton = %q, want %q", got, wantIdea)
 	}
 }
 
