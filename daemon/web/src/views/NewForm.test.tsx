@@ -14,6 +14,7 @@ const base: FormState = {
   where: '',
   problem: 'p',
   fix: 'f',
+  questions: '',
   done: '',
   blockedBy: '',
   parent: '',
@@ -44,6 +45,26 @@ describe('buildPayload', () => {
   it('uses Problem and Fix for a bug', () => {
     const { body } = buildPayload({ ...base, type: 'bug' });
     expect(body.body).toEqual({ where: '', doneWhen: [], problem: 'p', fix: 'f' });
+  });
+
+  it('composes an idea from a problem and its open questions', () => {
+    const { body } = buildPayload({
+      ...base,
+      type: 'idea',
+      where: 'ignored',
+      fix: 'not an idea field',
+      done: 'ignored too',
+      questions: ' How long does it stay hot? \n\n second question ',
+    });
+    expect(body.body).toEqual({
+      problem: 'p',
+      openQuestions: ['How long does it stay hot?', 'second question'],
+    });
+  });
+
+  it('omits Open questions for an idea that has none', () => {
+    const { body } = buildPayload({ ...base, type: 'idea' });
+    expect(body.body).toEqual({ problem: 'p' });
   });
 
   it('builds an epic with its children and no issue-only fields', () => {
@@ -122,6 +143,45 @@ describe('NewForm', () => {
     expect(screen.getByLabelText('Problem')).toBeInTheDocument();
     expect(screen.getByLabelText('Fix')).toBeInTheDocument();
     expect(screen.queryByLabelText('Goal')).toBeNull();
+  });
+
+  it('preselects Idea from the link and shows only the idea fields', () => {
+    mockApi({});
+    renderView(<NewForm type="idea" />);
+    expect(screen.getByLabelText('Type')).toHaveValue('idea');
+    expect(screen.getByLabelText('Problem or opportunity')).toBeVisible();
+    expect(screen.getByLabelText('Open questions')).toBeVisible();
+    expect(screen.getByLabelText('Where')).not.toBeVisible();
+    expect(screen.getByLabelText('Approach')).not.toBeVisible();
+    expect(screen.getByLabelText('Done when')).not.toBeVisible();
+    expect(screen.getByLabelText('Parent epic')).not.toBeVisible();
+  });
+
+  it('creates an idea with its statement and questions', async () => {
+    const { calls } = mockApi({
+      'POST /api/issues?dryRun=1': fx.check,
+      'POST /api/issues': { ...fx.create, issue: { ...fx.create.issue, number: 9 } },
+    });
+    const { user } = renderView(<NewForm type="idea" />);
+    await user.type(screen.getByLabelText('Title'), 'Consider a cache');
+    await user.type(screen.getByLabelText('Problem or opportunity'), 'Repeated reads are slow');
+    await user.type(screen.getByLabelText('Open questions'), 'How often does it change?');
+    expect(await screen.findByText('Ready to create.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(window.location.hash).toBe('#/issue/9'));
+    expect(calls.find((c) => c.path === '/api/issues')?.body).toMatchObject({
+      type: 'idea',
+      body: {
+        problem: 'Repeated reads are slow',
+        openQuestions: ['How often does it change?'],
+      },
+    });
+  });
+
+  it('falls back to the default type when the link names an unknown one', () => {
+    mockApi({});
+    renderView(<NewForm type="spike" />);
+    expect(screen.getByLabelText('Type')).toHaveValue('task');
   });
 
   it('creates the issue and opens it', async () => {

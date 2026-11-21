@@ -362,6 +362,64 @@ describe('IssueView', () => {
     });
   });
 
+  describe('ideas', () => {
+    const idea = (over: Partial<Detail['issue']> = {}): Detail =>
+      withIssue(fx.claimed, {
+        type: 'idea',
+        priority: 'P2',
+        assignees: [],
+        inProgress: false,
+        ...over,
+      });
+
+    it('offers an investigation action that declares discovery intent', async () => {
+      const d = idea();
+      const { calls } = mockApi({
+        ...reads(d),
+        'POST /api/issues/2/start': { issue: {}, claimant: 'daemon' },
+      });
+      const { user } = renderView(<IssueView n={2} />);
+      const start = await screen.findByRole('button', { name: 'Start investigation' });
+      expect(screen.getByText(/Claims this idea for research/)).toBeInTheDocument();
+      // Reading the detail is a read: it never claims the idea.
+      expect(calls.filter((c) => c.method !== 'GET')).toHaveLength(0);
+
+      await user.click(start);
+      expect(await screen.findByText('Investigating #2')).toBeInTheDocument();
+      expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
+        priority: '',
+        forDiscovery: true,
+      });
+    });
+
+    it('shows the original statement, the decision and its references', async () => {
+      const d = idea({
+        body: '### Problem\n\nRepeated reads are slow\n\n### Decision\n\nPursue after #12',
+      });
+      mockApi(reads(d));
+      renderView(<IssueView n={2} />);
+      expect(await screen.findByText('Repeated reads are slow')).toBeInTheDocument();
+      expect(screen.getByText('Pursue after')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: '#12' })).toHaveAttribute('href', '#/issue/12');
+      expect(screen.queryByText(/in progress/)).toBeNull();
+    });
+
+    it('offers no investigation on a closed idea', async () => {
+      mockApi(reads(idea({ state: 'closed' })));
+      renderView(<IssueView n={2} />);
+      expect(await screen.findByText('closed')).toHaveClass('state-closed');
+      expect(screen.queryByRole('button', { name: 'Start investigation' })).toBeNull();
+    });
+
+    it('offers idea among the types it can be changed to', async () => {
+      mockApi(reads(idea()));
+      renderView(<IssueView n={2} />);
+      await userEventOpen();
+      expect(screen.getByLabelText('Type')).toHaveValue('idea');
+      expect(screen.getByRole('option', { name: 'idea' })).toBeInTheDocument();
+    });
+  });
+
   it('shows comments as markdown', async () => {
     const d = withIssue(fx.claimed, {
       comments: [{ author: 'alice', createdAt: '2026-01-01T00:00:00Z', body: 'Looks **good**' }],

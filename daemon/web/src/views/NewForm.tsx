@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { api, explain } from '../api';
 import { useAct } from '../toast';
-import type { CheckResult, CreateResult, Finding } from '../types';
+import {
+  IDEA_TYPE,
+  ISSUE_TYPES,
+  type CheckResult,
+  type CreateResult,
+  type Finding,
+} from '../types';
 import { Field, PageHead } from '../ui';
 
 export interface FormState {
@@ -13,6 +19,7 @@ export interface FormState {
   where: string;
   problem: string;
   fix: string;
+  questions: string;
   done: string;
   blockedBy: string;
   parent: string;
@@ -28,6 +35,7 @@ const EMPTY: FormState = {
   where: '',
   problem: '',
   fix: '',
+  questions: '',
   done: '',
   blockedBy: '',
   parent: '',
@@ -40,21 +48,30 @@ const ints = (s: string): number[] =>
     .map((x) => Number.parseInt(x.replace('#', ''), 10))
     .filter(Number.isInteger);
 
+const lines = (s: string): string[] =>
+  s
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean);
+
 /**
  * The request a form state becomes. A bug's sections are Problem and Fix; a
  * task, enhancement or epic uses Goal and Approach, so one pair of boxes
- * serves both and only the wire names change.
+ * serves both and only the wire names change. An idea is Problem plus its open
+ * questions, with no approach or checklist: it is captured to decide whether
+ * to investigate, not to describe the work.
  */
 export function buildPayload(f: FormState): { path: string; body: Record<string, unknown> } {
+  const idea = f.kind === 'issue' && f.type === IDEA_TYPE;
   const bug = f.kind === 'issue' && f.type === 'bug';
-  const sections: Record<string, unknown> = {
-    where: f.where,
-    doneWhen: f.done
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean),
-    ...(bug ? { problem: f.problem, fix: f.fix } : { goal: f.problem, approach: f.fix }),
-  };
+  const questions = lines(f.questions);
+  const sections: Record<string, unknown> = idea
+    ? { problem: f.problem, ...(questions.length > 0 ? { openQuestions: questions } : {}) }
+    : {
+        where: f.where,
+        doneWhen: lines(f.done),
+        ...(bug ? { problem: f.problem, fix: f.fix } : { goal: f.problem, approach: f.fix }),
+      };
   if (f.kind === 'epic') {
     return {
       path: '/api/epics',
@@ -80,9 +97,12 @@ export function buildPayload(f: FormState): { path: string; body: Record<string,
 
 type Status = { ok: true; findings: Finding[] } | { ok: false; message: string } | null;
 
-export function NewForm() {
+export function NewForm({ type }: { type?: string }) {
   const act = useAct();
-  const [form, setForm] = useState(EMPTY);
+  const [form, setForm] = useState<FormState>(() => ({
+    ...EMPTY,
+    type: type && (ISSUE_TYPES as readonly string[]).includes(type) ? type : EMPTY.type,
+  }));
   const [touched, setTouched] = useState(false);
   const [status, setStatus] = useState<Status>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -93,6 +113,7 @@ export function NewForm() {
 
   const req = useMemo(() => buildPayload(form), [form]);
   const epic = form.kind === 'epic';
+  const idea = !epic && form.type === IDEA_TYPE;
   const bug = !epic && form.type === 'bug';
 
   // Validate through the write path's own dry run, so the form never offers
@@ -138,9 +159,9 @@ export function NewForm() {
             </Field>
             <Field label="Type" hidden={epic}>
               <select value={form.type} onChange={(e) => set('type', e.target.value)}>
-                <option>task</option>
-                <option>bug</option>
-                <option>enhancement</option>
+                {ISSUE_TYPES.map((t) => (
+                  <option key={t}>{t}</option>
+                ))}
               </select>
             </Field>
             <Field label="Priority" hidden={epic}>
@@ -178,20 +199,31 @@ export function NewForm() {
             Description
             <small>Section headings are added for you. Leave out any that do not apply.</small>
           </h3>
-          <Field label="Where" hint="Files, packages or areas involved.">
+          <Field label="Where" hidden={idea} hint="Files, packages or areas involved.">
             <textarea rows={2} value={form.where} onChange={(e) => set('where', e.target.value)} />
           </Field>
-          <Field label={bug ? 'Problem' : 'Goal'}>
+          <Field label={bug ? 'Problem' : idea ? 'Problem or opportunity' : 'Goal'}>
             <textarea
               rows={4}
               value={form.problem}
               onChange={(e) => set('problem', e.target.value)}
             />
           </Field>
-          <Field label={bug ? 'Fix' : 'Approach'}>
+          <Field label={bug ? 'Fix' : 'Approach'} hidden={idea}>
             <textarea rows={4} value={form.fix} onChange={(e) => set('fix', e.target.value)} />
           </Field>
-          <Field label="Done when" hint="One checklist item per line.">
+          <Field
+            label="Open questions"
+            hidden={!idea}
+            hint="One per line. Optional: add them when you know what needs investigating."
+          >
+            <textarea
+              rows={3}
+              value={form.questions}
+              onChange={(e) => set('questions', e.target.value)}
+            />
+          </Field>
+          <Field label="Done when" hidden={idea} hint="One checklist item per line.">
             <textarea rows={4} value={form.done} onChange={(e) => set('done', e.target.value)} />
           </Field>
         </div>
@@ -208,7 +240,7 @@ export function NewForm() {
                   onChange={(e) => set('blockedBy', e.target.value)}
                 />
               </Field>
-              <Field label="Parent epic">
+              <Field label="Parent epic" hidden={idea}>
                 <input
                   type="text"
                   placeholder="#12"

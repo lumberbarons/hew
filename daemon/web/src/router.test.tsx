@@ -6,11 +6,20 @@ describe('parseHash', () => {
   it('maps each view', () => {
     expect(parseHash('')).toEqual({ name: 'board' });
     expect(parseHash('#/')).toEqual({ name: 'board' });
+    expect(parseHash('#/ideas')).toEqual({ name: 'ideas', state: 'open' });
+    expect(parseHash('#/ideas?state=open')).toEqual({ name: 'ideas', state: 'open' });
+    expect(parseHash('#/ideas?state=closed')).toEqual({ name: 'ideas', state: 'closed' });
+    expect(parseHash('#/ideas?state=whatever')).toEqual({ name: 'ideas', state: 'open' });
     expect(parseHash('#/issue/12')).toEqual({ name: 'issue', n: 12 });
     expect(parseHash('#/new')).toEqual({ name: 'new' });
     expect(parseHash('#/triage')).toEqual({ name: 'triage' });
     expect(parseHash('#/apply')).toEqual({ name: 'apply' });
     expect(parseHash('#/primer')).toEqual({ name: 'primer' });
+  });
+
+  it('carries the preselected type to the new form', () => {
+    expect(parseHash('#/new?type=idea')).toEqual({ name: 'new', type: 'idea' });
+    expect(parseHash('#/new?type=')).toEqual({ name: 'new' });
   });
 
   it('reads the search terms from the query', () => {
@@ -30,7 +39,13 @@ describe('navHref', () => {
     expect(navHref({ name: 'issue', n: 3 })).toBe('#/');
     expect(navHref({ name: 'board' })).toBe('#/');
     expect(navHref({ name: 'new' })).toBe('#/new');
+    expect(navHref({ name: 'new', type: 'idea' })).toBe('#/new');
     expect(navHref({ name: 'search', q: 'x' })).toBe('#/search');
+  });
+
+  it('files both idea states under the ideas page', () => {
+    expect(navHref({ name: 'ideas', state: 'open' })).toBe('#/ideas');
+    expect(navHref({ name: 'ideas', state: 'closed' })).toBe('#/ideas');
   });
 });
 

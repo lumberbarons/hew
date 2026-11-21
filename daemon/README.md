@@ -75,6 +75,12 @@ body compose and check, apply (JSON plan), and PR create and amend (GitHub backe
 Library errors map to HTTP statuses with a stable `error` kind: the CLI's exit codes
 become `claimed_by_other`, `claimed_by_you` and `blocked` (all 409).
 
+The UI's Ideas page lists open and closed ideas through the same type filter as
+`hew list --type idea`, links to the New form with Idea preselected, and reads an
+idea in the ordinary detail view, where its body carries the outcome and its
+references. Starting an investigation is deliberate: the detail's button sends
+`forDiscovery` with the start request, which an idea refuses without.
+
 On a local tracker the `X-Hew-Actor` header (the UI's "acting as" box) picks the
 claimant per request through `Tracker.As`. On GitHub every request acts as the
 authenticated login.

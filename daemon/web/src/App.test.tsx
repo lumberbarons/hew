@@ -77,6 +77,35 @@ describe('App', () => {
     expect(await screen.findByRole('link', { name: 'raw unvetted report' })).toBeInTheDocument();
   });
 
+  it('routes ideas, their closed view, and the preselected New form', async () => {
+    mockApi({
+      ...routes,
+      'GET /api/issues?state=open&type=idea': [
+        {
+          ...fx.claimed.issue,
+          number: 9,
+          title: 'Consider a cache',
+          type: 'idea',
+          assignees: [],
+          inProgress: false,
+        },
+      ],
+      'GET /api/issues?state=closed&type=idea': [],
+    });
+    mount();
+    await screen.findByRole('heading', { name: 'Board' });
+
+    await goto('#/ideas');
+    expect(await screen.findByRole('link', { name: 'Consider a cache' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Ideas' })).toHaveAttribute('aria-current', 'page');
+
+    await goto('#/ideas?state=closed');
+    expect(await screen.findByText('No ideas are closed.')).toBeInTheDocument();
+
+    await goto('#/new?type=idea');
+    expect(await screen.findByLabelText('Type')).toHaveValue('idea');
+  });
+
   it('opens a search with the terms in the URL', async () => {
     mockApi({ ...routes, 'GET /api/search?q=importer': fx.search });
     window.location.hash = '#/search?q=importer';
