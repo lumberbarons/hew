@@ -80,7 +80,7 @@ type Sections struct {
 	Goal          string
 	Fix           string
 	Approach      string
-	OpenQuestions []string `json:"OpenQuestions,omitempty"`
+	OpenQuestions []string
 	DoneWhen      []string
 }
 
