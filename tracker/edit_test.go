@@ -130,6 +130,9 @@ func TestEditSwapsToIdeaAndBack(t *testing.T) {
 	if !got.HasLabel(model.IdeaType) || got.HasLabel("task") {
 		t.Errorf("labels = %v, want idea alone as the type", got.Labels)
 	}
+	if !slices.Equal(got.Areas(), []string{"area"}) {
+		t.Errorf("areas = %v, want the area untouched", got.Areas())
+	}
 
 	if _, err := tr.Edit(ctx, EditRequest{Issue: issue.Number, Type: &task}); err != nil {
 		t.Fatal(err)
