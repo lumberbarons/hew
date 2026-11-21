@@ -216,6 +216,25 @@ func TestReadyExcludesUntriaged(t *testing.T) {
 	}
 }
 
+// An idea is captured to decide whether to investigate it, not implementation
+// work: even unclaimed, unblocked and triaged it is never ready. Type
+// precedence still decides — a legacy issue carrying both task and idea reads
+// as a task and stays ready.
+func TestReadyExcludesIdeas(t *testing.T) {
+	issues := []Issue{
+		open(1, "P0", "idea"),         // the highest priority, still not ready
+		open(2, "P2", "task"),         // the equivalent task is ready
+		open(3, "P1", "idea", "task"), // reads as the task it has always been
+	}
+	var nums []int
+	for _, i := range Ready(issues) {
+		nums = append(nums, i.Number)
+	}
+	if !reflect.DeepEqual(nums, []int{3, 2}) {
+		t.Errorf("Ready() = %v, want [3 2]", nums)
+	}
+}
+
 func TestReadyExcludesUnlabeledEpic(t *testing.T) {
 	// Untriaged() exempts epics, so the untriaged gate is not what keeps an
 	// unlabeled epic out of ready — the epic exclusion still has to.
@@ -319,6 +338,8 @@ func TestEpicNext(t *testing.T) {
 		{"closed blockers do not block", []Issue{closedBlocker}, 21, true},
 		{"claimed is still next", []Issue{ok(1, "P4", "bug", "in-progress")}, 1, true},
 		{"nested epic skipped", []Issue{nested, ok(30, "P3", "task")}, 30, true},
+		{"idea skipped", []Issue{ok(1, "P0", "idea"), ok(30, "P3", "task")}, 30, true},
+		{"only an idea", []Issue{ok(1, "P0", "idea")}, 0, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

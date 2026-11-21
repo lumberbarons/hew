@@ -198,6 +198,48 @@ func TestDetailEpicCarriesChildrenNextAndWarnings(t *testing.T) {
 	}
 }
 
+// An idea child attached outside hew is an existing relationship the read path
+// preserves: epic detail shows it beside the task, and the next-child selector
+// leaves it alone because an idea is investigated, never implemented.
+func TestDetailEpicShowsIdeaChildButSelectsTheTask(t *testing.T) {
+	epic := fixture(10, "Epic", "P2", "task", "epic")
+	epic.SubIssues = []model.Ref{{Number: 11, State: "OPEN"}, {Number: 12, State: "OPEN"}}
+	epic.SubIssuesTotal = 2
+	idea := fixture(11, "Consider a cache", "P0", "idea")
+	idea.Parent = &model.Ref{Number: 10, State: "OPEN"}
+	task := fixture(12, "Wire the cache", "P3", "task")
+	task.Parent = &model.Ref{Number: 10, State: "OPEN"}
+
+	detail, err := WrapAs(&fakeClient{issues: []model.Issue{epic, idea, task}}, BackendGitHub, "").Detail(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := issueNumberList(detail.Children), []int{11, 12}; !slices.Equal(got, want) {
+		t.Errorf("Children = %v, want %v (the idea child stays visible)", got, want)
+	}
+	if detail.Next == nil || *detail.Next != 12 {
+		t.Errorf("Next = %v, want #12 (the task, not the higher-priority idea)", detail.Next)
+	}
+
+	// With an idea as the only eligible child there is no next child.
+	onlyIdeaEpic := fixture(20, "Epic with an idea", "P2", "task", "epic")
+	onlyIdeaEpic.SubIssues = []model.Ref{{Number: 21, State: "OPEN"}}
+	onlyIdeaEpic.SubIssuesTotal = 1
+	onlyIdea := fixture(21, "Consider only", "P1", "idea")
+	onlyIdea.Parent = &model.Ref{Number: 20, State: "OPEN"}
+
+	detail, err = WrapAs(&fakeClient{issues: []model.Issue{onlyIdeaEpic, onlyIdea}}, BackendGitHub, "").Detail(context.Background(), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := issueNumberList(detail.Children), []int{21}; !slices.Equal(got, want) {
+		t.Errorf("Children = %v, want %v", got, want)
+	}
+	if detail.Next != nil {
+		t.Errorf("Next = %d, want nil for an idea-only sequence", *detail.Next)
+	}
+}
+
 func TestDetailMissingIssueIsAPublicNotFound(t *testing.T) {
 	_, err := WrapAs(&fakeClient{}, BackendGitHub, "").Detail(context.Background(), 99)
 	var notFound *NotFoundError
@@ -370,8 +412,11 @@ func TestPrimerCarriesUncappedStateWarningsAndConventions(t *testing.T) {
 	capped := fixture(8, "Capped", "P2", "bug")
 	capped.BlockedBy = []model.Ref{{Number: 1, State: "OPEN"}}
 	capped.BlockedByTotal = 9
+	// Higher priority than any ready work, and still not ready: an idea is
+	// investigation work the primer must not offer.
+	idea := fixture(9, "Consider a cache", "P0", "idea")
 
-	store := &fakeClient{issues: []model.Issue{ready, untriaged, claimed, epic, child, multiPriority, multiType, cycleA, cycleB, capped}}
+	store := &fakeClient{issues: []model.Issue{ready, untriaged, claimed, epic, child, multiPriority, multiType, cycleA, cycleB, capped, idea}}
 
 	for _, tc := range []struct {
 		name       string
@@ -389,8 +434,8 @@ func TestPrimerCarriesUncappedStateWarningsAndConventions(t *testing.T) {
 			if got, want := issueNumberList(result.Ready), []int{4, 1, 5, 11}; !slices.Equal(got, want) {
 				t.Errorf("Ready = %v, want %v", got, want)
 			}
-			if result.ReadyTotal != 4 || result.OpenTotal != 10 {
-				t.Errorf("ready/open totals = %d/%d, want 4/10", result.ReadyTotal, result.OpenTotal)
+			if result.ReadyTotal != 4 || result.OpenTotal != 11 {
+				t.Errorf("ready/open totals = %d/%d, want 4/11 (the idea is open, not ready)", result.ReadyTotal, result.OpenTotal)
 			}
 			if got, want := issueNumberList(result.InProgress), []int{3, 10}; !slices.Equal(got, want) {
 				t.Errorf("InProgress = %v, want %v", got, want)

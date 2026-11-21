@@ -22,7 +22,8 @@ hew create ... --discovered-from <n>.`
 	// primerConventions runs from the conventions heading through the command
 	// list up to the pr entry, which only exists on the GitHub backend.
 	primerConventions = `Conventions (enforced by the tool's write path):
-- One priority label P0(critical)..P4(backlog), default P2; one type label bug|enhancement|task.
+- One priority label P0(critical)..P4(backlog), default P2; one type label bug|enhancement|task|idea.
+- Ideas (type idea) are investigation work, not implementation: claim one with hew start <n> --for-discovery only when the user asked, use it for research, an ADR or a spec, and hand approved implementation to separate work issues (--discovered-from <n>). ready never offers one.
 - Area labels sparingly — only once several issues would share one. No title prefixes; labels carry the metadata.
 - Dependencies are native (--blocked-by), never body text. Epics are sub-issue trees.
 - Bodies: ### Where / ### Problem or ### Goal / ### Fix or ### Approach / ### Done when (checklist). Omit empty sections.

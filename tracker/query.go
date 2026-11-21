@@ -81,8 +81,11 @@ type IssueDetail struct {
 // Detail is the show read: one live issue in any state, with body and recent
 // comments. An epic's view also fetches both states to resolve its children
 // from parent backlinks — complete even when the epic's sub-issue connection
-// was capped — and names the next workable child. An issue number named by the
-// caller is the deliberate retrieval path, so untriaged text is returned here.
+// was capped — and names the next workable child. Children keep every existing
+// relationship, including an idea attached outside hew; the next-child selector
+// skips ideas, because the epic's sequence is implementation work. An issue
+// number named by the caller is the deliberate retrieval path, so untriaged
+// text is returned here.
 func (t *Tracker) Detail(ctx context.Context, number int) (IssueDetail, error) {
 	issue, err := t.store.GetIssue(ctx, number)
 	if err != nil {
