@@ -62,6 +62,11 @@ describe('buildPayload', () => {
     });
   });
 
+  it('never sends a parent for an idea, even one typed before switching type', () => {
+    const { body } = buildPayload({ ...base, type: 'idea', parent: '#12' });
+    expect(body.parent).toBe(0);
+  });
+
   it('omits Open questions for an idea that has none', () => {
     const { body } = buildPayload({ ...base, type: 'idea' });
     expect(body.body).toEqual({ problem: 'p' });

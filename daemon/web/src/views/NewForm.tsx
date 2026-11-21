@@ -88,7 +88,9 @@ export function buildPayload(f: FormState): { path: string; body: Record<string,
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean),
-      parent: ints(f.parent)[0] ?? 0,
+      // The Parent field is hidden for an idea, which stays independent of any
+      // epic, so a value typed before switching the type must not ride along.
+      parent: idea ? 0 : (ints(f.parent)[0] ?? 0),
       blockedBy: ints(f.blockedBy),
       body: sections,
     },
