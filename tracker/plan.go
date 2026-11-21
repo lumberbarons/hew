@@ -46,7 +46,11 @@ type Sections struct {
 	Goal     string
 	Fix      string
 	Approach string
-	DoneWhen []string
+	// OpenQuestions is the optional discovery section. The json tag omits an
+	// unset list so adding the field does not change the derived digest of a
+	// plan whose provenance markers were written before it existed.
+	OpenQuestions []string `json:"OpenQuestions,omitempty"`
+	DoneWhen      []string
 }
 
 // IsZero reports whether no section was provided.

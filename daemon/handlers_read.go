@@ -39,8 +39,9 @@ func (s *Server) primer(q *request[none]) (reply, error) {
 }
 
 // board is the landing view: one snapshot sliced into the sections `hew list`
-// orders. Untriaged issues appear only as a count, never as text; triage is
-// the one read that returns them.
+// orders. Its Ready section follows the shared readiness policy, so ideas are
+// not offered as implementation work. Untriaged issues appear only as a count,
+// never as text; triage is the one read that returns them.
 func (s *Server) board(q *request[none]) (reply, error) {
 	snap, err := q.tr.Snapshot(q.ctx, tracker.SnapshotOptions{})
 	if err != nil {
@@ -61,6 +62,8 @@ func limited(issues []tracker.Issue, query url.Values) []tracker.Issue {
 	return issues
 }
 
+// ready is the implementation queue: a snapshot's Ready omits untriaged
+// issues, epics and ideas, so the UI never offers one as work.
 func (s *Server) ready(q *request[none]) (reply, error) {
 	snap, err := q.tr.Snapshot(q.ctx, tracker.SnapshotOptions{})
 	if err != nil {
@@ -91,7 +94,10 @@ func (s *Server) list(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	filter := tracker.ListFilter{Label: q.query.Get("label")}
+	filter := tracker.ListFilter{Label: q.query.Get("label"), Type: q.query.Get("type")}
+	if err := filter.Validate(); err != nil {
+		return reply{}, err
+	}
 	if e := q.query.Get("epic"); e != "" {
 		if filter.Epic, err = strconv.Atoi(e); err != nil || filter.Epic <= 0 {
 			return reply{}, &tracker.InvalidInputError{Field: "epic", Reason: "must be a positive issue number"}

@@ -70,6 +70,9 @@ func TestTemplateSections(t *testing.T) {
 			t.Errorf("%s sections = %v", typ, s)
 		}
 	}
+	if idea := TemplateSections("idea"); len(idea) != 2 || idea[0] != "### Problem" || idea[1] != "### Open questions" {
+		t.Errorf("idea sections = %v", idea)
+	}
 }
 
 func TestTemplateSkeleton(t *testing.T) {
@@ -83,6 +86,12 @@ func TestTemplateSkeleton(t *testing.T) {
 	wantTask := "### Where\n\n### Goal\n\n### Approach\n\n### Done when\n\n- [ ] \n"
 	if got := TemplateSkeleton("task"); got != wantTask {
 		t.Errorf("task skeleton = %q, want %q", got, wantTask)
+	}
+	// An idea is captured as a problem and questions: no approach to invent and
+	// no checklist seeded.
+	wantIdea := "### Problem\n\n### Open questions\n"
+	if got := TemplateSkeleton("idea"); got != wantIdea {
+		t.Errorf("idea skeleton = %q, want %q", got, wantIdea)
 	}
 }
 
@@ -147,13 +156,30 @@ func TestSectionsComposeOmitsEmpty(t *testing.T) {
 	}
 }
 
+// Open questions is the optional discovery section: a bullet list after the
+// approach and before the acceptance checklist, omitted entirely when unset.
+func TestSectionsComposeOpenQuestions(t *testing.T) {
+	got := Sections{
+		Problem:       "Ideas get lost in the backlog.",
+		OpenQuestions: []string{"Which command filters ideas?", "How does hewd browse them?"},
+	}.Compose()
+	want := "### Problem\n\nIdeas get lost in the backlog.\n\n### Open questions\n\n- Which command filters ideas?\n- How does hewd browse them?"
+	if got != want {
+		t.Errorf("composed = %q, want %q", got, want)
+	}
+
+	if got := (Sections{Problem: "only the problem"}).Compose(); strings.Contains(got, "Open questions") {
+		t.Errorf("empty open questions emitted a heading:\n%s", got)
+	}
+}
+
 func TestSectionsIsZero(t *testing.T) {
 	if !(Sections{}).IsZero() {
 		t.Error("zero Sections not IsZero")
 	}
 	for _, s := range []Sections{
 		{Where: "w"}, {Problem: "p"}, {Goal: "g"}, {Fix: "f"},
-		{Approach: "a"}, {DoneWhen: []string{"d"}},
+		{Approach: "a"}, {OpenQuestions: []string{"q"}}, {DoneWhen: []string{"d"}},
 	} {
 		if s.IsZero() {
 			t.Errorf("%+v reported IsZero", s)
@@ -170,7 +196,7 @@ func TestDiscoveredFrom(t *testing.T) {
 func TestPrimerStaticMentionsCoreCommands(t *testing.T) {
 	for _, cmd := range []string{"hew ready", "start", "triage", "hew search", "--discovered-from", "Fixes #n", "P0", "P4", "exit 3", "exit 5",
 		"### Where", "### Done when", "Area labels sparingly", "No title prefixes",
-		"--goal|--problem", "--approach|--fix", "--done-when", "--body-file F for long bodies"} {
+		"--goal|--problem", "--approach|--fix", "--open-questions", "--done-when", "--body-file F for long bodies"} {
 		if !strings.Contains(PrimerStatic, cmd) {
 			t.Errorf("primer missing %q", cmd)
 		}
@@ -306,6 +332,33 @@ func TestPrimerLocalCompletesWorkByClosing(t *testing.T) {
 		if strings.Contains(PrimerLocal, banned) {
 			t.Errorf("local primer mentions %q:\n%s", banned, PrimerLocal)
 		}
+	}
+}
+
+// Every agent sees one of the two primers, so both must teach what an idea is,
+// that claiming one is a deliberate investigation request rather than routine
+// work, and that approved implementation is filed separately.
+func TestPrimersTeachIdeas(t *testing.T) {
+	for name, primer := range map[string]string{"github": PrimerStatic, "local": PrimerLocal} {
+		t.Run(name, func(t *testing.T) {
+			var guidance string
+			for _, line := range strings.Split(primer, "\n") {
+				if strings.Contains(line, "(type idea)") {
+					guidance = line
+				}
+			}
+			if guidance == "" {
+				t.Fatalf("%s primer has no idea guidance:\n%s", name, primer)
+			}
+			for _, want := range []string{
+				"investigation work", "--for-discovery", "only when the user asked",
+				"research", "ADR", "spec", "separate work issues",
+			} {
+				if !strings.Contains(guidance, want) {
+					t.Errorf("%s idea guidance missing %q:\n%s", name, want, guidance)
+				}
+			}
+		})
 	}
 }
 

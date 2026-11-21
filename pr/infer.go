@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lumberbarons/hew/internal/model"
 	"github.com/lumberbarons/hew/tracker"
 )
 
@@ -40,6 +41,8 @@ func linkedIssues(issues []tracker.Issue, branch, actor string, requested []int)
 // in the branch name breaks ties, covers the unclaimed case, and vetoes a lone
 // claim it contradicts. Ambiguity is a typed refusal naming the candidates
 // rather than a coin flip: a wrong Fixes line closes the wrong issue on merge.
+// Only an issue eligible for inference takes part; anything else is selectable
+// solely through an explicit request.
 func linkedIssue(issues []tracker.Issue, branch, actor string, requested int) (tracker.Issue, error) {
 	byNum := byNumber(issues)
 	if requested > 0 {
@@ -55,7 +58,7 @@ func linkedIssue(issues []tracker.Issue, branch, actor string, requested int) (t
 
 	var claimed []tracker.Issue
 	for _, i := range issues {
-		if !i.Epic && slices.Contains(i.Assignees, actor) {
+		if eligibleForInference(i) && slices.Contains(i.Assignees, actor) {
 			claimed = append(claimed, i)
 		}
 	}
@@ -63,12 +66,12 @@ func linkedIssue(issues []tracker.Issue, branch, actor string, requested int) (t
 	switch {
 	case len(claimed) == 1:
 		// The claim is the stronger signal, but when the branch name points
-		// at a different open issue the two disagree and one of them is
-		// wrong. Preferring the claim silently writes a Fixes line that
+		// at a different eligible open issue the two disagree and one of them
+		// is wrong. Preferring the claim silently writes a Fixes line that
 		// closes the other issue on merge, so the disagreement is the
 		// caller's to resolve.
 		if other, ok := byNum[branchNum]; hasBranchNum && ok &&
-			other.Number != claimed[0].Number && !other.Epic {
+			other.Number != claimed[0].Number && eligibleForInference(other) {
 			return tracker.Issue{}, &IssueInferenceError{
 				Failure: InferenceConflict, Branch: branch, Actor: actor,
 				Claimed: issueNumbers(claimed), BranchIssue: other.Number,
@@ -89,7 +92,7 @@ func linkedIssue(issues []tracker.Issue, branch, actor string, requested int) (t
 		}
 	default:
 		if hasBranchNum {
-			if issue, ok := byNum[branchNum]; ok && !issue.Epic {
+			if issue, ok := byNum[branchNum]; ok && eligibleForInference(issue) {
 				return issue, nil
 			}
 		}
@@ -97,6 +100,22 @@ func linkedIssue(issues []tracker.Issue, branch, actor string, requested int) (t
 			Failure: InferenceMissing, Branch: branch, Actor: actor,
 		}
 	}
+}
+
+// eligibleForInference reports whether an issue can become a pull request's
+// closing target without being named. An epic is a container, not a unit of
+// work, and an idea is discovery whose outcome lives outside the tracker, so a
+// merge is not what completes either. Both remain selectable through an
+// explicit request, which is how a documentation pull request closes an idea.
+func eligibleForInference(issue tracker.Issue) bool {
+	return !issue.Epic && !isIdea(issue)
+}
+
+// isIdea reports whether the issue's effective type is the discovery type. A
+// legacy issue carrying idea beside an implementation type reads as that
+// implementation type, so only a pure idea is excluded.
+func isIdea(issue tracker.Issue) bool {
+	return issue.Type != nil && *issue.Type == model.IdeaType
 }
 
 // branchIssueNumber pulls an issue number out of a branch name, matching the

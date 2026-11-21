@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -194,6 +195,48 @@ func TestConfigAndCreateAppearOnTheBoard(t *testing.T) {
 	issue := d["issue"].(map[string]any)
 	if status != 200 || issue["title"] != "First" || !strings.Contains(issue["body"].(string), "it works") {
 		t.Fatalf("detail = %d %v", status, d)
+	}
+}
+
+// Ready is the implementation queue on the daemon too: an unclaimed, unblocked
+// idea beside an equivalent task is absent from /api/ready, the board and the
+// primer. An epic keeps an idea child attached outside hew visible in detail,
+// but never selects it as next — with only an idea, nothing is next.
+func TestIdeasStayOutOfReadyAndOutOfEpicNext(t *testing.T) {
+	e := newEnv(t, false)
+	e.appendRaw(
+		`{"number":1,"title":"Ship the cache","body":"","state":"OPEN","created_at":"2026-01-01T00:00:00Z","labels":["P1","epic"]}`,
+		`{"number":2,"title":"Consider a cache","body":"","state":"OPEN","created_at":"2026-01-01T00:00:00Z","labels":["P0","idea"],"parent":1}`,
+		`{"number":3,"title":"Wire the cache","body":"","state":"OPEN","created_at":"2026-01-01T00:00:00Z","labels":["P2","task"],"parent":1}`,
+		`{"number":4,"title":"Investigate only","body":"","state":"OPEN","created_at":"2026-01-01T00:00:00Z","labels":["P1","epic"]}`,
+		`{"number":5,"title":"Consider only","body":"","state":"OPEN","created_at":"2026-01-01T00:00:00Z","labels":["P1","idea"],"parent":4}`,
+	)
+
+	status, ready := e.call("GET", "/api/ready", "", nil)
+	if status != 200 || !slices.Equal(numbers(ready["_list"]), []int{3}) {
+		t.Fatalf("ready = %d %v, want the task only", status, ready["_list"])
+	}
+	for _, path := range []string{"/api/board", "/api/primer"} {
+		_, res := e.call("GET", path, "", nil)
+		if got := numbers(res["ready"]); !slices.Equal(got, []int{3}) {
+			t.Errorf("%s ready = %v, want the task only", path, got)
+		}
+	}
+
+	_, d := e.call("GET", "/api/issues/1", "", nil)
+	if got := numbers(d["children"]); !slices.Equal(got, []int{2, 3}) {
+		t.Errorf("children = %v, want both the idea and the task", got)
+	}
+	if next, ok := d["next"].(float64); !ok || int(next) != 3 {
+		t.Errorf("next = %v, want the task #3", d["next"])
+	}
+
+	_, d = e.call("GET", "/api/issues/4", "", nil)
+	if got := numbers(d["children"]); !slices.Equal(got, []int{5}) {
+		t.Errorf("children = %v, want the idea child", got)
+	}
+	if d["next"] != nil {
+		t.Errorf("next = %v, want null for an idea-only sequence", d["next"])
 	}
 }
 

@@ -92,6 +92,8 @@ func creationInputError(invalid *tracker.InvalidInputError) error {
 		return usageErr("--problem and --goal are mutually exclusive; pick one wording")
 	case "fix":
 		return usageErr("--fix and --approach are mutually exclusive; pick one wording")
+	case "open-questions":
+		return usageErr("--open-questions items cannot be empty")
 	case "done-when":
 		return usageErr("--done-when items cannot be empty")
 	}
@@ -150,7 +152,7 @@ func validateBodySource(s conventions.Sections, bodyFile string, edit bool) erro
 		return usageErr("--body-file and --edit are mutually exclusive")
 	}
 	if !s.IsZero() && (bodyFile != "" || edit) {
-		return usageErr("section flags (--where/--problem/--goal/--fix/--approach/--done-when) and --body-file/--edit are mutually exclusive")
+		return usageErr("section flags (--where/--problem/--goal/--fix/--approach/--open-questions/--done-when) and --body-file/--edit are mutually exclusive")
 	}
 	return nil
 }
@@ -172,6 +174,8 @@ func validateSections(s conventions.Sections) error {
 		return usageErr("--problem and --goal are mutually exclusive; pick one wording")
 	case "fix":
 		return usageErr("--fix and --approach are mutually exclusive; pick one wording")
+	case "open-questions":
+		return usageErr("--open-questions items cannot be empty")
 	case "done-when":
 		return usageErr("--done-when items cannot be empty")
 	}

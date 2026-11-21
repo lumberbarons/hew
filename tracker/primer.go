@@ -14,7 +14,8 @@ import (
 // convention text. Section caps, layout and the hook wrapper stay with the
 // renderer; this value is the policy.
 type PrimerResult struct {
-	// Ready is every ready issue, priority-sorted; ReadyTotal is its uncapped
+	// Ready is every ready issue, priority-sorted; ideas are never in it, so
+	// the section offers implementation work only. ReadyTotal is its uncapped
 	// length.
 	Ready      []Issue `json:"ready"`
 	ReadyTotal int     `json:"readyTotal"`

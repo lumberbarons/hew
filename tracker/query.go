@@ -15,9 +15,25 @@ type ListFilter struct {
 	// Label keeps issues carrying the label, compared case-insensitively as
 	// GitHub and the CLI's --label both do.
 	Label string
+	// Type keeps issues whose normalized type matches. It is the type the
+	// write path would record — bug, enhancement, task or idea — not a label
+	// spelling, so a literal `idea` label on a task stays a task query. A type
+	// query excludes epics: an epic is a container, and a type names an
+	// ordinary issue's classification.
+	Type string
 	// Epic keeps issues whose parent is this epic. Zero applies no epic
 	// filter.
 	Epic int
+}
+
+// Validate reports whether the filter names a type the tracker recognizes. An
+// empty Type is valid. The rejection is an *InvalidInputError naming "type", so
+// the CLI and the daemon spell the same rule in their own words.
+func (f ListFilter) Validate() error {
+	if f.Type == "" || model.IsType(f.Type) {
+		return nil
+	}
+	return &InvalidInputError{Field: "type", Reason: "must be one of " + strings.Join(model.Types, "|")}
 }
 
 // List answers `hew list` from one snapshot: the fetched issues in list order
@@ -27,7 +43,14 @@ type ListFilter struct {
 func (s *Snapshot) List(filter ListFilter) []Issue {
 	issues := slices.Clone(s.issues)
 	model.SortForList(issues)
-	return issuesFromModel(model.List(issues, model.ListFilter{Label: filter.Label, Epic: filter.Epic}), s.bodies)
+	filtered := model.List(issues, model.ListFilter{Label: filter.Label, Epic: filter.Epic})
+	if filter.Type != "" {
+		filtered = slices.DeleteFunc(filtered, func(issue model.Issue) bool {
+			typ, _ := issue.Type()
+			return issue.IsEpic() || typ != filter.Type
+		})
+	}
+	return issuesFromModel(filtered, s.bodies)
 }
 
 // TextFinding is one field's advisory character findings. Source attributes
@@ -81,8 +104,11 @@ type IssueDetail struct {
 // Detail is the show read: one live issue in any state, with body and recent
 // comments. An epic's view also fetches both states to resolve its children
 // from parent backlinks — complete even when the epic's sub-issue connection
-// was capped — and names the next workable child. An issue number named by the
-// caller is the deliberate retrieval path, so untriaged text is returned here.
+// was capped — and names the next workable child. Children keep every existing
+// relationship, including an idea attached outside hew; the next-child selector
+// skips ideas, because the epic's sequence is implementation work. An issue
+// number named by the caller is the deliberate retrieval path, so untriaged
+// text is returned here.
 func (t *Tracker) Detail(ctx context.Context, number int) (IssueDetail, error) {
 	issue, err := t.store.GetIssue(ctx, number)
 	if err != nil {

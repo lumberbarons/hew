@@ -221,6 +221,14 @@ func (i Issue) Type() (typ string, multi bool) {
 	return typ, n > 1
 }
 
+// IsIdea reports whether the issue's effective type is the discovery type.
+// Type precedence decides, so a legacy issue carrying idea beside task is a
+// task, not an idea.
+func (i Issue) IsIdea() bool {
+	t, _ := i.Type()
+	return t == IdeaType
+}
+
 // Areas returns all labels that are not priority, type, or in-progress, in
 // any case.
 func (i Issue) Areas() []string {
@@ -398,8 +406,8 @@ func List(issues []Issue, filter ListFilter) []Issue {
 	return out
 }
 
-// Ready returns open, non-epic, unclaimed, triaged issues with zero open
-// blockers, sorted by priority.
+// Ready returns open, non-epic, unclaimed, triaged, non-idea issues with zero
+// open blockers, sorted by priority.
 //
 // Untriaged issues are excluded because ready feeds the automatic paths —
 // `hew ready` and the primer — where issue text reaches an agent with no
@@ -409,10 +417,16 @@ func List(issues []Issue, filter ListFilter) []Issue {
 // forgery-resistant gate, and it costs hew-created issues nothing: the write
 // path labels them by construction. The work is not hidden — `hew triage`
 // and `hew list` still show it, and the primer carries the count.
+//
+// Ideas are excluded because ready is the implementation queue: an idea is a
+// question a maintainer has not yet decided to investigate, and every ready
+// consumer may act on what it is offered. Investigation is a deliberate
+// claim (`hew start --for-discovery`), so an idea stays visible in `list`,
+// `show` and its epic's detail without being offered as work.
 func Ready(issues []Issue) []Issue {
 	var out []Issue
 	for _, i := range issues {
-		if !i.IsOpen() || i.IsEpic() || i.Claimed() || i.Untriaged() {
+		if !i.IsOpen() || i.IsEpic() || i.Claimed() || i.Untriaged() || i.IsIdea() {
 			continue
 		}
 		if len(i.OpenBlockers()) > 0 {
@@ -474,16 +488,18 @@ func UntriagedIssues(issues []Issue) []Issue {
 }
 
 // EpicNext returns the epic's next workable child: the first child, in
-// Children's creation order, that is open, has no open blockers, and is
-// triaged. For epics whose children are sequenced by blocked-by, that order
-// is the sequence itself. A claimed child is still next — the claim is an
-// annotation to resolve (resume yours, skip someone else's), and `start`'s
-// exit codes say which. Untriaged children and nested epics are skipped
-// exactly as ready skips them: next feeds the same automatic paths, and an
-// epic is never worked directly.
+// Children's creation order, that is open, has no open blockers, is triaged,
+// and is not an idea. For epics whose children are sequenced by blocked-by,
+// that order is the sequence itself. A claimed child is still next — the
+// claim is an annotation to resolve (resume yours, skip someone else's), and
+// `start`'s exit codes say which. Untriaged children, nested epics and ideas
+// are skipped exactly as ready skips them: next feeds the same automatic
+// paths, an epic is never worked directly, and an idea child — which only
+// arrives through a relationship made outside hew — is investigation work
+// rather than the epic's implementation sequence.
 func EpicNext(children []Issue) (r Issue, ok bool) {
 	for _, c := range children {
-		if !c.IsOpen() || c.IsEpic() || c.Untriaged() || len(c.OpenBlockers()) > 0 {
+		if !c.IsOpen() || c.IsEpic() || c.Untriaged() || c.IsIdea() || len(c.OpenBlockers()) > 0 {
 			continue
 		}
 		return c, true

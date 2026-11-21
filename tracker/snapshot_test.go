@@ -180,6 +180,25 @@ func TestSnapshotIncludesClosedOnRequest(t *testing.T) {
 	}
 }
 
+// Ready is the implementation queue, and both `hew ready` and hewd answer from
+// this one policy: an unclaimed, unblocked idea beside an equivalent task is
+// not offered, while the idea stays visible to every list-shaped read.
+func TestSnapshotReadyOmitsIdeasButKeepsThemListed(t *testing.T) {
+	idea := fixture(1, "Consider a cache", "P0", "idea")
+	task := fixture(2, "Wire the cache", "P2", "task")
+
+	snapshot, err := Wrap(&fakeClient{issues: []model.Issue{idea, task}}).Snapshot(context.Background(), SnapshotOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := numbers(snapshot.Ready()), []int{2}; !slices.Equal(got, want) {
+		t.Errorf("Ready = %v, want %v", got, want)
+	}
+	if got, want := numbers(snapshot.List(ListFilter{})), []int{1, 2}; !slices.Equal(got, want) {
+		t.Errorf("List = %v, want %v (the idea stays listed)", got, want)
+	}
+}
+
 // TestSnapshotUntriagedCountsOpenUntriagedOnly pins what a board needs: the
 // number a primer reports, without the titles and bodies Triage is the
 // deliberate read for. A closed issue is not triage work, and an epic is never

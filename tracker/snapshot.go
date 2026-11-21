@@ -225,8 +225,10 @@ func (s *Snapshot) Untriaged() int {
 	return len(model.UntriagedIssues(s.issues))
 }
 
-// Ready returns open, non-epic, unclaimed, triaged issues with no open
-// blockers, sorted by priority — the same set `hew ready` prints.
+// Ready returns open, non-epic, unclaimed, triaged, non-idea issues with no
+// open blockers, sorted by priority — the same set `hew ready` prints and the
+// same policy hewd's Ready queue answers from. An idea stays in Issues, List
+// and Children: it is investigation work, never offered as implementation.
 func (s *Snapshot) Ready() []Issue {
 	return issuesFromModel(model.Ready(s.issues), s.bodies)
 }

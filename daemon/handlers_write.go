@@ -231,7 +231,8 @@ func (in applyIn) plan() []tracker.PlanEntry {
 		if e.Sections != nil {
 			pe.Sections = tracker.Sections{
 				Where: e.Sections.Where, Problem: e.Sections.Problem, Goal: e.Sections.Goal,
-				Fix: e.Sections.Fix, Approach: e.Sections.Approach, DoneWhen: e.Sections.DoneWhen,
+				Fix: e.Sections.Fix, Approach: e.Sections.Approach,
+				OpenQuestions: e.Sections.OpenQuestions, DoneWhen: e.Sections.DoneWhen,
 			}
 		}
 		if e.Parent != nil {

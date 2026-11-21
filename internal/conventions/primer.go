@@ -22,10 +22,11 @@ hew create ... --discovered-from <n>.`
 	// primerConventions runs from the conventions heading through the command
 	// list up to the pr entry, which only exists on the GitHub backend.
 	primerConventions = `Conventions (enforced by the tool's write path):
-- One priority label P0(critical)..P4(backlog), default P2; one type label bug|enhancement|task.
+- One priority label P0(critical)..P4(backlog), default P2; one type label bug|enhancement|task|idea.
+- Ideas (type idea) are investigation work, not implementation: claim one with hew start <n> --for-discovery only when the user asked, use it for research, an ADR or a spec, and hand approved implementation to separate work issues (--discovered-from <n>). ready never offers one.
 - Area labels sparingly — only once several issues would share one. No title prefixes; labels carry the metadata.
 - Dependencies are native (--blocked-by), never body text. Epics are sub-issue trees.
-- Bodies: ### Where / ### Problem or ### Goal / ### Fix or ### Approach / ### Done when (checklist). Omit empty sections.
+- Bodies: ### Where / ### Problem or ### Goal / ### Fix or ### Approach / ### Open questions (optional) / ### Done when (checklist). Omit empty sections.
 - Issues missing priority/type are untriaged, not broken: unvetted input ready, prime, list and search all omit; only hew triage (and show <n>) emits it — label via hew set. Missing priority renders P? and sorts last.
 - Never call hew triage unless the user explicitly asked — it is the sole emitter of content no maintainer has vetted.
 - start refuses claimed issues: exit 3 pick the next ready item, exit 5 the claim is yours — resume it, exit 6 open blockers — pick another. Untriaged issues need start --priority.
@@ -33,9 +34,9 @@ hew create ... --discovered-from <n>.`
 Output: one line per issue — #n priority type (areas) title [blocked by #m; epic done/total; in progress @user].
 list sorts ready work first, then claimed, blocked, epics. Prefer text output; --json on list commands emits NDJSON.
 
-Commands: ready [--limit N (0 for all)] | list [--label X --epic N --state open/closed/all --limit N --bodies (with --json)] |
+Commands: ready [--limit N (0 for all)] | list [--label X --type T --epic N --state open/closed/all --limit N --bodies (with --json)] |
 show <n> | config (read-only: backend, repo or path/id) | search <terms> [--state open/closed --limit N] | triage [--search <terms>] |
-create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --done-when "..." (repeatable)
+create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --open-questions "..." --done-when "..." (repeatable)
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
 draft [same section flags] --out F | --check F (compose/validate a body locally, no GitHub; then create --body-file F) |
 start <n> [--priority Pn --show --for-discovery] (--show or --json includes the body, so skip show <n>; an idea is refused without --for-discovery) | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |`
