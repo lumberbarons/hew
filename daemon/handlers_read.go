@@ -91,7 +91,10 @@ func (s *Server) list(q *request[none]) (reply, error) {
 	if err != nil {
 		return reply{}, err
 	}
-	filter := tracker.ListFilter{Label: q.query.Get("label")}
+	filter := tracker.ListFilter{Label: q.query.Get("label"), Type: q.query.Get("type")}
+	if err := filter.Validate(); err != nil {
+		return reply{}, err
+	}
 	if e := q.query.Get("epic"); e != "" {
 		if filter.Epic, err = strconv.Atoi(e); err != nil || filter.Epic <= 0 {
 			return reply{}, &tracker.InvalidInputError{Field: "epic", Reason: "must be a positive issue number"}
