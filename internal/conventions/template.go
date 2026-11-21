@@ -71,20 +71,24 @@ func sectionHasContent(lines []string) bool {
 // flags and plan entries. Problem/Goal and Fix/Approach are wording pairs —
 // at most one of each is set (the write path enforces it), and whichever is
 // set picks the header, so word choice is never policed against the issue
-// type.
+// type. Open questions is optional and only rendered when supplied; it is a
+// bullet list, not a checklist, so an idea can carry questions without a
+// done-when.
 type Sections struct {
-	Where    string
-	Problem  string
-	Goal     string
-	Fix      string
-	Approach string
-	DoneWhen []string
+	Where         string
+	Problem       string
+	Goal          string
+	Fix           string
+	Approach      string
+	OpenQuestions []string `json:"OpenQuestions,omitempty"`
+	DoneWhen      []string
 }
 
 // IsZero reports whether no section was provided.
 func (s Sections) IsZero() bool {
 	return s.Where == "" && s.Problem == "" && s.Goal == "" &&
-		s.Fix == "" && s.Approach == "" && len(s.DoneWhen) == 0
+		s.Fix == "" && s.Approach == "" && len(s.OpenQuestions) == 0 &&
+		len(s.DoneWhen) == 0
 }
 
 // Compose renders the sections as a template-conformant body: headers in
@@ -102,6 +106,13 @@ func (s Sections) Compose() string {
 	section("Goal", s.Goal)
 	section("Fix", s.Fix)
 	section("Approach", s.Approach)
+	if len(s.OpenQuestions) > 0 {
+		var questions strings.Builder
+		for _, q := range s.OpenQuestions {
+			fmt.Fprintf(&questions, "- %s\n", strings.TrimSpace(q))
+		}
+		section("Open questions", questions.String())
+	}
 	if len(s.DoneWhen) > 0 {
 		b.WriteString("### Done when\n\n")
 		for _, item := range s.DoneWhen {

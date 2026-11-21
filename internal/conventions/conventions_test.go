@@ -147,13 +147,30 @@ func TestSectionsComposeOmitsEmpty(t *testing.T) {
 	}
 }
 
+// Open questions is the optional discovery section: a bullet list after the
+// approach and before the acceptance checklist, omitted entirely when unset.
+func TestSectionsComposeOpenQuestions(t *testing.T) {
+	got := Sections{
+		Problem:       "Ideas get lost in the backlog.",
+		OpenQuestions: []string{"Which command filters ideas?", "How does hewd browse them?"},
+	}.Compose()
+	want := "### Problem\n\nIdeas get lost in the backlog.\n\n### Open questions\n\n- Which command filters ideas?\n- How does hewd browse them?"
+	if got != want {
+		t.Errorf("composed = %q, want %q", got, want)
+	}
+
+	if got := (Sections{Problem: "only the problem"}).Compose(); strings.Contains(got, "Open questions") {
+		t.Errorf("empty open questions emitted a heading:\n%s", got)
+	}
+}
+
 func TestSectionsIsZero(t *testing.T) {
 	if !(Sections{}).IsZero() {
 		t.Error("zero Sections not IsZero")
 	}
 	for _, s := range []Sections{
 		{Where: "w"}, {Problem: "p"}, {Goal: "g"}, {Fix: "f"},
-		{Approach: "a"}, {DoneWhen: []string{"d"}},
+		{Approach: "a"}, {OpenQuestions: []string{"q"}}, {DoneWhen: []string{"d"}},
 	} {
 		if s.IsZero() {
 			t.Errorf("%+v reported IsZero", s)
@@ -170,7 +187,7 @@ func TestDiscoveredFrom(t *testing.T) {
 func TestPrimerStaticMentionsCoreCommands(t *testing.T) {
 	for _, cmd := range []string{"hew ready", "start", "triage", "hew search", "--discovered-from", "Fixes #n", "P0", "P4", "exit 3", "exit 5",
 		"### Where", "### Done when", "Area labels sparingly", "No title prefixes",
-		"--goal|--problem", "--approach|--fix", "--done-when", "--body-file F for long bodies"} {
+		"--goal|--problem", "--approach|--fix", "--open-questions", "--done-when", "--body-file F for long bodies"} {
 		if !strings.Contains(PrimerStatic, cmd) {
 			t.Errorf("primer missing %q", cmd)
 		}

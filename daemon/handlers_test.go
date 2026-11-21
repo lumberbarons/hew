@@ -540,6 +540,71 @@ func TestAnIdeaIsClaimedOnlyForDiscovery(t *testing.T) {
 	}
 }
 
+// The type query is the normalized type, not a literal label: an idea opens
+// through create with a problem and optional questions, a legacy task with an
+// idea label stays a task, and an epic is not a type match. State still
+// narrows open and closed.
+func TestListTypeQueryAndIdeaCapture(t *testing.T) {
+	e := newEnv(t, false)
+	idea := e.create("Open idea", map[string]any{
+		"type": "idea",
+		"body": map[string]any{
+			"problem":       "Ideas get lost in the backlog.",
+			"openQuestions": []string{"Which command filters ideas?", "How does hewd browse them?"},
+		},
+	})
+	e.create("A task", nil)
+	e.appendRaw(
+		`{"number":900,"title":"Legacy task","body":"x","state":"OPEN","created_at":"2026-01-01T00:00:00Z","labels":["P2","task","idea"]}`,
+		`{"number":901,"title":"Epic idea","body":"x","state":"OPEN","created_at":"2026-01-01T00:00:00Z","labels":["P2","idea","epic"]}`,
+		`{"number":902,"title":"Epic child","body":"x","state":"OPEN","created_at":"2026-01-01T00:00:00Z","labels":["P2","task"],"parent":901}`,
+	)
+
+	// The create route writes the idea's problem and questions.
+	_, d := e.call("GET", fmt.Sprintf("/api/issues/%d", idea), "", nil)
+	body := d["issue"].(map[string]any)["body"].(string)
+	for _, want := range []string{"### Problem", "### Open questions", "- Which command filters ideas?"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("idea body %q missing %q", body, want)
+		}
+	}
+	for _, unwanted := range []string{"### Approach", "### Done when"} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("idea body grew %q:\n%s", unwanted, body)
+		}
+	}
+
+	count := func(path string) []int {
+		t.Helper()
+		status, res := e.call("GET", path, "", nil)
+		if status != 200 {
+			t.Fatalf("GET %s = %d %v", path, status, res)
+		}
+		return numbers(res["_list"])
+	}
+
+	if got, want := count("/api/issues?type=idea"), []int{idea}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("?type=idea = %v, want %v", got, want)
+	}
+	if got, want := count("/api/issues?label=idea"), []int{idea, 900, 901}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("?label=idea = %v, want the literal-label matches %v", got, want)
+	}
+
+	if status, res := e.call("POST", fmt.Sprintf("/api/issues/%d/close", idea), "", map[string]any{"reason": "done", "completed": true}); status != 200 {
+		t.Fatalf("close idea = %d %v", status, res)
+	}
+	if got, want := count("/api/issues?type=idea&state=closed"), []int{idea}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("?type=idea&state=closed = %v, want %v", got, want)
+	}
+	if got := count("/api/issues?type=idea"); len(got) != 0 {
+		t.Errorf("default open ?type=idea = %v, want none", got)
+	}
+
+	if status, res := e.call("GET", "/api/issues?type=story", "", nil); status != 400 || res["error"] != "invalid_input" {
+		t.Errorf("?type=story = %d %v, want 400 invalid_input", status, res)
+	}
+}
+
 func TestEpicDryRunGivesTheSameAdviceAsAnIssue(t *testing.T) {
 	e := newEnv(t, false)
 	body := map[string]any{"goal": "Edit internal/cli/pr.go", "doneWhen": []string{"x"}}

@@ -38,7 +38,7 @@ func (a *App) draftCompose(opts DraftOpts) error {
 		return err
 	}
 	if opts.Sections.IsZero() {
-		return usageErr("nothing to compose; pass section flags (--where/--problem/--goal/--fix/--approach/--done-when), or --check FILE to revalidate a draft")
+		return usageErr("nothing to compose; pass section flags (--where/--problem/--goal/--fix/--approach/--open-questions/--done-when), or --check FILE to revalidate a draft")
 	}
 	composed, err := a.renderBody(bodySource{sections: opts.Sections})
 	if err != nil {

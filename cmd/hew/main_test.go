@@ -55,19 +55,21 @@ var omittedFlags = map[string]bool{
 	"pr --base":        true, // the repo default is right outside release branches
 	// epic create's body flags mirror create's exactly; the primer shows the
 	// epic-typical --goal/--done-when form and the long-form escape hatch.
-	"epic create --where":    true,
-	"epic create --problem":  true,
-	"epic create --fix":      true,
-	"epic create --approach": true,
-	"epic create --edit":     true, // interactive, not for agents
+	"epic create --where":          true,
+	"epic create --problem":        true,
+	"epic create --fix":            true,
+	"epic create --approach":       true,
+	"epic create --open-questions": true,
+	"epic create --edit":           true, // interactive, not for agents
 	// draft takes create's section flags verbatim; the primer entry says
 	// "same section flags" rather than restating them.
-	"draft --where":     true,
-	"draft --problem":   true,
-	"draft --goal":      true,
-	"draft --fix":       true,
-	"draft --approach":  true,
-	"draft --done-when": true,
+	"draft --where":          true,
+	"draft --problem":        true,
+	"draft --goal":           true,
+	"draft --fix":            true,
+	"draft --approach":       true,
+	"draft --open-questions": true,
+	"draft --done-when":      true,
 }
 
 type leaf struct {

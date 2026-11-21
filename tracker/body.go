@@ -17,8 +17,8 @@ import (
 // the bytes over as Text. Nothing here touches a store or the network.
 type Body struct {
 	// Sections compose the issue template: Where, Problem or Goal, Fix or
-	// Approach, and Done when. Wording pairs are exclusive, and Done when
-	// items must be non-blank.
+	// Approach, optional Open questions, and Done when. Wording pairs are
+	// exclusive, and Open questions and Done when items must be non-blank.
 	Sections Sections
 	// PRSections compose the pull-request template: What, Why, Testing and
 	// Risk.
@@ -107,14 +107,20 @@ type Finding struct {
 }
 
 // ValidateSections enforces the issue body's section rules: Problem and Goal
-// are one wording pair, Fix and Approach another, and a Done when item cannot
-// be blank. A rejection is an *InvalidInputError naming the offending field.
+// are one wording pair, Fix and Approach another, and an Open questions or
+// Done when item cannot be blank. A rejection is an *InvalidInputError naming
+// the offending field.
 func ValidateSections(s Sections) error {
 	if s.Problem != "" && s.Goal != "" {
 		return &InvalidInputError{Field: "problem", Reason: "problem and goal are mutually exclusive"}
 	}
 	if s.Fix != "" && s.Approach != "" {
 		return &InvalidInputError{Field: "fix", Reason: "fix and approach are mutually exclusive"}
+	}
+	for _, question := range s.OpenQuestions {
+		if strings.TrimSpace(question) == "" {
+			return &InvalidInputError{Field: "open-questions", Reason: "open questions cannot be empty"}
+		}
 	}
 	for _, item := range s.DoneWhen {
 		if strings.TrimSpace(item) == "" {
@@ -179,7 +185,7 @@ func validateBody(b Body) error {
 	case !b.Sections.IsZero() && !b.PRSections.IsZero():
 		return &InvalidInputError{Field: "body", Reason: "issue and pull-request sections are mutually exclusive"}
 	case !b.Sections.IsZero() && b.Text != "":
-		return &InvalidInputError{Field: "body", Reason: "body and section fields (where/problem/goal/fix/approach/done-when) are mutually exclusive"}
+		return &InvalidInputError{Field: "body", Reason: "body and section fields (where/problem/goal/fix/approach/open-questions/done-when) are mutually exclusive"}
 	case !b.PRSections.IsZero() && b.Text != "":
 		return &InvalidInputError{Field: "body", Reason: "pull-request sections and body text are mutually exclusive"}
 	case !b.Sections.IsZero() && !b.Trailers.isZero():

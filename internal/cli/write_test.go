@@ -366,6 +366,51 @@ func TestCreateSections(t *testing.T) {
 	}
 }
 
+// Quick capture is the shortest useful idea: a title, a problem statement, and
+// optional open questions, with the default priority and no approach or
+// acceptance checklist required.
+func TestCreateIdeaQuickCapture(t *testing.T) {
+	for name, tc := range map[string]struct {
+		sections conventions.Sections
+		want     string
+	}{
+		"problem only": {
+			conventions.Sections{Problem: "Ideas get lost in the backlog."},
+			"### Problem\n\nIdeas get lost in the backlog.",
+		},
+		"problem and questions": {
+			conventions.Sections{
+				Problem:       "Ideas get lost in the backlog.",
+				OpenQuestions: []string{"Which command filters ideas?", "How does hewd browse them?"},
+			},
+			"### Problem\n\nIdeas get lost in the backlog.\n\n### Open questions\n\n- Which command filters ideas?\n- How does hewd browse them?",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFake()
+			app, out, _ := newApp(f)
+			if err := app.Create(ctx, CreateOpts{Title: "Capture ideas", Type: "idea", Sections: tc.sections}); err != nil {
+				t.Fatal(err)
+			}
+			created := f.byNumber(101)
+			if !reflect.DeepEqual(created.Labels, []string{"P2", "idea"}) {
+				t.Errorf("labels = %v, want the default priority and the idea type", created.Labels)
+			}
+			if created.Body != tc.want {
+				t.Errorf("body = %q, want %q", created.Body, tc.want)
+			}
+			for _, unwanted := range []string{"### Approach", "### Done when"} {
+				if strings.Contains(created.Body, unwanted) {
+					t.Errorf("quick capture grew %q:\n%s", unwanted, created.Body)
+				}
+			}
+			if !strings.Contains(out.String(), "created #101: Capture ideas") {
+				t.Errorf("output = %q", out.String())
+			}
+		})
+	}
+}
+
 func TestCreateSectionsWithDiscoveredFrom(t *testing.T) {
 	f := newFake(issue(7, "Source", "P2", "task"))
 	app, _, _ := newApp(f)

@@ -72,6 +72,43 @@ func TestDraftRoundTripsThroughCreateBodyFile(t *testing.T) {
 	}
 }
 
+// An idea can be composed offline with only its problem and questions, then
+// published byte-for-byte with create --body-file.
+func TestDraftComposesOpenQuestionsAndCreatePublishesThem(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "idea.md")
+	sections := conventions.Sections{
+		Problem:       "Ideas get lost in the backlog.",
+		OpenQuestions: []string{"Which command filters ideas?", "How does hewd browse them?"},
+	}
+	app, _, _ := newApp(newFake())
+	if err := app.Draft(ctx, DraftOpts{Sections: sections, Out: path}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"### Problem", "Ideas get lost in the backlog.", "### Open questions", "- Which command filters ideas?", "- How does hewd browse them?"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("draft %q missing %q", data, want)
+		}
+	}
+	for _, unwanted := range []string{"### Approach", "### Done when"} {
+		if strings.Contains(string(data), unwanted) {
+			t.Errorf("draft grew %q:\n%s", unwanted, data)
+		}
+	}
+
+	f := newFake()
+	published, _, _ := newApp(f)
+	if err := published.Create(ctx, CreateOpts{Title: "Capture ideas", Type: "idea", BodyFile: path}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := f.byNumber(101).Body, string(data); got != want {
+		t.Errorf("published body = %q, want the drafted bytes %q", got, want)
+	}
+}
+
 func TestDraftWithoutOutWritesBodyToStdout(t *testing.T) {
 	app, out, _ := newApp(newFake())
 	if err := app.Draft(ctx, DraftOpts{Sections: draftSections}); err != nil {

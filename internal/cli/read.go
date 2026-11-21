@@ -104,7 +104,10 @@ func (a *App) Ready(ctx context.Context, opts ReadyOpts) error {
 // ListOpts filters list output.
 type ListOpts struct {
 	Label string
-	Epic  int
+	// Type keeps issues whose normalized type matches — bug, enhancement, task
+	// or idea — so `--type idea` lists ideas without matching a literal label.
+	Type string
+	Epic int
 	// State is "open", "closed", or "all"; empty means the default, which is
 	// open — except under Epic, where progress means seeing what is done as
 	// well as what is left.
@@ -176,6 +179,14 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 	if err != nil {
 		return err
 	}
+	filter := tracker.ListFilter{Label: opts.Label, Type: opts.Type, Epic: opts.Epic}
+	if err := filter.Validate(); err != nil {
+		var invalid *tracker.InvalidInputError
+		if errors.As(err, &invalid) {
+			return usageErr("--type %s", invalid.Reason)
+		}
+		return err
+	}
 	snapshot, err := tracker.Wrap(a.Client).Snapshot(ctx, tracker.SnapshotOptions{
 		States: states,
 		Bodies: opts.Bodies,
@@ -183,7 +194,7 @@ func (a *App) List(ctx context.Context, opts ListOpts) error {
 	if err != nil {
 		return err
 	}
-	out := a.limitIssues(issuesFromTracker(snapshot.List(tracker.ListFilter{Label: opts.Label, Epic: opts.Epic})), opts.Limit, "issues", limitAllHint)
+	out := a.limitIssues(issuesFromTracker(snapshot.List(filter)), opts.Limit, "issues", limitAllHint)
 	return a.emitListBodies(out, "no issues", render.List, opts.Bodies)
 }
 
