@@ -13,20 +13,22 @@ import (
 // than one library result.
 
 type bodyIn struct {
-	Where    string   `json:"where"`
-	Problem  string   `json:"problem"`
-	Goal     string   `json:"goal"`
-	Fix      string   `json:"fix"`
-	Approach string   `json:"approach"`
-	DoneWhen []string `json:"doneWhen"`
-	Text     string   `json:"text"`
+	Where         string   `json:"where"`
+	Problem       string   `json:"problem"`
+	Goal          string   `json:"goal"`
+	Fix           string   `json:"fix"`
+	Approach      string   `json:"approach"`
+	OpenQuestions []string `json:"openQuestions"`
+	DoneWhen      []string `json:"doneWhen"`
+	Text          string   `json:"text"`
 }
 
 func (b bodyIn) body(discoveredFrom int) tracker.Body {
 	return tracker.Body{
 		Sections: tracker.Sections{
 			Where: b.Where, Problem: b.Problem, Goal: b.Goal,
-			Fix: b.Fix, Approach: b.Approach, DoneWhen: b.DoneWhen,
+			Fix: b.Fix, Approach: b.Approach, OpenQuestions: b.OpenQuestions,
+			DoneWhen: b.DoneWhen,
 		},
 		Text:           b.Text,
 		DiscoveredFrom: discoveredFrom,

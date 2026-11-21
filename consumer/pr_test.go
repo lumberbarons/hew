@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -273,6 +274,55 @@ func TestExternalConsumerCreatesAndAmendsAPullRequest(t *testing.T) {
 	body := fake.updates[0].body
 	if !strings.Contains(body, "`go test -race ./...` passes") || !strings.HasSuffix(body, "Fixes #314") {
 		t.Errorf("amended body = %q", body)
+	}
+}
+
+// An idea is discovery work rather than implementation, so automatic inference
+// skips it whether the signal is a claim or the branch number; a branch naming
+// an idea must not veto a task claim. A documentation pull request can still
+// name the idea explicitly.
+func TestExternalConsumerRequiresAnExplicitIdeaClosure(t *testing.T) {
+	idea := pullIssueNode(314, "Investigate a cache", []string{"P2", "idea", "in-progress"}, "octocat")
+	task := pullIssueNode(315, "Add a cache", []string{"P2", "task", "in-progress"}, "octocat")
+	fake := &pullRequestFake{viewer: "octocat", issues: []map[string]any{idea}}
+	client, err := openWorkflow(t, checkout(t), fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := pr.Body{Sections: pr.Sections{Testing: "`go test ./...` passes"}}
+
+	// The branch names the idea and the acting identity has claimed it, but an
+	// idea alone is no automatic closing target.
+	_, err = client.Create(context.Background(), pr.CreateRequest{Body: body})
+	var inference *pr.IssueInferenceError
+	if !errors.As(err, &inference) || inference.Failure != pr.InferenceMissing {
+		t.Fatalf("err = %T (%v), want the no-signal inference refusal", err, err)
+	}
+
+	// An implementation task claimed alongside the idea is inferred even
+	// though the branch still names the idea.
+	fake.issues = append(fake.issues, task)
+	created, err := client.Create(context.Background(), pr.CreateRequest{Body: body})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Fixes != 315 || !slices.Equal(created.FixedIssues, []int{315}) {
+		t.Errorf("Fixes = %d, FixedIssues = %v, want the claimed task", created.Fixes, created.FixedIssues)
+	}
+
+	// A documentation pull request that names the idea closes it.
+	fake.openPR = nil
+	named, err := client.Create(context.Background(), pr.CreateRequest{
+		For: []int{314}, Title: "docs: record the cache decision", Body: body,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if named.Fixes != 314 || !slices.Equal(named.FixedIssues, []int{314}) {
+		t.Errorf("Fixes = %d, FixedIssues = %v, want the explicitly named idea", named.Fixes, named.FixedIssues)
+	}
+	if got := fake.creates[len(fake.creates)-1].body; !strings.HasSuffix(got, "Fixes #314") {
+		t.Errorf("body = %q", got)
 	}
 }
 

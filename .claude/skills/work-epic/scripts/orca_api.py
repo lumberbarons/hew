@@ -4,8 +4,10 @@ Every Orca command answers with an envelope on stdout — `{"ok": true, "result"
 {...}}` or `{"ok": false, "error": {"code", "message", "data"}}` — and keepalive
 lines on stderr. `Orca.call` returns `result` or raises `OrcaError`; the typed
 helpers below name the handful of commands the pump uses and the fields it
-reads from them. Shapes were captured from a live Orca (1.4.x) and are pinned
-in test_orca_api.py.
+reads from them. Orca 1.4.267 flattened and renamed several of those fields;
+`run_id`, `normalise_worker`, and `normalise_show` accept both shapes so the
+pump reads one set of fields on every host. Shapes were captured from a live
+Orca (1.4.x) and are pinned in test_orca_api.py.
 
 All effects go through the injected `sh`, so tests drive the pump against a fake.
 """
@@ -105,8 +107,68 @@ def payload(message):
 SETTLED_WORKER_STATES = {"succeeded", "failed"}
 
 
+def run_id(result):
+    """The Run id, from either `runId` or the older nested `run.id`."""
+    return result.get("runId") or (result.get("run") or {}).get("id")
+
+
+def normalise_worker(row):
+    """A worker row with the nested keys the pump reads filled from Orca 1.4.267's flat ones.
+
+    Orca removed `projection` and renamed `workerState` to `state`, `attention` to a
+    top-level category list, and so on. Old hosts already carry the nested keys, so this
+    leaves their rows untouched apart from copying them.
+    """
+    row = dict(row)
+    state = row.get("state")
+    if row.get("workerState") is None and state is not None:
+        row["workerState"] = state
+    if row.get("dispatchStatus") is None:
+        if state in ("succeeded", "completed"):
+            row["dispatchStatus"] = "completed"
+        elif state in ("failed", "stopped", "abandoned"):
+            # 1.4.267 treats stopped and abandoned as settled too; the nested rows the
+            # pump was written against reported those as a failed Dispatch.
+            row["dispatchStatus"] = "failed"
+
+    projection = dict(row.get("projection") or {})
+    if isinstance(row.get("workspace"), str) and row["workspace"]:
+        workspace = dict(projection.get("workspace") or {})
+        workspace.setdefault("id", row["workspace"])
+        projection["workspace"] = workspace
+    if isinstance(row.get("liveness"), str) and row["liveness"]:
+        liveness = dict(projection.get("liveness") or {})
+        liveness.setdefault("verdict", row["liveness"])
+        projection["liveness"] = liveness
+    if isinstance(row.get("attention"), list):
+        attention = dict(projection.get("attention") or {})
+        attention.setdefault("categories", list(row["attention"]))
+        attention.setdefault("requiresAction", bool(row["attention"]))
+        projection["attention"] = attention
+    if projection:
+        row["projection"] = projection
+    return row
+
+
+def normalise_show(result):
+    """A `worker-show` result with `observation.agentWait` filled from `waitingOnHuman`.
+
+    `waitingOnHuman` is absent when the worker is free and `"unknown"` when Orca could
+    not look; both mean the pump should not raise the parked-on-a-dialog flag.
+    """
+    result = dict(result)
+    observation = dict(result.get("observation") or {})
+    if "agentWait" not in observation and "waitingOnHuman" in result:
+        wait = result.get("waitingOnHuman")
+        observation["agentWait"] = None if wait in (None, "unknown") else wait
+    if observation:
+        result["observation"] = observation
+    return result
+
+
 def settled(row):
-    return (row.get("workerState") in SETTLED_WORKER_STATES
+    state = row.get("workerState") or row.get("state")
+    return (state in SETTLED_WORKER_STATES
             or row.get("dispatchStatus") in ("completed", "failed"))
 
 
@@ -150,8 +212,7 @@ class Orca:
     # --- runs ------------------------------------------------------------
 
     def run_create(self, objective):
-        run = self.call("orchestration", "run-create", "--objective", objective).get("run") or {}
-        return run["id"]
+        return run_id(self.call("orchestration", "run-create", "--objective", objective))
 
     def runs(self):
         return self.call("orchestration", "run-list").get("runs") or []
@@ -160,7 +221,7 @@ class Orca:
         self.call("orchestration", "run-use", "--id", run_id)
 
     def run_current(self):
-        return (self.call("orchestration", "run-current").get("run") or {}).get("id")
+        return run_id(self.call("orchestration", "run-current"))
 
     # --- tasks and workers -------------------------------------------------
 
@@ -168,21 +229,26 @@ class Orca:
         return self.call("orchestration", "task-list", "--run", run_id).get("tasks") or []
 
     def workers(self, run_id):
-        """Every worker row for the Run, following pages."""
+        """Every worker row for the Run, following pages.
+
+        1.4.267 puts `nextCursor` at the top level; older hosts nest it under
+        `page` with a `hasMore` flag.
+        """
         rows, cursor = [], None
         while True:
             args = ["orchestration", "worker-list", "--run", run_id, "--limit", "100"]
             if cursor:
                 args += ["--cursor", cursor]
             result = self.call(*args)
-            rows += result.get("workers") or []
+            rows += [normalise_worker(row) for row in result.get("workers") or []]
             page = result.get("page") or {}
-            cursor = page.get("nextCursor")
-            if not (page.get("hasMore") and cursor):
+            cursor = result.get("nextCursor") or (
+                page.get("nextCursor") if page.get("hasMore") else None)
+            if not cursor:
                 return rows
 
     def worker_show(self, dispatch):
-        return self.call("orchestration", "worker-show", "--dispatch", dispatch)
+        return normalise_show(self.call("orchestration", "worker-show", "--dispatch", dispatch))
 
     def worker_release(self, dispatch):
         return self.call("orchestration", "worker-release", "--dispatch", dispatch)
@@ -199,11 +265,17 @@ class Orca:
             if value is not None:
                 args += [flag, value]
         result = self.call(*args)
-        wt = None
-        for effect in result.get("effects") or []:
-            if effect.get("kind") == "worktree" and effect.get("id"):
-                wt = effect["id"]
-        return StartReceipt(result.get("taskId"), result.get("dispatchId"), wt, result)
+        # 1.4.267 reports the created worktree as a top-level `workspace`; older hosts
+        # report it in `effects`.
+        created = result.get("workspace")
+        if isinstance(created, dict):
+            created = created.get("id")
+        if not created:
+            for effect in result.get("effects") or []:
+                if effect.get("kind") == "worktree" and effect.get("id"):
+                    created = effect["id"]
+                    break
+        return StartReceipt(result.get("taskId"), result.get("dispatchId"), created, result)
 
     def check(self, run_id, *, timeout_ms, ack=None, types="worker_done,escalation,question"):
         """Wait for the Run's next Delivery, acknowledging the previous one first."""

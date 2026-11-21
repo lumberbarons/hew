@@ -348,6 +348,65 @@ func TestListFilters(t *testing.T) {
 	}
 }
 
+// --type filters on the normalized type, not on a literal label: a legacy task
+// carrying an idea label stays a task, and an epic is not an ordinary type
+// match. --label remains the literal-label query. The state filter still
+// chooses open or closed.
+func TestListFiltersByNormalizedType(t *testing.T) {
+	idea := issue(1, "Open idea", "P2", "idea")
+	legacy := issue(2, "Legacy task", "P2", "task", "idea")
+	closedIdea := issue(3, "Closed idea", "P2", "idea")
+	closedIdea.State = "CLOSED"
+	epicIdea := issue(4, "Epic idea", "P2", "idea", "epic")
+	epicIdea.SubIssues = []model.Ref{{Number: 5, State: "OPEN"}}
+	epicIdea.SubIssuesTotal = 1
+
+	app, out, _ := newApp(newFake(idea, legacy, closedIdea, epicIdea))
+	if err := app.List(ctx, ListOpts{Type: "idea"}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "#1") || strings.Contains(got, "#2") || strings.Contains(got, "#4") {
+		t.Errorf("list --type idea:\n%s", got)
+	}
+
+	out.Reset()
+	if err := app.List(ctx, ListOpts{Type: "idea", State: stateClosed}); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); strings.Contains(got, "#1") || !strings.Contains(got, "#3") {
+		t.Errorf("list --type idea --state closed:\n%s", got)
+	}
+
+	out.Reset()
+	if err := app.List(ctx, ListOpts{Label: "idea"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, "#1") || !strings.Contains(got, "#2") {
+		t.Errorf("list --label idea should still match the literal label:\n%s", got)
+	}
+
+	// NDJSON carries the normalized type on each line.
+	app.JSON = true
+	out.Reset()
+	if err := app.List(ctx, ListOpts{Type: "idea"}); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("NDJSON type filter wrote %d lines, want 1:\n%s", len(lines), out.String())
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &obj); err != nil {
+		t.Fatalf("list line is not JSON: %v\n%s", err, lines[0])
+	}
+	if obj["type"] != "idea" {
+		t.Errorf("NDJSON type = %v, want idea", obj["type"])
+	}
+
+	usageError(t, app.List(ctx, ListOpts{Type: "story"}), "--type must be one of")
+}
+
 // GitHub treats label names case-insensitively, and the write path already
 // de-duplicates areas that way, so the read filter must agree on both backends.
 func TestListLabelFilterIgnoresCase(t *testing.T) {
