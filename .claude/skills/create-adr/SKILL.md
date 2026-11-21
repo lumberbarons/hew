@@ -19,7 +19,15 @@ The primary reader of an ADR in this project is another AI agent picking up the 
 
 Use MADR format with rich frontmatter. Link to other ADRs via `supersedes`, `superseded-by`, and `related`, and to the research the decision rests on via `research` — those edges are stable and directionally correct. Do not embed paths to specs, plans, or task files; those are forward-references that rot.
 
-Research (`create-research`) sits upstream of the ADR: it establishes what is true, and the ADR records what was decided given that. An ADR cites the research documents it relies on by id (`RES-0004`), and the cited document gets this ADR's id added to its own `related`, so the link can be followed from either end. Both ends are append-only records with stable ids, which is what makes a link in each direction safe; that does not extend to specs, which is why the spec side still does the citing.
+Research (`create-research`) sits upstream of the ADR: it establishes what is true, and the ADR records what was decided given that. An ADR cites the research documents it relies on by id (`RES-0004`), and once the ADR is accepted the cited document gets this ADR's id added to its own `related`, so the link can be followed from either end. Both ends are append-only records with stable ids, which is what makes a link in each direction safe; that does not extend to specs, which is why the spec side still does the citing.
+
+This skill writes a **`proposed`** ADR and stops. A proposed ADR is not policy: `review-policy` ignores it, it is not registered in the agent instructions, and nothing else is edited on its account. Acceptance is a separate act by a person, through `approve-adr`, and it is what applies the supersede and research back-links, updates the index and registers the ADR. `refine-adr` sharpens a proposed ADR before then. Keeping the two apart means an ADR that is never accepted leaves nothing behind.
+
+The format is held by `adr.py`, which sits in this skill's `scripts/` directory: `check` validates an ADR against the template, and it is what `refine-adr` and `approve-adr` gate on. Resolve it once:
+
+```bash
+ADR="<this skill's directory>/scripts/adr.py"
+```
 
 ## Workflow
 
@@ -37,7 +45,7 @@ Check the target project for an existing ADR directory, in this order:
 If the directory already contains ADRs, read them before drafting. You need to know:
 
 - **Already-documented decisions** — if an existing ADR already covers the same choice at the same scope, stop and tell the user which ADR it is. Do not create a duplicate. If the user's intent is actually to *change* the prior decision, that's a supersede flow (see below), not a new ADR.
-- **Conflict or supersede candidates** — any prior ADR that contradicts or is narrower than the new one. If the new decision replaces an earlier one, you will record that in both the new ADR's `supersedes:` field and the old ADR's `superseded-by:` field + status change to `superseded`.
+- **Conflict or supersede candidates** — any prior ADR that contradicts or is narrower than the new one. If the new decision replaces an earlier one, record it in the new ADR's `supersedes:` field only. Leave the old ADR exactly as it is: it stays `accepted`, and so stays binding, until the new one is accepted, at which point `approve-adr` marks it `superseded`.
 - **Related decisions** — prior ADRs that the new one depends on or complements. Capture these in `related:`.
 - **House style** — deciders convention, tag vocabulary, any project-specific sections.
 
@@ -92,9 +100,9 @@ Before filling in the template, investigate the project to ground the ADR in rea
 Edit the scaffolded file, replacing every placeholder with project-specific content:
 
 - **Frontmatter**:
-  - `status`: start as `proposed` unless the user explicitly says the decision is already made
-  - `deciders`: names/handles of the people deciding, from the user's input — do not guess
-  - `supersedes` / `superseded-by` / `related`: ADR IDs you identified in Step 2
+  - `status`: always `proposed`, even if the user says the decision is already made — acceptance goes through `approve-adr`, which is also what registers it
+  - `deciders`: names/handles of the people deciding, from the user's input — do not guess. If you do not have them, ask; `check` rejects an empty list
+  - `supersedes` / `related`: ADR IDs you identified in Step 2. Leave `superseded-by` empty — it is filled in when a later ADR is accepted
   - `research`: the `RES-NNNN` IDs of the research documents this decision rests on, from Step 2. Ids only, not paths
   - `tags`: short nouns (e.g., `storage`, `observability`, `build`) — reuse vocabulary from prior ADRs
 - **Context and Problem Statement**: the forces at play, grounded in the codebase research and any cited research documents
@@ -109,53 +117,20 @@ Edit the scaffolded file, replacing every placeholder with project-specific cont
 > [!NOTE]
 > If the request or the conversation does not provide enough material for Decision Drivers or Consequences, stop and ask the user. An ADR with hand-wavy drivers and made-up consequences is worse than no ADR.
 
-### Step 7: Update back-links
+### Step 7: Check the ADR
 
-**Supersede links.** If the new ADR supersedes an earlier one (captured in its `supersedes:` frontmatter), edit the superseded ADR:
-
-1. Set its `status:` to `superseded`
-2. Add the new ADR's ID to its `superseded-by:` list
-3. Do **not** rewrite the old ADR's content — the historical record matters
-
-**Research links.** For each id in the new ADR's `research`, edit that research document's frontmatter and add this ADR's id to its `related` list. Change nothing else in it — not its status, findings, or text — since it records what was known when it was written. Superseded research should not have been cited (Step 2).
-
-### Step 8: Update the ADR index (if one exists)
-
-Check if the ADR directory has an index file (e.g., `README.md`, `INDEX.md`). If so, add an entry for the new ADR following the existing format. If the directory has no index and already contains 3+ ADRs, offer to create a `README.md` index listing all ADRs with `id | title | status | date`.
-
-### Step 9: Register the ADR in the project's agent instructions
-
-> [!IMPORTANT]
-> This step is critical. ADRs only bind future work if agents and developers can discover them. Register the ADR in the repository instructions that future sessions actually load; filenames and precedence depend on the running agent and the project's configuration.
-
-Identify the repository's active instruction files from the session and project configuration. Read root `AGENTS.md`, `AGENTS.override.md`, and `CLAUDE.md` when present, plus repository instruction files selected by configured paths or globs. An override may replace a default file, and a configured file may be the only entry point; updating an inactive default alone does not register the ADR for that agent.
-
-Update the effective repository entry point for each supported agent. Where several active files already share a repository-owned instruction document through imports or links, update that shared document and preserve the existing discovery paths. Otherwise update each active root entry point, including an override that replaces `AGENTS.md`. Follow actual import semantics rather than inventing them for a plain Markdown file. Do not modify user-global instructions outside the repository. If there is no repository instruction file or configured convention, create a root `AGENTS.md` and register the ADR there; report which files you updated.
-
-In each selected file, look for an existing `## Architectural Decisions` section.
-
-**If the section already exists**, add a new row to the table for the ADR you just created, following the existing format.
-
-**If the section does not exist**, append it to the end using this format (substitute the actual ADR directory):
-
-```markdown
-## Architectural Decisions
-
-ADRs live in `<adr-dir>/`. Read the relevant ADRs before proposing architectural changes — they encode constraints and rejected alternatives. When writing or modifying a spec, cite the ADRs that constrained it in the spec itself; ADRs do not track their downstream consumers. An ADR does name the research it rests on (its `research` frontmatter) — read that before overturning a decision.
-
-| ADR | When this applies |
-|---|---|
-| `<adr-dir>/<NNNN-slug>.md` | <1-line description of the area/situation this decision governs> |
+```bash
+uv run --no-project "$ADR" check <ADR_FILE>
 ```
 
-The "When this applies" column should describe the *situation* that should make a future agent read the ADR — not just restate the title. Good example: "Any change to event persistence, replay semantics, or write-path latency in `services/ledger/`". Bad example: "When using the event store".
+Fix whatever it reports — an unfilled placeholder, an empty `deciders` list, a cited research document that does not exist — before showing the ADR to anyone. Do not edit any other file: no back-links, no index entry, no change to the agent instructions. Those belong to acceptance (`approve-adr`).
 
-### Step 10: Present for review
+### Step 8: Present for review
 
 Show the user the completed ADR and ask whether the drivers, rejected alternatives, and consequences match their intent. Explicitly flag:
 
 - Any section where you had to make assumptions due to limited information
-- Any supersede links you applied to prior ADRs
+- Any `supersedes` link, and that the older ADR stays binding until this one is accepted
 - Which research documents the decision cites, and any driver that rests on a `Low`-confidence finding or on research still at `draft`
 
-Only change `status:` from `proposed` to `accepted` after the user confirms — do not do it preemptively.
+Say that the ADR is `proposed` and what comes next: `refine-adr` to sharpen it with a short interview, `approve-adr` to review and accept it. Do not run either unprompted, and do not change `status` yourself.
