@@ -82,6 +82,10 @@ func classify(err error) (int, problem) {
 		return set(http.StatusConflict, string(tracker.StartBlocked), map[string]any{
 			"issue": blocked.Issue, "openBlockers": orEmpty(blocked.OpenBlockers),
 		})
+	case errors.As(err, &partialEdit):
+		return set(http.StatusInternalServerError, "partial_edit", map[string]any{
+			"issue": partialEdit.Issue, "applied": orEmpty(partialEdit.Applied), "failed": partialEdit.Failed,
+		})
 	case errors.As(err, &invalid):
 		return set(http.StatusBadRequest, "invalid_input", map[string]any{"field": invalid.Field, "reason": invalid.Reason})
 	case errors.As(err, &untriaged):
@@ -126,10 +130,6 @@ func classify(err error) (int, problem) {
 	case errors.As(err, &partialCreat):
 		return set(http.StatusInternalServerError, "partial_create", map[string]any{
 			"issue": partialCreat.Issue.Number, "stage": string(partialCreat.Stage),
-		})
-	case errors.As(err, &partialEdit):
-		return set(http.StatusInternalServerError, "partial_edit", map[string]any{
-			"issue": partialEdit.Issue, "applied": orEmpty(partialEdit.Applied), "failed": partialEdit.Failed,
 		})
 	case errors.As(err, &partialRel):
 		return set(http.StatusInternalServerError, "partial_release", map[string]any{"issue": partialRel.Issue})

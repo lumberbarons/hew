@@ -200,7 +200,12 @@ function OutcomeEditor({ d, reload }: { d: Detail; reload: () => void }) {
         label="Outcome note"
         hint="Markdown is supported. Use # followed by an issue number to link follow-up work."
       >
-        <textarea rows={4} value={outcome} onChange={(e) => setOutcome(e.target.value)} />
+        <textarea
+          rows={4}
+          value={outcome}
+          disabled={saving}
+          onChange={(e) => setOutcome(e.target.value)}
+        />
       </Field>
       <div className="toolbar">
         <button

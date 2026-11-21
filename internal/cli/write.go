@@ -519,6 +519,15 @@ func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 // exit codes: the field mistakes are usage errors, a closed target names its
 // override, and a partial edit keeps the applied-field report.
 func setError(err error) error {
+	var partial *tracker.PartialEditError
+	if errors.As(err, &partial) {
+		applied := make([]string, len(partial.Applied))
+		for i, field := range partial.Applied {
+			applied[i] = editFieldFlag(field)
+		}
+		return fmt.Errorf("#%d partially updated (applied %s); %s failed: %w",
+			partial.Issue, strings.Join(applied, ", "), editFieldFlag(partial.Failed), partial.Err)
+	}
 	var invalid *tracker.InvalidInputError
 	if errors.As(err, &invalid) {
 		switch invalid.Field {
@@ -539,15 +548,6 @@ func setError(err error) error {
 	var closed *tracker.ClosedError
 	if errors.As(err, &closed) {
 		return genericErr("#%d is closed%s — pass --closed to edit anyway", closed.Issue, closedState(closed.Reason))
-	}
-	var partial *tracker.PartialEditError
-	if errors.As(err, &partial) {
-		applied := make([]string, len(partial.Applied))
-		for i, field := range partial.Applied {
-			applied[i] = editFieldFlag(field)
-		}
-		return fmt.Errorf("#%d partially updated (applied %s); %s failed: %w",
-			partial.Issue, strings.Join(applied, ", "), editFieldFlag(partial.Failed), partial.Err)
 	}
 	return err
 }

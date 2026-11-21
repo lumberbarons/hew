@@ -18,6 +18,7 @@ import (
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/local"
 	"github.com/lumberbarons/hew/internal/model"
+	"github.com/lumberbarons/hew/tracker"
 )
 
 func exitCode(t *testing.T, err error, want int) {
@@ -3159,4 +3160,14 @@ func TestSetRecordsIdeaOutcome(t *testing.T) {
 			t.Errorf("body = %q, want %q", got.Body, want)
 		}
 	})
+}
+
+func TestSetReportsPartialOutcomeEdit(t *testing.T) {
+	err := setError(&tracker.PartialEditError{
+		Issue: 1, Applied: []string{"title"}, Failed: "outcome",
+		Err: &tracker.InvalidInputError{Field: "outcome", Reason: "the body changed"},
+	})
+	if !strings.Contains(err.Error(), "partially updated (applied title)") {
+		t.Errorf("set error = %v, want the applied field", err)
+	}
 }

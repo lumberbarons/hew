@@ -48,7 +48,7 @@ start <n> [--priority Pn --show --for-discovery] (--show or --json includes the 
 	primerTail = `release <n> [--force] (give up a claim; --force releases any owner) |
 close <n> --reason "..." [--completed | --duplicate-of M] [--force: close an epic with open sub-issues] | reopen <n> --reason "..." |
 block <n> --on <m> | unblock <n> --from <m> |
-epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F | --outcome "..."] | epic status [<n> | --state open/closed/all] |
+epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n> | --state open/closed/all] |
 apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew apply --help). All take --json.`
 )
 

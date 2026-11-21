@@ -842,6 +842,8 @@ func TestEditAppendsIdeaOutcomeWithoutReformattingBody(t *testing.T) {
 		{"existing section", "### Outcome\n\nFirst.\n\n### Notes\n\nNext.", "Second.", "### Outcome\n\nFirst.\n\nSecond.\n\n### Notes\n\nNext."},
 		{"provenance", "### Outcome\n\nFirst.\n\n" + marker, "Second.", "### Outcome\n\nFirst.\n\nSecond.\n\n" + marker},
 		{"code example", "~~~md\n### Outcome\n~~~\n    ### Outcome", "Actual.", "~~~md\n### Outcome\n~~~\n    ### Outcome\n\n### Outcome\n\nActual."},
+		{"indented top-level heading", "  ### Outcome\n\nFirst.\n\n  ### Follow-up\n\nKeep.", "Second.", "  ### Outcome\n\nFirst.\n\nSecond.\n\n  ### Follow-up\n\nKeep."},
+		{"nested heading", "- Item\n  ### Outcome\n  Nested", "Actual.", "- Item\n  ### Outcome\n  Nested\n\n### Outcome\n\nActual."},
 		{"comment", "<!--\n### Outcome\n-->\n### Problem\n\nSlow.", "Actual.", "<!--\n### Outcome\n-->\n### Problem\n\nSlow.\n\n### Outcome\n\nActual."},
 		{"CRLF", "### Outcome\r\n\r\nFirst.\r\n", "Second.\nContinued.", "### Outcome\r\n\r\nFirst.\r\n\r\nSecond.\r\nContinued.\r\n"},
 	}
@@ -870,6 +872,9 @@ func TestEditRefusesInvalidIdeaOutcomesBeforeChangingOtherFields(t *testing.T) {
 		{name: "empty note", typ: "idea", note: point(" \n ")},
 		{name: "body replacement", typ: "idea", note: point("Note."), replacement: point("Replacement.")},
 		{name: "task", typ: "task", note: point("Note.")},
+		{name: "unclosed fence in note", typ: "idea", body: "### Outcome\n\nFirst.\n\n### Follow-up\n\nKeep.", note: point("~~~md\nUnclosed")},
+		{name: "unclosed comment in note", typ: "idea", body: "### Outcome\n\nFirst.\n\n### Follow-up\n\nKeep.", note: point("<!--\nUnclosed")},
+		{name: "note creates peer section", typ: "idea", note: point("### Decision\n\nText")},
 		{name: "unfinished fence", typ: "idea", body: "~~~md\nUntitled", note: point("Note.")},
 	}
 	for _, tc := range cases {
@@ -891,18 +896,23 @@ func TestEditRefusesInvalidIdeaOutcomesBeforeChangingOtherFields(t *testing.T) {
 	}
 }
 
-type concurrentBodyEdit struct{ *local.Store }
+type concurrentBodyEdit struct {
+	*local.Store
+	beforeWrite func(context.Context, int) error
+}
 
-func (s concurrentBodyEdit) EditBodyIfCurrent(ctx context.Context, number int, before, after string) (bool, error) {
-	if err := s.EditBody(ctx, number, "A concurrent body update."); err != nil {
-		return false, err
+func (s concurrentBodyEdit) EditBodyWithCheck(ctx context.Context, number int, body string, check func(model.Issue) error) error {
+	if err := s.beforeWrite(ctx, number); err != nil {
+		return err
 	}
-	return s.Store.EditBodyIfCurrent(ctx, number, before, after)
+	return s.Store.EditBodyWithCheck(ctx, number, body, check)
 }
 
 func TestEditOutcomeDoesNotOverwriteAConcurrentLocalBodyEdit(t *testing.T) {
 	ctx, store, issue := startFixture(t, "P2", "idea")
-	tr := WrapAs(concurrentBodyEdit{store}, BackendLocal, "")
+	tr := WrapAs(concurrentBodyEdit{store, func(ctx context.Context, number int) error {
+		return store.EditBody(ctx, number, "A concurrent body update.")
+	}}, BackendLocal, "")
 	_, err := tr.Edit(ctx, EditRequest{Issue: issue.Number, Outcome: point("First decision.")})
 	var invalid *InvalidInputError
 	if !errors.As(err, &invalid) || invalid.Field != "outcome" {
@@ -911,4 +921,36 @@ func TestEditOutcomeDoesNotOverwriteAConcurrentLocalBodyEdit(t *testing.T) {
 	if got := storeIssue(t, ctx, store, issue.Number).Body; got != "A concurrent body update." {
 		t.Errorf("body = %q, want the concurrent edit", got)
 	}
+}
+
+func TestEditOutcomeRechecksLocalEligibilityUnderTheWriteLock(t *testing.T) {
+	t.Run("closed", func(t *testing.T) {
+		ctx, store, issue := startFixture(t, "P2", "idea")
+		tr := WrapAs(concurrentBodyEdit{store, func(ctx context.Context, number int) error {
+			return store.CloseIssue(ctx, number, gh.CloseCompleted)
+		}}, BackendLocal, "")
+		_, err := tr.Edit(ctx, EditRequest{Issue: issue.Number, Outcome: point("Decision.")})
+		var closed *ClosedError
+		if !errors.As(err, &closed) {
+			t.Fatalf("edit = %v, want closed issue error", err)
+		}
+		if body := storeIssue(t, ctx, store, issue.Number).Body; body != issue.Body {
+			t.Errorf("body changed to %q", body)
+		}
+	})
+
+	t.Run("retyped", func(t *testing.T) {
+		ctx, store, issue := startFixture(t, "P2", "idea")
+		tr := WrapAs(concurrentBodyEdit{store, func(ctx context.Context, number int) error {
+			return swapType(ctx, store, issue, "task")
+		}}, BackendLocal, "")
+		_, err := tr.Edit(ctx, EditRequest{Issue: issue.Number, Outcome: point("Decision.")})
+		var invalid *InvalidInputError
+		if !errors.As(err, &invalid) || invalid.Field != "outcome" {
+			t.Fatalf("edit = %v, want invalid outcome error", err)
+		}
+		if body := storeIssue(t, ctx, store, issue.Number).Body; body != issue.Body {
+			t.Errorf("body changed to %q", body)
+		}
+	})
 }
