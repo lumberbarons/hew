@@ -814,6 +814,9 @@ func TestApplyPlanRefusesFreshIdeaHierarchyPlans(t *testing.T) {
 			if !strings.Contains(invalid.Reason, "idea") || !strings.Contains(invalid.Reason, "line ") {
 				t.Errorf("reason = %q, want the plan line and the idea rule", invalid.Reason)
 			}
+			if strings.Contains(invalid.Reason, "#0") {
+				t.Errorf("reason = %q, names an uncreated parent as #0", invalid.Reason)
+			}
 			if store.createCalls != 0 || len(store.created) != 0 {
 				t.Errorf("refused plan created %d issue(s): %v", store.createCalls, store.created)
 			}

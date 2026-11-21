@@ -273,18 +273,24 @@ func (t *Tracker) validatePendingPlanParents(ctx context.Context, entries []Plan
 		}
 		var parentNum int
 		var parentType string
+		var parentRef string // how the refusal names the parent
 		if e.Parent.ID != "" {
 			parentEntry, ok := byKey[e.Parent.ID]
 			if !ok {
 				continue // ValidatePlan already refused an unknown id
 			}
 			parentNum, _ = checkpoint.Created(parentEntry.Key())
+			parentRef = fmt.Sprintf("#%d", parentNum)
+			if parentNum == 0 {
+				parentRef = fmt.Sprintf("%q", e.Parent.ID) // not created yet: no number to name
+			}
 			var err error
 			if parentType, err = entryType(parentEntry); err != nil {
 				return err
 			}
 		} else {
 			parentNum = e.Parent.Number
+			parentRef = fmt.Sprintf("#%d", parentNum)
 			parent, err := t.store.GetIssue(ctx, parentNum)
 			if err != nil {
 				return fmt.Errorf("line %d: parent: %w", e.Line, asReadError(err))
@@ -303,7 +309,7 @@ func (t *Tracker) validatePendingPlanParents(ctx context.Context, entries []Plan
 			return &InvalidInputError{Field: "plan", Reason: entryError(e, i, "parent: %s", ideaChildRefusal).Error()}
 		}
 		if parentType == model.IdeaType {
-			return &InvalidInputError{Field: "plan", Reason: entryError(e, i, "parent: #%d is an idea; %s", parentNum, ideaParentRefusal).Error()}
+			return &InvalidInputError{Field: "plan", Reason: entryError(e, i, "parent: %s is an idea; %s", parentRef, ideaParentRefusal).Error()}
 		}
 	}
 	return nil
