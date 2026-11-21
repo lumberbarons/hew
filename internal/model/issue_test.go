@@ -2,6 +2,7 @@ package model
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -515,5 +516,70 @@ func TestEpicsOfIncludesClosedEpicsAndEpicsDoesNot(t *testing.T) {
 	}
 	if got := EpicsOf(issues); len(got) != 2 || got[0].Number != 1 || got[1].Number != 2 {
 		t.Errorf("EpicsOf() = %v, want both epics and not the plain issue", got)
+	}
+}
+
+// An issue typed idea that also meets the epic rule keeps the epic
+// classification on reads: children and the marker outrank the type, ready
+// leaves it out, and the write-side conflict names what holds it there.
+func TestIdeaTypedEpicKeepsEpicPrecedence(t *testing.T) {
+	withChildren := Issue{
+		Number: 5, State: "OPEN", Labels: []string{"P2", IdeaType},
+		SubIssues:      []Ref{{Number: 6, State: "OPEN"}},
+		SubIssuesTotal: 1,
+	}
+	withMarker := Issue{Number: 7, State: "OPEN", Labels: []string{"P1", IdeaType, EpicLabel}}
+	for name, issue := range map[string]Issue{"children": withChildren, "marker": withMarker} {
+		t.Run(name, func(t *testing.T) {
+			if !issue.IsEpic() {
+				t.Errorf("IsEpic() = false, want the idea typed %s treated as an epic", name)
+			}
+			if issue.Untriaged() {
+				t.Error("an epic read as untriaged")
+			}
+			if ready := Ready([]Issue{issue}); len(ready) != 0 {
+				t.Errorf("Ready() = %v, want the epic idea excluded", ready)
+			}
+			if conflict := issue.IdeaEpicConflict(); conflict == "" {
+				t.Error("IdeaEpicConflict() is empty, want the holding relationship named")
+			}
+		})
+	}
+	if !withChildren.HasChildren() || withChildren.HasEpicMarker() {
+		t.Errorf("child-bearing idea = children %v marker %v, want children only", withChildren.HasChildren(), withChildren.HasEpicMarker())
+	}
+	if withMarker.HasChildren() || !withMarker.HasEpicMarker() {
+		t.Errorf("marked idea = children %v marker %v, want the marker only", withMarker.HasChildren(), withMarker.HasEpicMarker())
+	}
+}
+
+// IdeaEpicConflict is the write-side counterpart of the read precedence: it
+// names the first hierarchy that would survive a type change to idea, and
+// reports none for an issue with nothing holding it.
+func TestIdeaEpicConflictNamesTheHoldingRelationship(t *testing.T) {
+	parent := &Ref{Number: 9, State: "OPEN"}
+	tests := map[string]struct {
+		issue Issue
+		want  string
+	}{
+		"child":           {Issue{Number: 1, Parent: parent}, "child of #9"},
+		"children":        {Issue{Number: 2, SubIssues: []Ref{{Number: 3}}, SubIssuesTotal: 1}, "sub-issues"},
+		"marker":          {Issue{Number: 4, Labels: []string{"P2", IdeaType, EpicLabel}}, "epic label"},
+		"standalone idea": {Issue{Number: 5, Labels: []string{"P2", IdeaType}}, ""},
+		"plain task":      {Issue{Number: 6, Labels: []string{"P2", "task"}}, ""},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := tc.issue.IdeaEpicConflict()
+			if tc.want == "" {
+				if got != "" {
+					t.Errorf("IdeaEpicConflict() = %q, want none", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("IdeaEpicConflict() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

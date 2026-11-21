@@ -3,6 +3,7 @@ package tracker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -84,9 +85,47 @@ func (t *Tracker) Edit(ctx context.Context, req EditRequest) (EditResult, error)
 	}
 	// Resolve the parent before the first write, like every other reference an
 	// edit writes: a typo must not leave the earlier fields applied.
+	var parent model.Issue
 	if req.Parent != nil {
-		if _, err := t.store.GetIssue(ctx, *req.Parent); err != nil {
+		var err error
+		parent, err = t.store.GetIssue(ctx, *req.Parent)
+		if err != nil {
 			return EditResult{}, asReadError(err)
+		}
+	}
+	// The idea type takes no epic position. Check the edit's result before the
+	// first write: a type change to idea may only land when no relationship or
+	// marker would survive it, and a new parent edge may not touch an idea on
+	// either end. A NoParent in the same request is part of the result, which
+	// is how a maintainer repairs an existing overlap.
+	resultingType, _ := issue.Type()
+	if req.Type != nil {
+		resultingType = *req.Type
+	}
+	if req.Type != nil && *req.Type == model.IdeaType {
+		retained := issue
+		switch {
+		case req.NoParent:
+			retained.Parent = nil
+		case req.Parent != nil:
+			retained.Parent = &model.Ref{Number: *req.Parent, State: parent.State}
+		}
+		if conflict := retained.IdeaEpicConflict(); conflict != "" {
+			return EditResult{}, &InvalidInputError{
+				Field:  "type",
+				Reason: fmt.Sprintf("cannot classify #%d as an idea while %s; detach the relationship or change its type first", req.Issue, conflict),
+			}
+		}
+	}
+	if req.Parent != nil {
+		if resultingType == model.IdeaType {
+			return EditResult{}, &InvalidInputError{Field: "parent", Reason: ideaChildRefusal}
+		}
+		if typ, _ := parent.Type(); typ == model.IdeaType {
+			return EditResult{}, &InvalidInputError{
+				Field:  "parent",
+				Reason: fmt.Sprintf("#%d is an idea; %s", parent.Number, ideaParentRefusal),
+			}
 		}
 	}
 

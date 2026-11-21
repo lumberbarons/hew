@@ -637,6 +637,175 @@ func TestEditNoParent(t *testing.T) {
 	})
 }
 
+// A hierarchy cannot be retyped as an idea while the parent, children or epic
+// marker that contradicts the type would remain. Each refusal happens before
+// the first write, so the issue is untouched.
+func TestEditRefusesToRetypeAHierarchyAsIdea(t *testing.T) {
+	t.Run("a child of an epic", func(t *testing.T) {
+		ctx, store, issue := startFixture(t)
+		parent, err := store.CreateIssue(ctx, "Epic: parent", "", []string{"P2", model.EpicLabel})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.AddSubIssue(ctx, parent.Number, issue.Number, false); err != nil {
+			t.Fatal(err)
+		}
+		before := storeIssue(t, ctx, store, issue.Number)
+		idea := model.IdeaType
+		var invalid *InvalidInputError
+		if _, err := WrapAs(store, BackendLocal, "actor-a").Edit(ctx, EditRequest{Issue: issue.Number, Type: &idea}); !errors.As(err, &invalid) {
+			t.Fatalf("Edit = %v, want an *InvalidInputError", err)
+		}
+		if invalid.Field != "type" || !strings.Contains(invalid.Reason, "child of #") {
+			t.Errorf("InvalidInputError = %+v, want a type refusal naming the parent", invalid)
+		}
+		assertUnchanged(t, before, storeIssue(t, ctx, store, issue.Number))
+	})
+
+	t.Run("an issue with children", func(t *testing.T) {
+		ctx, store, issue := startFixture(t)
+		child, err := store.CreateIssue(ctx, "Child", "", []string{"P2", "task"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.AddSubIssue(ctx, issue.Number, child.Number, false); err != nil {
+			t.Fatal(err)
+		}
+		before := storeIssue(t, ctx, store, issue.Number)
+		idea := model.IdeaType
+		var invalid *InvalidInputError
+		if _, err := WrapAs(store, BackendLocal, "actor-a").Edit(ctx, EditRequest{Issue: issue.Number, Type: &idea}); !errors.As(err, &invalid) {
+			t.Fatalf("Edit = %v, want an *InvalidInputError", err)
+		}
+		if invalid.Field != "type" || !strings.Contains(invalid.Reason, "sub-issues") {
+			t.Errorf("InvalidInputError = %+v, want a type refusal naming the children", invalid)
+		}
+		assertUnchanged(t, before, storeIssue(t, ctx, store, issue.Number))
+	})
+
+	t.Run("a marked epic", func(t *testing.T) {
+		ctx, store, issue := startFixture(t, "P2", "task", model.EpicLabel)
+		before := storeIssue(t, ctx, store, issue.Number)
+		idea := model.IdeaType
+		var invalid *InvalidInputError
+		if _, err := WrapAs(store, BackendLocal, "actor-a").Edit(ctx, EditRequest{Issue: issue.Number, Type: &idea}); !errors.As(err, &invalid) {
+			t.Fatalf("Edit = %v, want an *InvalidInputError", err)
+		}
+		if invalid.Field != "type" || !strings.Contains(invalid.Reason, "epic label") {
+			t.Errorf("InvalidInputError = %+v, want a type refusal naming the marker", invalid)
+		}
+		assertUnchanged(t, before, storeIssue(t, ctx, store, issue.Number))
+	})
+}
+
+// A maintainer resolves an existing overlap the same way the read path keeps
+// it visible: detach the relationship or change the type.
+func TestEditResolvesAnIdeaOverlap(t *testing.T) {
+	t.Run("detaching the parent lets the child become an idea", func(t *testing.T) {
+		ctx, store, issue := startFixture(t)
+		parent, err := store.CreateIssue(ctx, "Epic: parent", "", []string{"P2", model.EpicLabel})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.AddSubIssue(ctx, parent.Number, issue.Number, false); err != nil {
+			t.Fatal(err)
+		}
+		idea := model.IdeaType
+		if _, err := WrapAs(store, BackendLocal, "actor-a").Edit(ctx, EditRequest{
+			Issue: issue.Number, Type: &idea, NoParent: true,
+		}); err != nil {
+			t.Fatalf("Edit: %v", err)
+		}
+		got := storeIssue(t, ctx, store, issue.Number)
+		if typ, _ := got.Type(); typ != model.IdeaType {
+			t.Errorf("type = %q, want idea", typ)
+		}
+		if got.Parent != nil {
+			t.Errorf("parent = %+v, want it detached", got.Parent)
+		}
+	})
+
+	t.Run("changing a marked idea to task keeps the marker and clears the conflict", func(t *testing.T) {
+		ctx, store, issue := startFixture(t, "P2", model.IdeaType, model.EpicLabel)
+		task := "task"
+		if _, err := WrapAs(store, BackendLocal, "actor-a").Edit(ctx, EditRequest{Issue: issue.Number, Type: &task}); err != nil {
+			t.Fatalf("Edit: %v", err)
+		}
+		got := storeIssue(t, ctx, store, issue.Number)
+		if typ, _ := got.Type(); typ != "task" {
+			t.Errorf("type = %q, want task", typ)
+		}
+		if !got.IsEpic() || !got.HasEpicMarker() {
+			t.Error("the epic marker was not kept, want the hierarchy still visible")
+		}
+	})
+}
+
+// A new parent relationship is refused when either end is an idea: an idea is
+// associated with an epic through references, not the child hierarchy.
+func TestEditRefusesNewIdeaParentRelationships(t *testing.T) {
+	t.Run("an idea as the child", func(t *testing.T) {
+		ctx, store, issue := startFixture(t, "P2", model.IdeaType)
+		parent, err := store.CreateIssue(ctx, "Epic: parent", "", []string{"P2", model.EpicLabel})
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := storeIssue(t, ctx, store, issue.Number)
+		var invalid *InvalidInputError
+		if _, err := WrapAs(store, BackendLocal, "actor-a").Edit(ctx, EditRequest{
+			Issue: issue.Number, Parent: &parent.Number,
+		}); !errors.As(err, &invalid) {
+			t.Fatalf("Edit = %v, want an *InvalidInputError", err)
+		}
+		if invalid.Field != "parent" || !strings.Contains(invalid.Reason, "idea cannot be an epic child") {
+			t.Errorf("InvalidInputError = %+v, want a parent refusal naming the idea rule", invalid)
+		}
+		assertUnchanged(t, before, storeIssue(t, ctx, store, issue.Number))
+	})
+
+	t.Run("an idea as the parent", func(t *testing.T) {
+		ctx, store, issue := startFixture(t)
+		parent, err := store.CreateIssue(ctx, "Consider a cache", "", []string{"P2", model.IdeaType})
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := storeIssue(t, ctx, store, issue.Number)
+		var invalid *InvalidInputError
+		if _, err := WrapAs(store, BackendLocal, "actor-a").Edit(ctx, EditRequest{
+			Issue: issue.Number, Parent: &parent.Number,
+		}); !errors.As(err, &invalid) {
+			t.Fatalf("Edit = %v, want an *InvalidInputError", err)
+		}
+		if invalid.Field != "parent" || !strings.Contains(invalid.Reason, "cannot be an epic parent") {
+			t.Errorf("InvalidInputError = %+v, want a parent refusal naming the idea parent", invalid)
+		}
+		assertUnchanged(t, before, storeIssue(t, ctx, store, issue.Number))
+	})
+}
+
+// An idea attached outside hew is repaired through the ordinary detach: reads
+// keep showing the overlap, and the edit that removes it is allowed.
+func TestEditDetachesAnExternallyAttachedIdeaChild(t *testing.T) {
+	ctx, store, epic := startFixture(t, "P2", model.EpicLabel)
+	idea, err := store.CreateIssue(ctx, "Consider a cache", "", []string{"P1", model.IdeaType})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddSubIssue(ctx, epic.Number, idea.Number, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WrapAs(store, BackendLocal, "actor-a").Edit(ctx, EditRequest{Issue: idea.Number, NoParent: true}); err != nil {
+		t.Fatalf("Edit NoParent on an idea child: %v", err)
+	}
+	got := storeIssue(t, ctx, store, idea.Number)
+	if got.Parent != nil {
+		t.Errorf("parent = %+v, want the external attachment removed", got.Parent)
+	}
+	if typ, _ := got.Type(); typ != model.IdeaType {
+		t.Errorf("type = %q, want the idea kept", typ)
+	}
+}
+
 // A parent the issue is already under is the requested state: the write is a
 // no-op the backend accepts, and the remaining edits still land.
 func TestEditToTheSameParent(t *testing.T) {

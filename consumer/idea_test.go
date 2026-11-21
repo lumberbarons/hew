@@ -6,6 +6,7 @@ package consumer_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -266,4 +267,138 @@ func TestExternalConsumerAppliesAndMigratesAnIdea(t *testing.T) {
 		t.Fatal("the idea was not migrated")
 	}
 	assertOneTypeAndPriority(t, labels, "idea")
+}
+
+// TestExternalConsumerKeepsIdeasOutOfEpicHierarchy is the hierarchy contract
+// from outside the module: create and epic creation refuse new idea
+// relationships before writing, and an ordinary issue reference stays a
+// reference rather than becoming a child link.
+func TestExternalConsumerKeepsIdeasOutOfEpicHierarchy(t *testing.T) {
+	tr := externalTracker(t)
+	ctx := context.Background()
+
+	epic, err := tr.CreateEpic(ctx, tracker.CreateEpicRequest{Title: "Voltgo support"})
+	if err != nil {
+		t.Fatalf("CreateEpic: %v", err)
+	}
+	idea, err := tr.Create(ctx, tracker.CreateRequest{Title: "Consider a cache", Type: "idea"})
+	if err != nil {
+		t.Fatalf("Create idea: %v", err)
+	}
+
+	var invalid *tracker.InvalidInputError
+	if _, err := tr.Create(ctx, tracker.CreateRequest{
+		Title: "Child idea", Type: "idea", Parent: epic.Issue.Number,
+	}); !errors.As(err, &invalid) || invalid.Field != "parent" {
+		t.Fatalf("idea child = %v, want a parent InvalidInputError", err)
+	}
+	invalid = nil
+	if _, err := tr.Create(ctx, tracker.CreateRequest{
+		Title: "Work", Type: "task", Parent: idea.Issue.Number,
+	}); !errors.As(err, &invalid) || invalid.Field != "parent" {
+		t.Fatalf("task under an idea = %v, want a parent InvalidInputError", err)
+	}
+	invalid = nil
+	if _, err := tr.CreateEpic(ctx, tracker.CreateEpicRequest{
+		Title: "Another epic", Children: []int{idea.Issue.Number},
+	}); !errors.As(err, &invalid) || invalid.Field != "children" {
+		t.Fatalf("epic with an idea child = %v, want a children InvalidInputError", err)
+	}
+
+	snapshot, err := tr.Snapshot(ctx, tracker.SnapshotOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(snapshot.Issues()); got != 2 {
+		t.Fatalf("refused writes left %d issues, want only the epic and the idea", got)
+	}
+
+	referenced, err := tr.Create(ctx, tracker.CreateRequest{
+		Title: "Further thought", Type: "idea",
+		Body: tracker.Body{Text: fmt.Sprintf("Follow-up to #%d", epic.Issue.Number)},
+	})
+	if err != nil {
+		t.Fatalf("Create referencing idea: %v", err)
+	}
+	read, err := tr.Get(ctx, referenced.Issue.Number)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Parent != nil {
+		t.Errorf("parent = %+v, want a body reference to create no child link", read.Parent)
+	}
+	detail, err := tr.Detail(ctx, epic.Issue.Number)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Children) != 0 {
+		t.Errorf("epic children = %v, want the referenced idea outside the hierarchy", detail.Children)
+	}
+}
+
+// TestExternalConsumerReadsAnExternallyAttachedIdeaAsAnEpic pins the read
+// precedence on GitHub: an idea a repository attached to a child reads as an
+// epic, keeps its stored relationships visible, cannot be claimed even with
+// discovery intent, and can still be detached through the ordinary edit.
+func TestExternalConsumerReadsAnExternallyAttachedIdeaAsAnEpic(t *testing.T) {
+	fake := newGitHubFake()
+	tr := openGitHubTracker(t, fake)
+	ctx := context.Background()
+
+	seed(fake, 800, "Epic: Voltgo support", "", "P2", "epic")
+	seed(fake, 801, "Consider a cache", "", "P1", "idea")
+	seed(fake, 802, "Implementation", "", "P2", "task")
+	fake.mu.Lock()
+	fake.issues[801].parent = 800
+	fake.issues[802].parent = 801
+	fake.mu.Unlock()
+
+	read, err := tr.Get(ctx, 801)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !read.Epic {
+		t.Error("Epic = false, want the idea with children read as an epic")
+	}
+	if read.Type == nil || *read.Type != "idea" {
+		t.Errorf("type = %v, want the stored idea type kept", read.Type)
+	}
+	if got, want := read.SubIssues, []int{802}; !slices.Equal(got, want) {
+		t.Errorf("subIssues = %v, want the stored relationship %v visible", got, want)
+	}
+
+	var epicErr *tracker.EpicError
+	if _, err := tr.Start(ctx, 801, tracker.StartOptions{ForDiscovery: true}); !errors.As(err, &epicErr) {
+		t.Fatalf("discovery start = %v, want an *tracker.EpicError", err)
+	}
+
+	detail, err := tr.Detail(ctx, 801)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := issueNumbers(detail.Children), []int{802}; !slices.Equal(got, want) {
+		t.Errorf("detail children = %v, want %v", got, want)
+	}
+
+	if _, err := tr.Edit(ctx, tracker.EditRequest{Issue: 801, NoParent: true}); err != nil {
+		t.Fatalf("detach externally attached idea: %v", err)
+	}
+	read, err = tr.Get(ctx, 801)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Parent != nil {
+		t.Errorf("parent = %+v, want the external attachment removed", read.Parent)
+	}
+	if !read.Epic {
+		t.Error("Epic = false, want the idea's own child kept")
+	}
+}
+
+func issueNumbers(issues []tracker.Issue) []int {
+	out := make([]int, len(issues))
+	for i, issue := range issues {
+		out[i] = issue.Number
+	}
+	return out
 }
