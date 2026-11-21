@@ -2,56 +2,126 @@ package conventions
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 )
 
-// AppendOutcome adds a note to the first level-three Outcome section, creating
-// one if needed. It inserts text without reformatting the rest of the body.
+// AppendOutcome adds a note to the first top-level ATX Outcome
+// section, creating one if needed. It inserts text without reformatting the
+// rest of the body. Notes must leave the surrounding Markdown blocks intact.
 func AppendOutcome(body, note string) (string, error) {
+	if err := validateOutcomeNote(note); err != nil {
+		return "", err
+	}
 	const heading = "### Outcome"
 	var offset, end int
-	var fence string
-	var found, comment bool
+	var blocks outcomeBlocks
+	var found bool
 	for raw := range strings.SplitSeq(body, "\n") {
 		line := strings.TrimSuffix(raw, "\r")
 		trimmed := strings.TrimSpace(line)
 		at := offset
 		offset += len(raw) + 1
-		switch {
-		case comment:
-			comment = !strings.Contains(trimmed, "-->")
-		case fence != "":
-			if strings.HasPrefix(trimmed, fence) && strings.Trim(trimmed, fence[:1]) == "" {
-				fence = ""
-			}
-		case strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t"):
-			// Indented code cannot start or end a section.
-		case strings.HasPrefix(trimmed, "<!--"):
-			if found && strings.HasPrefix(trimmed, "<!-- hew:") {
-				return insertOutcome(body, end, note), nil
-			}
-			comment = !strings.Contains(trimmed, "-->")
-		default:
-			fence = openingFence(trimmed)
-			if title, ok := headingTitle(trimmed); ok {
-				level := len(trimmed) - len(strings.TrimLeft(trimmed, "#"))
+		if found && !blocks.open() && strings.HasPrefix(line, "<!-- hew:") {
+			return insertOutcome(body, end, note), nil
+		}
+		if !blocks.consume(line, trimmed) {
+			if level, title := outcomeHeading(trimmed); level > 0 {
 				if found && level <= 3 {
 					return insertOutcome(body, end, note), nil
 				}
-				found = level == 3 && strings.EqualFold(title, "Outcome") || found
+				found = found || (level == 3 && strings.EqualFold(title, "Outcome"))
 			}
 		}
 		if trimmed != "" {
 			end = at + len(line)
 		}
 	}
-	if fence != "" || comment {
+	if blocks.open() {
 		return "", errors.New("close the Markdown code fence or comment in the issue body first")
 	}
 	if !found {
 		note = heading + "\n\n" + note
 	}
 	return insertOutcome(body, end, note), nil
+}
+
+func validateOutcomeNote(note string) error {
+	const headingRefusal = "use level-four or deeper headings within an outcome note"
+	var blocks outcomeBlocks
+	var prose bool
+	for line := range strings.SplitSeq(note, "\n") {
+		trimmed := strings.TrimSpace(line)
+		inside := blocks.consume(line, trimmed)
+		if !inside {
+			if level, _ := outcomeHeading(trimmed); level > 0 && level <= 3 {
+				return errors.New(headingRefusal)
+			}
+			// A setext underline turns the preceding paragraph into a
+			// heading; after a blank line the same line is a thematic break.
+			if prose && isSetextUnderline(trimmed) {
+				return errors.New(headingRefusal)
+			}
+		}
+		level, _ := outcomeHeading(trimmed)
+		prose = !inside && trimmed != "" && level == 0 && !isSetextUnderline(trimmed)
+	}
+	if blocks.open() {
+		return errors.New("close the Markdown code fence or comment in the outcome note")
+	}
+	return nil
+}
+
+// isSetextUnderline reports whether the line is a setext heading underline:
+// one or more '=' or '-' characters and nothing else.
+func isSetextUnderline(line string) bool {
+	return line != "" && (strings.Trim(line, "=") == "" || strings.Trim(line, "-") == "")
+}
+
+func outcomeHeading(line string) (level int, title string) {
+	title, ok := headingTitle(line)
+	if !ok {
+		return 0, ""
+	}
+	return len(line) - len(strings.TrimLeft(line, "#")), title
+}
+
+var outcomeListMarker = regexp.MustCompile(`^ {0,3}(?:[-+*]|[0-9]{1,9}[.)]) {1,4}`)
+
+type outcomeBlocks struct {
+	fence      string
+	comment    bool
+	listIndent int
+}
+
+func (b outcomeBlocks) open() bool {
+	return b.fence != "" || b.comment
+}
+
+// consume reports whether the line is inside a code block, comment or list.
+func (b *outcomeBlocks) consume(line, trimmed string) bool {
+	if b.listIndent > 0 {
+		if trimmed == "" || len(line)-len(strings.TrimLeft(line, " ")) >= b.listIndent {
+			return true
+		}
+		b.listIndent = 0
+	}
+	switch {
+	case b.comment:
+		b.comment = !strings.Contains(trimmed, "-->")
+	case b.fence != "":
+		if strings.HasPrefix(trimmed, b.fence) && strings.Trim(trimmed, b.fence[:1]) == "" {
+			b.fence = ""
+		}
+	case strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t"):
+	case strings.HasPrefix(trimmed, "<!--"):
+		b.comment = !strings.Contains(trimmed, "-->")
+	default:
+		b.listIndent = len(outcomeListMarker.FindString(line))
+		b.fence = openingFence(trimmed)
+		return b.fence != "" || b.listIndent > 0
+	}
+	return true
 }
 
 func insertOutcome(body string, at int, note string) string {

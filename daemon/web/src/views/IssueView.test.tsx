@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Detail } from '../types';
 import { fx } from '../test/fixtures';
 import { mockApi, status } from '../test/mockApi';
@@ -492,4 +492,27 @@ it('keeps an outcome draft when the tracker refuses the edit', async () => {
     outcome: 'Decided in #9.',
     allowClosed: true,
   });
+});
+
+it('locks the outcome draft until its save finishes', async () => {
+  mockApi(reads(withIssue(fx.claimed, { type: 'idea' })));
+  const fetch = globalThis.fetch;
+  let finishSave!: (value: Response) => void;
+  const pending = new Promise<Response>((resolve) => {
+    finishSave = resolve;
+  });
+  vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+    init?.method === 'PATCH' ? pending : fetch(input, init),
+  );
+  const { user } = renderView(<IssueView n={2} />);
+  await user.click(await screen.findByText('Record outcome'));
+  const note = screen.getByLabelText('Outcome note');
+  await user.type(note, 'First decision.');
+  await user.click(screen.getByRole('button', { name: 'Save outcome' }));
+  expect(note).toBeDisabled();
+
+  finishSave(new Response('{}'));
+  expect(await screen.findByText('Outcome recorded')).toBeInTheDocument();
+  expect(note).toBeEnabled();
+  expect(note).toHaveValue('');
 });

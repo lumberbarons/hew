@@ -195,7 +195,7 @@ func (t *Tracker) Edit(ctx context.Context, req EditRequest) (EditResult, error)
 		}
 	}
 	if req.Outcome != nil {
-		if err := step("outcome", t.editOutcomeBody(ctx, issue, outcomeBody)); err != nil {
+		if err := step("outcome", t.editOutcomeBody(ctx, issue, outcomeBody, req.AllowClosed)); err != nil {
 			return EditResult{}, err
 		}
 	}
@@ -217,15 +217,22 @@ func (t *Tracker) Edit(ctx context.Context, req EditRequest) (EditResult, error)
 
 // A local store can guard a read-modify-write under its write lock. The
 // GitHub backend exposes only whole-body updates.
-func (t *Tracker) editOutcomeBody(ctx context.Context, issue model.Issue, body string) error {
+func (t *Tracker) editOutcomeBody(ctx context.Context, issue model.Issue, body string, allowClosed bool) error {
 	if store, ok := t.store.(interface {
-		EditBodyIfCurrent(context.Context, int, string, string) (bool, error)
+		EditBodyWithCheck(context.Context, int, string, func(model.Issue) error) error
 	}); ok {
-		matched, err := store.EditBodyIfCurrent(ctx, issue.Number, issue.Body, body)
-		if err == nil && !matched {
-			return &InvalidInputError{Field: "outcome", Reason: "the body changed while recording the outcome; try again"}
-		}
-		return err
+		return store.EditBodyWithCheck(ctx, issue.Number, body, func(current model.Issue) error {
+			if !current.IsOpen() && !allowClosed {
+				return &ClosedError{Issue: current.Number, Reason: current.StateReason}
+			}
+			if !current.IsIdea() || current.IsEpic() {
+				return &InvalidInputError{Field: "outcome", Reason: "can only be recorded on an idea"}
+			}
+			if current.Body != issue.Body {
+				return &InvalidInputError{Field: "outcome", Reason: "the body changed while recording the outcome; try again"}
+			}
+			return nil
+		})
 	}
 	return t.store.EditBody(ctx, issue.Number, body)
 }

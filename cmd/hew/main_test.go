@@ -153,6 +153,9 @@ func TestPrimerMatchesCommandSurface(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			entries := primerCommandEntries(t, tc.primer)
+			if strings.Contains(entries["epic create"], "--outcome") {
+				t.Errorf("epic create does not accept --outcome: %q", entries["epic create"])
+			}
 			for _, lf := range leaves(root(), "") {
 				if setupCommands[lf.topName] {
 					continue
