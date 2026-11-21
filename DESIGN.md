@@ -48,7 +48,9 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
 
 - **Priority labels**, every issue gets exactly one: `P0` (critical) → `P4` (backlog).
   Default `P2`.
-- **Type labels**, exactly one: `bug`, `enhancement`, `task`.
+- **Type labels**, exactly one: `bug`, `enhancement`, `task`, or `idea` for
+  discovery work. `idea` sits last in the normalization precedence, so an older
+  issue that already carried it as an area label keeps its previous reading.
 - **Area labels**, zero or more, flat names (`tests`, `web-ui`, ...). Created
   sparingly.
 - **No title prefixes** — type/priority/area live in labels. Exception: `Epic: ` on
@@ -60,6 +62,18 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
   them. Every epic the tool creates (`epic create`, `apply` epic entries,
   `migrate beads`) also carries the `epic` label, which is what makes a childless
   one an epic — see read-path normalization.
+- **Ideas are investigation work, not implementation.** `create --type idea`
+  captures a possible improvement; `ready`, the primer's Ready section and hewd's
+  Ready queue exclude it, because those are the automatic paths where an agent
+  acts on what it is offered. `start <n> --for-discovery` is the explicit claim
+  path and records the caller's intent — an ordinary start refuses an idea,
+  forced or not. An investigation produces research, an ADR or a spec; approved
+  implementation is handed off as separate work issues (`--discovered-from <n>`),
+  since the idea's own scope is a question rather than a diff. An idea associates
+  with an epic through an issue reference, not as a sub-issue, so it stays out of
+  that epic's progress and next-child sequence. An idea child attached outside
+  hew remains visible in epic detail — reads preserve existing relationships —
+  but is never selected as the epic's next child.
 - **Discovered work** links back: `Discovered while working on #123` in the body,
   via `--discovered-from 123`.
 - **Body template**: `### Where` / `### Problem`|`### Goal` / `### Fix`|`### Approach` /
@@ -131,8 +145,8 @@ primer so agents know what they're looking at:
 
 - Missing priority → renders as `P?`, sorts after P4. Multiple priority labels →
   highest wins, plus a warning.
-- Missing type → shown without one. Multiple → first of bug|enhancement|task wins,
-  plus a warning.
+- Missing type → shown without one. Multiple → first of bug|enhancement|task|idea
+  wins, plus a warning.
 - Epic-ness = *has sub-issues, or carries the `epic` label*; the `Epic: ` title
   prefix is cosmetic. `ready` excludes every epic, `start` refuses one, and an
   epic is exempt from triage (it needs no type label). The label exists for the
@@ -245,7 +259,7 @@ drifts. What follows is the reasoning behind the command behaviors that are not
 obvious from a flag name. The public operation behind each command is in
 [Tracker library](#tracker-library).
 
-- **Reads.** `ready` is open, non-epic, triaged issues with zero *open*
+- **Reads.** `ready` is open, non-epic, non-idea, triaged issues with zero *open*
   blockers, sorted P0→P4 and oldest first within a priority. `list` hides
   untriaged issues in every state, and `--state` defaults to open — except
   under `--epic`, where progress means seeing what is done too. `list --bodies`
@@ -269,7 +283,9 @@ obvious from a flag name. The public operation behind each command is in
   from `list` or `show` cannot claim work whose prerequisite is unfinished; closed
   blockers do not count, and a capped blocker list warns instead of refusing on
   what it cannot see. `--force` steals a claim or overrides the blockers (the way
-  to take an issue stuck in a dependency cycle). An untriaged
+  to take an issue stuck in a dependency cycle). An idea requires
+  `--for-discovery`, forced or not: investigation is a decision the caller
+  declares rather than a routine claim. An untriaged
   issue requires `--priority`, because claiming is triage. `--show` (or
   `--json`) returns the body from the post-claim read with no extra fetch, so a
   separate `show` after claiming is unnecessary; like every mutation it omits
@@ -300,8 +316,11 @@ obvious from a flag name. The public operation behind each command is in
   issue it is a no-op rather than an error, so a retry does not look like a
   failure.
 - **`epic status`** with `<n>` lists the children plus the next workable child
-  (`next: #k`): the first open, unblocked, triaged child in creation order, which
-  is the sequence head for epics whose children chain by blocked-by. Children
+  (`next: #k`): the first open, unblocked, triaged, non-idea child in creation
+  order, which is the sequence head for epics whose children chain by blocked-by.
+  An idea child — only possible through a relationship made outside hew — is
+  listed so the relationship stays visible, but never becomes next: the
+  sequence is implementation work. Children
   come from parent backlinks over both states, so the view survives a capped
   sub-issue connection, and a capped blocker list on a child warns that `next`
   may be wrong, matching `ready`'s honesty. `show` of an epic names the same

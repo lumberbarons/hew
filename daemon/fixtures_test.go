@@ -49,7 +49,9 @@ func TestFixturesMatchTheDaemonsResponses(t *testing.T) {
 
 	// A small, fixed tracker that exercises every shape the UI renders: a
 	// claimed bug, a blocked enhancement, an epic with children, an untriaged
-	// report, an invisible character in a title, and a dependency cycle.
+	// report, an idea, an invisible character in a title, and a dependency
+	// cycle. The idea is ready-looking (unclaimed, unblocked, triaged, P0) so
+	// the fixtures catch any regression that offers it as implementation work.
 	body := map[string]any{"goal": "Make it so", "approach": "Carefully", "doneWhen": []string{"It works", "Docs updated"}}
 	post := func(path string, v any) {
 		t.Helper()
@@ -66,6 +68,7 @@ func TestFixturesMatchTheDaemonsResponses(t *testing.T) {
 		`{"number":6,"title":"Odd\u200b title","body":"see #1 and <script>alert(1)</script>","state":"OPEN","created_at":"2026-01-01T00:00:00Z","labels":["P2","task"]}`,
 		`{"number":7,"title":"Loops back","body":"x","state":"OPEN","created_at":"2026-01-01T00:00:00Z","labels":["P2","task"],"blocked_by":[8]}`,
 		`{"number":8,"title":"Loops forward","body":"y","state":"OPEN","created_at":"2026-01-01T00:00:00Z","labels":["P2","task"],"blocked_by":[7]}`,
+		`{"number":9,"title":"Consider a cache","body":"Consider caching repeated reads","state":"OPEN","created_at":"2026-01-01T00:00:00Z","labels":["P0","idea"]}`,
 	)
 	if status, res := e.call("POST", "/api/issues/2/start", "alice", map[string]any{}); status != 200 {
 		t.Fatalf("seed start = %d %v", status, res)
