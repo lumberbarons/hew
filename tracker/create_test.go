@@ -1003,3 +1003,69 @@ func TestCheckCreateEpicAgreesWithCreateEpic(t *testing.T) {
 		t.Errorf("CheckCreateEpic wrote %d issue(s)", got-before)
 	}
 }
+
+// A new idea cannot be filed as an epic child, and no new issue can be
+// attached under an idea: both ends are validated in preparation, so the
+// pre-flight and the creation refuse together and nothing is written.
+func TestCreateRefusesIdeaEpicRelationships(t *testing.T) {
+	ctx, tr, store := createTracker(t)
+	ideaParent := seed(t, store, "Consider a cache", "P2", model.IdeaType)
+	before := len(allIssues(t, store))
+
+	tests := map[string]struct {
+		req   CreateRequest
+		field string
+		want  string
+	}{
+		"idea as child": {
+			CreateRequest{Title: "Child idea", Type: model.IdeaType, Parent: ideaParent.Number},
+			"parent", "idea cannot be an epic child",
+		},
+		"idea as parent": {
+			CreateRequest{Title: "Work", Type: "task", Parent: ideaParent.Number},
+			"parent", "cannot be an epic parent",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			var invalid *InvalidInputError
+			if _, err := tr.Create(ctx, tc.req); !errors.As(err, &invalid) {
+				t.Fatalf("Create = %v, want an *InvalidInputError", err)
+			}
+			if invalid.Field != tc.field || !strings.Contains(invalid.Reason, tc.want) {
+				t.Errorf("InvalidInputError = %+v, want field %q naming %q", invalid, tc.field, tc.want)
+			}
+			checkErr := tr.CheckCreate(ctx, tc.req)
+			if checkErr == nil || checkErr.Error() != invalid.Error() {
+				t.Errorf("CheckCreate = %v, want the same refusal as Create (%v)", checkErr, invalid)
+			}
+			if got := len(allIssues(t, store)); got != before {
+				t.Errorf("refused request wrote %d issue(s)", got-before)
+			}
+		})
+	}
+}
+
+// An epic creation refuses an idea child before filing the epic itself, so a
+// rejected request cannot leave a childless epic behind.
+func TestCreateEpicRefusesAnIdeaChild(t *testing.T) {
+	ctx, tr, store := createTracker(t)
+	idea := seed(t, store, "Consider a cache", "P2", model.IdeaType)
+	before := len(allIssues(t, store))
+
+	req := CreateEpicRequest{Title: "Voltgo support", Children: []int{idea.Number}}
+	var invalid *InvalidInputError
+	if _, err := tr.CreateEpic(ctx, req); !errors.As(err, &invalid) {
+		t.Fatalf("CreateEpic = %v, want an *InvalidInputError", err)
+	}
+	if invalid.Field != "children" || !strings.Contains(invalid.Reason, "idea cannot be an epic child") {
+		t.Errorf("InvalidInputError = %+v, want a children refusal naming the idea rule", invalid)
+	}
+	checkErr := tr.CheckCreateEpic(ctx, req)
+	if checkErr == nil || checkErr.Error() != invalid.Error() {
+		t.Errorf("CheckCreateEpic = %v, want the same refusal as CreateEpic (%v)", checkErr, invalid)
+	}
+	if got := len(allIssues(t, store)); got != before {
+		t.Errorf("refused epic creation wrote %d issue(s)", got-before)
+	}
+}

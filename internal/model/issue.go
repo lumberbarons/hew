@@ -3,6 +3,7 @@
 package model
 
 import (
+	"fmt"
 	"slices"
 	"sort"
 	"strings"
@@ -250,8 +251,41 @@ func (i Issue) HasLabel(name string) bool {
 // IsEpic reports whether the issue has sub-issues or carries the epic label
 // the tool puts on every epic it creates, so a new epic is an epic before its
 // first child is attached. The "Epic: " title prefix is cosmetic.
+//
+// The hierarchy outranks the type: an issue also typed idea reads and claims
+// as an epic until a maintainer repairs the overlap.
 func (i Issue) IsEpic() bool {
-	return i.SubIssuesTotal > 0 || slices.ContainsFunc(i.Labels, IsEpicLabel)
+	return i.HasChildren() || i.HasEpicMarker()
+}
+
+// HasChildren reports whether the issue has sub-issues. SubIssuesTotal is the
+// backend's count, so a capped connection does not hide them.
+func (i Issue) HasChildren() bool {
+	return i.SubIssuesTotal > 0 || len(i.SubIssues) > 0
+}
+
+// HasEpicMarker reports whether the issue carries the epic label the tool puts
+// on every epic it creates. A childless epic is an epic by the marker alone.
+func (i Issue) HasEpicMarker() bool {
+	return slices.ContainsFunc(i.Labels, IsEpicLabel)
+}
+
+// IdeaEpicConflict reports why the issue cannot be typed as an idea while
+// keeping its current hierarchy, or "" when nothing holds it: an idea takes no
+// epic position, so a parent, sub-issues or the epic label each conflict with
+// it. It is the write-side counterpart of IsEpic's read precedence — an
+// existing overlap stays visible on reads, and a type change must remove the
+// relationship rather than coexist with it.
+func (i Issue) IdeaEpicConflict() string {
+	switch {
+	case i.Parent != nil:
+		return fmt.Sprintf("it is a child of #%d", i.Parent.Number)
+	case i.HasChildren():
+		return "it has sub-issues"
+	case i.HasEpicMarker():
+		return "it carries the epic label"
+	}
+	return ""
 }
 
 // InProgress reports whether the issue carries the in-progress label.

@@ -785,3 +785,172 @@ func TestApplyPlanTypesItsFailuresAtTheBoundary(t *testing.T) {
 		}
 	})
 }
+
+// A fresh plan never introduces an idea into the epic hierarchy — as a child
+// or as a parent, through a local id or an existing issue number — and the
+// refusal names the plan line before anything is created.
+func TestApplyPlanRefusesFreshIdeaHierarchyPlans(t *testing.T) {
+	tests := map[string]struct {
+		entries []PlanEntry
+		want    string // the rule the refusal names
+	}{
+		"idea child": {[]PlanEntry{
+			{ID: "epic", Title: "Voltgo support", Type: PlanTypeEpic},
+			{ID: "idea", Title: "Consider a cache", Type: model.IdeaType, Parent: &PlanRef{ID: "epic"}},
+		}, "an idea cannot be an epic child"},
+		"idea parent": {[]PlanEntry{
+			{ID: "idea", Title: "Consider a cache", Type: model.IdeaType},
+			{ID: "work", Title: "Add a cache", Type: "task", Parent: &PlanRef{ID: "idea"}},
+		}, "an idea cannot be an epic parent"},
+		"existing idea parent": {[]PlanEntry{
+			{ID: "work", Title: "Add a cache", Type: "task", Parent: &PlanRef{Number: 55}},
+		}, "#55 is an idea; an idea cannot be an epic parent"},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			store := newApplyStore(fixture(55, "Consider a cache", "P2", model.IdeaType))
+			_, err := WrapAs(store, BackendGitHub, "").ApplyPlan(testCtx, tc.entries, ApplyOptions{})
+			var invalid *InvalidInputError
+			if !errors.As(err, &invalid) || invalid.Field != "plan" {
+				t.Fatalf("err = %v, want an *InvalidInputError naming the plan", err)
+			}
+			if !strings.Contains(invalid.Reason, tc.want) || !strings.Contains(invalid.Reason, "line ") {
+				t.Errorf("reason = %q, want the plan line and %q", invalid.Reason, tc.want)
+			}
+			if strings.Contains(invalid.Reason, "#0") {
+				t.Errorf("reason = %q, names an uncreated parent as #0", invalid.Reason)
+			}
+			if store.createCalls != 0 || len(store.created) != 0 {
+				t.Errorf("refused plan created %d issue(s): %v", store.createCalls, store.created)
+			}
+		})
+	}
+}
+
+// A relationship the checkpoint already recorded as wired stays put: an idea
+// attached before the rule existed must not block the rest of its resume.
+func TestApplyPlanResumesAWiredIdeaChild(t *testing.T) {
+	entries := normalizePlan([]PlanEntry{
+		{ID: "epic", Title: "Voltgo support", Type: PlanTypeEpic},
+		{ID: "idea", Title: "Consider a cache", Type: model.IdeaType, Parent: &PlanRef{ID: "epic"}},
+	})
+	digest, err := planDigest(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	epic := fixture(40, "Epic: Voltgo support", "P2", model.EpicLabel)
+	epic.Body = PlanBodyWithProvenance(entries[0], digest)
+	epic.SubIssues = []model.Ref{{Number: 55, State: "OPEN"}}
+	epic.SubIssuesTotal = 1
+	idea := fixture(55, "Consider a cache", "P2", model.IdeaType)
+	idea.Body = PlanBodyWithProvenance(entries[1], digest)
+	idea.Parent = &model.Ref{Number: 40, State: "OPEN"}
+
+	store := newApplyStore(epic, idea)
+	checkpoint := NewMemoryCheckpoint()
+	for key, number := range map[string]int{"epic": 40, "idea": 55} {
+		if err := checkpoint.RecordCreated(key, number); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := checkpoint.RecordWired(ParentEdge, 55, 40); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := WrapAs(store, BackendGitHub, "").ApplyPlan(testCtx, entries, ApplyOptions{Checkpoint: checkpoint})
+	if err != nil {
+		t.Fatalf("resume over a wired idea edge: %v", err)
+	}
+	if result.Created != 0 || result.Wired != 0 {
+		t.Errorf("result = %+v, want no writes on a fully recorded resume", result)
+	}
+	if got := store.byTitle("Consider a cache"); got == nil || got.Parent == nil || got.Parent.Number != 40 {
+		t.Errorf("idea = %+v, want its recorded parent kept", got)
+	}
+}
+
+// A recorded edge costs no read: a resume must not fail over an existing
+// parent that can no longer be read, the way requirePlanRefs skips entries it
+// already created.
+func TestApplyPlanResumeSkipsReadingAWiredParent(t *testing.T) {
+	entries := normalizePlan([]PlanEntry{
+		{ID: "work", Title: "Add a cache", Type: "task", Parent: &PlanRef{Number: 12}},
+	})
+	digest, err := planDigest(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := fixture(55, "Add a cache", "P2", "task")
+	work.Body = PlanBodyWithProvenance(entries[0], digest)
+	store := newApplyStore(work) // #12 is gone
+
+	checkpoint := NewMemoryCheckpoint()
+	if err := checkpoint.RecordCreated("work", 55); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkpoint.RecordWired(ParentEdge, 55, 12); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WrapAs(store, BackendGitHub, "").ApplyPlan(testCtx, entries, ApplyOptions{Checkpoint: checkpoint}); err != nil {
+		t.Fatalf("resume over a wired edge to an unreadable parent: %v", err)
+	}
+}
+
+// On resume only pending parent relationships are validated, using each
+// endpoint's stored normalized type. An attachment still pending that touches
+// an idea fails before the run creates anything.
+func TestApplyPlanRefusesAPendingIdeaEdgeOnResume(t *testing.T) {
+	t.Run("a checkpointed idea child awaiting its epic", func(t *testing.T) {
+		entries := normalizePlan([]PlanEntry{
+			{ID: "epic", Title: "Voltgo support", Type: PlanTypeEpic},
+			{ID: "idea", Title: "Consider a cache", Type: model.IdeaType, Parent: &PlanRef{ID: "epic"}},
+		})
+		digest, err := planDigest(entries)
+		if err != nil {
+			t.Fatal(err)
+		}
+		idea := fixture(55, "Consider a cache", "P2", model.IdeaType)
+		idea.Body = PlanBodyWithProvenance(entries[1], digest)
+
+		store := newApplyStore(idea)
+		checkpoint := NewMemoryCheckpoint()
+		if err := checkpoint.RecordCreated("idea", 55); err != nil {
+			t.Fatal(err)
+		}
+		_, err = WrapAs(store, BackendGitHub, "").ApplyPlan(testCtx, entries, ApplyOptions{Checkpoint: checkpoint})
+		var invalid *InvalidInputError
+		if !errors.As(err, &invalid) || invalid.Field != "plan" || !strings.Contains(invalid.Reason, "idea") {
+			t.Fatalf("err = %v, want an InvalidInputError naming the pending idea edge", err)
+		}
+		if store.createCalls != 0 {
+			t.Errorf("refused resume created %d issue(s)", store.createCalls)
+		}
+	})
+
+	t.Run("a pending child of a checkpointed idea", func(t *testing.T) {
+		entries := normalizePlan([]PlanEntry{
+			{ID: "idea", Title: "Consider a cache", Type: model.IdeaType},
+			{ID: "work", Title: "Add a cache", Type: "task", Parent: &PlanRef{ID: "idea"}},
+		})
+		digest, err := planDigest(entries)
+		if err != nil {
+			t.Fatal(err)
+		}
+		idea := fixture(55, "Consider a cache", "P2", model.IdeaType)
+		idea.Body = PlanBodyWithProvenance(entries[0], digest)
+
+		store := newApplyStore(idea)
+		checkpoint := NewMemoryCheckpoint()
+		if err := checkpoint.RecordCreated("idea", 55); err != nil {
+			t.Fatal(err)
+		}
+		_, err = WrapAs(store, BackendGitHub, "").ApplyPlan(testCtx, entries, ApplyOptions{Checkpoint: checkpoint})
+		var invalid *InvalidInputError
+		if !errors.As(err, &invalid) || invalid.Field != "plan" || !strings.Contains(invalid.Reason, "cannot be an epic parent") {
+			t.Fatalf("err = %v, want an InvalidInputError naming the idea parent", err)
+		}
+		if store.createCalls != 0 {
+			t.Errorf("refused resume created %d issue(s)", store.createCalls)
+		}
+	})
+}

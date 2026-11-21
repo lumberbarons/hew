@@ -250,6 +250,11 @@ func (t *Tracker) prepareCreate(ctx context.Context, req CreateRequest) (createP
 	if req.Parent < 0 {
 		return createPlan{}, &InvalidInputError{Field: "parent", Reason: "must be an issue number"}
 	}
+	if req.Type == model.IdeaType && req.Parent > 0 {
+		// An idea is associated with an epic by a reference, not by becoming
+		// its child; refusing here keeps the first write from happening.
+		return createPlan{}, &InvalidInputError{Field: "parent", Reason: ideaChildRefusal}
+	}
 	if req.DiscoveredFrom < 0 {
 		return createPlan{}, &InvalidInputError{Field: "discoveredFrom", Reason: "must be an issue number"}
 	}
@@ -294,6 +299,12 @@ func (t *Tracker) prepareCreate(ctx context.Context, req CreateRequest) (createP
 		parent, err := t.store.GetIssue(ctx, req.Parent)
 		if err != nil {
 			return createPlan{}, asReadError(err)
+		}
+		if typ, _ := parent.Type(); typ == model.IdeaType {
+			return createPlan{}, &InvalidInputError{
+				Field:  "parent",
+				Reason: fmt.Sprintf("#%d is an idea; %s", parent.Number, ideaParentRefusal),
+			}
 		}
 		parentRef = &model.Ref{Number: parent.Number, State: parent.State}
 		parentTitle = parent.Title
@@ -403,6 +414,15 @@ func (t *Tracker) prepareCreateEpic(ctx context.Context, req CreateEpicRequest) 
 		child, err := t.store.GetIssue(ctx, number)
 		if err != nil {
 			return epicPlan{}, asReadError(err)
+		}
+		// The idea rule comes before the already-parented check: detaching an
+		// externally attached idea only to be refused here would be a worse
+		// repair path than refusing the attach itself.
+		if typ, _ := child.Type(); typ == model.IdeaType {
+			return epicPlan{}, &InvalidInputError{
+				Field:  "children",
+				Reason: fmt.Sprintf("#%d is an idea; %s", number, ideaChildRefusal),
+			}
 		}
 		if child.Parent != nil {
 			return epicPlan{}, &ParentedError{Issue: number, Parent: child.Parent.Number}

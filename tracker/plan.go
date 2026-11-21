@@ -172,6 +172,11 @@ func (e PlanEntry) ExistingRefs() []ExistingRef {
 // pending entry — which is every entry of a fresh plan — before its first
 // write (see validatePendingPlanFields).
 //
+// The idea relationship rule is deferred for the same reason: whether a parent
+// edge is still pending depends on the checkpoint, so ApplyPlan judges both
+// endpoints by their normalized types and leaves an edge it already recorded
+// as wired alone (see validatePendingPlanParents).
+//
 // A rejection is an *InvalidInputError whose Reason names the entry and the
 // rule, so a caller branches on the type rather than the text.
 func ValidatePlan(entries []PlanEntry) error {
@@ -308,6 +313,15 @@ func planFieldError(e PlanEntry, index int, err error) error {
 func isLegacyConventionLabel(name string) bool {
 	return model.IsConventionLabel(name) && !strings.EqualFold(name, model.IdeaType)
 }
+
+// The idea type takes no epic position: an idea is associated with an epic by
+// an issue reference, while a parent-child edge is implementation structure.
+// Create, CreateEpic, Edit and ApplyPlan share this wording, so the same rule
+// reads the same wherever it is refused.
+const (
+	ideaChildRefusal  = "an idea cannot be an epic child; reference the epic from the idea instead"
+	ideaParentRefusal = "an idea cannot be an epic parent; reference the idea from the work instead"
+)
 
 func validatePlanEntry(e PlanEntry, index int) error {
 	if e.Title == "" {
