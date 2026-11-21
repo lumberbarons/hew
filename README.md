@@ -161,8 +161,9 @@ hew close 1 --completed --reason "..."   # finishing work: there is no `hew pr`
 
 ```
 hew prime                      # session-start context for agents
-hew ready [--limit N]          # open, non-epic, triaged, zero open blockers; P0→P4
-                                  # capped at 30 by default (0 for all); truncation warns
+hew ready [--limit N]          # open, non-epic, non-idea, triaged, zero open blockers;
+                                  # P0→P4, capped at 30 by default (0 for all);
+                                  # truncation warns
 hew list [--label X] [--epic N] [--state open|closed|all]
             [--limit N]          # prints all by default; truncation warns, like ready
             [--bodies]           # with --json: body on every line, dedup in one call;
@@ -181,6 +182,9 @@ hew create --type bug|enhancement|task|idea --title "..."
 hew draft [section flags] [--out F]   # compose a body locally (stdout without --out)
 hew draft --check F                   # revalidate a draft; neither touches GitHub
 hew start <n> [--priority P0..P4] [--force] [--show]
+              [--for-discovery]     # an idea is refused without --for-discovery:
+                                   # investigation is an explicit decision, not a
+                                   # routine claim
                                    # --show appends the issue's detail (as show would);
                                    # --json includes the body too (without text-findings annotations)
 hew release <n> [--force]       # remove assignees + in-progress; --force releases
@@ -292,6 +296,26 @@ hew create --type task --title "..." --body-file draft.md
 but never inserts backticks for you, and `--out` refuses a file that already exists so a
 revised draft is not overwritten. `hew epic create --body-file draft.md` publishes an epic body
 the same way. `create` itself still only warns.
+
+### Capturing and investigating an idea
+
+An issue typed `idea` is a possible improvement you are not ready to implement. The
+ready queue, the primer's Ready section and hewd's Ready view leave it alone, so an
+agent working the queue never starts on one by accident:
+
+```sh
+hew create --type idea --title "Consider caching repeated reads" --problem "..."
+hew list --label idea               # browse what is captured
+hew start 42 --for-discovery --show # the explicit claim, once you decide to investigate
+```
+
+Investigation produces evidence or a decision — research, an ADR, a spec — and
+approved implementation is handed off as separate work issues filed with
+`--discovered-from 42`. That keeps the idea's original statement and history as the
+starting point while the implementation gets its own scoped, reviewable work.
+Referencing the idea from an epic (or the epic from the idea) associates the two
+without making the idea an epic child, so it stays out of the epic's progress and
+next-child sequence.
 
 ### Writing a PR body
 

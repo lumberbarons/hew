@@ -90,7 +90,7 @@ describe('Primer', () => {
   it('shows what an agent session would be shown', async () => {
     mockApi({ 'GET /api/primer': fx.primer });
     renderView(<Primer />);
-    expect(await screen.findByText(/8 open, 1 untriaged/)).toBeInTheDocument();
+    expect(await screen.findByText(/9 open, 1 untriaged/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/Workflow: hew ready/)).toBeInTheDocument());
     expect(screen.getByRole('heading', { name: 'Conventions' })).toBeInTheDocument();
     expect(screen.getByText(/#7 → #8 → #7/)).toBeInTheDocument();

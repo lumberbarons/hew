@@ -79,6 +79,28 @@ func TestReadyOmitsUntriaged(t *testing.T) {
 	}
 }
 
+// Ideas are captured for a later decision, not offered as implementation work:
+// an unclaimed, unblocked idea stays out of the queue even when it outranks an
+// equivalent task. Claiming one takes --for-discovery, which is the caller's
+// explicit intent rather than a routine ready item.
+func TestReadyHidesIdeas(t *testing.T) {
+	f := newFake(
+		issue(1, "Consider a cache", "P0", "idea"),
+		issue(2, "Wire the cache", "P2", "task"),
+	)
+	app, out, _ := newApp(f)
+	if err := app.Ready(ctx, ReadyOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "Wire the cache") {
+		t.Errorf("Ready dropped the implementation task:\n%s", got)
+	}
+	if strings.Contains(got, "Consider a cache") {
+		t.Errorf("Ready offered an idea:\n%s", got)
+	}
+}
+
 func TestReadyAllUntriagedIsEmpty(t *testing.T) {
 	// A tracker of nothing but drive-by reports must report an empty queue
 	// rather than handing them to an agent.

@@ -335,6 +335,33 @@ func TestPrimerLocalCompletesWorkByClosing(t *testing.T) {
 	}
 }
 
+// Every agent sees one of the two primers, so both must teach what an idea is,
+// that claiming one is a deliberate investigation request rather than routine
+// work, and that approved implementation is filed separately.
+func TestPrimersTeachIdeas(t *testing.T) {
+	for name, primer := range map[string]string{"github": PrimerStatic, "local": PrimerLocal} {
+		t.Run(name, func(t *testing.T) {
+			var guidance string
+			for _, line := range strings.Split(primer, "\n") {
+				if strings.Contains(line, "(type idea)") {
+					guidance = line
+				}
+			}
+			if guidance == "" {
+				t.Fatalf("%s primer has no idea guidance:\n%s", name, primer)
+			}
+			for _, want := range []string{
+				"investigation work", "--for-discovery", "only when the user asked",
+				"research", "ADR", "spec", "separate work issues",
+			} {
+				if !strings.Contains(guidance, want) {
+					t.Errorf("%s idea guidance missing %q:\n%s", name, want, guidance)
+				}
+			}
+		})
+	}
+}
+
 // The two primers share their conventions and command pieces, so the local one
 // can differ only where the backend does.
 func TestPrimerLocalKeepsTheSharedConventions(t *testing.T) {
