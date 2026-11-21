@@ -448,11 +448,10 @@ merges, checks and PR listing stay where they are.
   primary signal.
   A number in the branch name (`feat/30-pr-command`) breaks ties when several
   are claimed and stands in when none is, but only as a whole `-`/`/`-delimited
-  segment, so `fix/http500-retries` doesn't link `#500`. It also vetoes a lone
-  claim it contradicts: a branch naming a *different* eligible issue is two signals
-  disagreeing, and preferring the claim would close the other issue on merge
-  with nothing in the output saying so. Anything still
-  ambiguous is a usage error naming the candidates. Discovery has its own
+  segment, so `fix/http500-retries` doesn't link `#500`. Hew refuses to infer a
+  target when a lone claim and a branch number point to different eligible
+  issues. Ambiguity also produces a usage error naming the candidates.
+  Discovery has its own
   completion workflow, so an idea's claim and branch number are ignored in
   inference, including in the conflict check. Use `--for <n>` to name an idea
   explicitly when merging a documentation PR should close it.
@@ -1336,7 +1335,7 @@ lumberbarons/solar-controller — 14 open issues:
 | `hew ready` | 324 | 1969 | 6.1x | gh issue list --json † |
 | `hew list` | 353 | 1172 | 3.3x | gh api graphql (open issues) |
 | `hew list --json` | 1607 | 1172 | 0.7x | gh api graphql (open issues) |
-| `hew prime` | 1160 | 1172 | 1.0x | gh api graphql (open issues) |
+| `hew prime` | 1163 | 1172 | 1.0x | gh api graphql (open issues) |
 | `hew show #119` | 431 | 590 | 1.4x | gh issue view --json + gh api graphql |
 
 Findings, including the ones that don't flatter the tool:
@@ -1354,7 +1353,7 @@ Findings, including the ones that don't flatter the tool:
   empty arrays, derived booleans, `createdAt` — where the lean query writes seven
   fields. The schema's stability is deliberate (agents parse it), but the token
   cost is a real regression against the tool's own claim, filed as #62.
-- **`prime` measures 1160 tokens on solar-controller and 1175 on hew.**
+- **`prime` measures 1163 tokens on solar-controller and 1178 on hew.**
   Both fit the ~1200-token target tracked by the eval harness. The primer
   combines workflow guidance and a command cheatsheet with capped live
   sections. The exact count varies with the tracker state and issue titles.

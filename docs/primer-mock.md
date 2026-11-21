@@ -19,7 +19,7 @@ Sandboxed sessions may lack GitHub credentials. If gh works outside the sandbox,
 
 Conventions (enforced by the tool's write path):
 - One priority P0(critical)..P4(backlog), default P2. One type bug|enhancement|task|idea.
-- Ideas (type idea) are investigation work. Use hew start <n> --for-discovery only when the user asked. Produce research, an ADR or a spec; file separate work issues (--discovered-from <n>). ready skips ideas.
+- Ideas (type idea) are investigation work. Use hew start <n> --for-discovery only when the user asked. Produce research, an ADR or a spec; file approved implementation as separate work issues (--discovered-from <n>). ready skips ideas.
 - Area labels sparingly when several issues share one. No title prefixes.
 - Use native dependencies (--blocked-by) and sub-issues for epics.
 - Bodies: ### Where / ### Problem or ### Goal / ### Fix or ### Approach / ### Open questions / ### Done when (checklist). Omit empty sections.
@@ -83,7 +83,7 @@ Read a candidate with show <n>. File with hew create ... --discovered-from <n>.
 
 Conventions (enforced by the tool's write path):
 - One priority P0(critical)..P4(backlog), default P2. One type bug|enhancement|task|idea.
-- Ideas (type idea) are investigation work. Use hew start <n> --for-discovery only when the user asked. Produce research, an ADR or a spec; file separate work issues (--discovered-from <n>). ready skips ideas.
+- Ideas (type idea) are investigation work. Use hew start <n> --for-discovery only when the user asked. Produce research, an ADR or a spec; file approved implementation as separate work issues (--discovered-from <n>). ready skips ideas.
 - Area labels sparingly when several issues share one. No title prefixes.
 - Use native dependencies (--blocked-by) and sub-issues for epics.
 - Bodies: ### Where / ### Problem or ### Goal / ### Fix or ### Approach / ### Open questions / ### Done when (checklist). Omit empty sections.

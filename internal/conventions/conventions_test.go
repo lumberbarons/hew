@@ -361,7 +361,7 @@ func TestPrimersTeachIdeas(t *testing.T) {
 			}
 			for _, want := range []string{
 				"investigation work", "--for-discovery", "only when the user asked",
-				"research", "ADR", "spec", "separate work issues",
+				"research", "ADR", "spec", "approved implementation", "separate work issues",
 			} {
 				if !strings.Contains(guidance, want) {
 					t.Errorf("%s idea guidance missing %q:\n%s", name, want, guidance)
