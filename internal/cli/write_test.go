@@ -3135,3 +3135,28 @@ func TestEpicCreateEditValidatesBeforeEditor(t *testing.T) {
 		})
 	}
 }
+
+func TestSetRecordsIdeaOutcome(t *testing.T) {
+	eachBackend(t, func(t *testing.T, store gh.IssueStore) {
+		const original = "### Problem\n\nRepeated reads are slow."
+		idea, err := store.CreateIssue(ctx, "Idea", original, []string{"P2", "idea"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app, _, _ := newLocalApp(store)
+		note, empty := "Pursued as #9.", ""
+		exitCode(t, app.Set(ctx, idea.Number, SetOpts{Outcome: &empty}), ExitUsage)
+		exitCode(t, app.Set(ctx, idea.Number, SetOpts{Outcome: &note, BodyFile: "replacement.md"}), ExitUsage)
+
+		if err := app.Set(ctx, idea.Number, SetOpts{Outcome: &note}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := store.GetIssue(ctx, idea.Number)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := original + "\n\n### Outcome\n\n" + note; got.Body != want {
+			t.Errorf("body = %q, want %q", got.Body, want)
+		}
+	})
+}

@@ -71,7 +71,7 @@ func TestParseSections(t *testing.T) {
 // on an entry a pre-upgrade checkpoint already created: the reservation is
 // ApplyPlan's to enforce against pending entries, not the file format's.
 func TestParseAcceptsIdeasAndTheirDeferredArea(t *testing.T) {
-	fixture := `{"title":"Consider a cache","type":"idea","problem":"writes are slow"}
+	fixture := `{"title":"Consider a cache","type":"idea","problem":"writes are slow","open-questions":["What is slow?","Can we measure it?"]}
 {"title":"Legacy","type":"task","areas":["idea"]}
 `
 	entries, err := Parse(strings.NewReader(fixture))
@@ -80,6 +80,9 @@ func TestParseAcceptsIdeasAndTheirDeferredArea(t *testing.T) {
 	}
 	if entries[0].Type != model.IdeaType {
 		t.Errorf("type = %q, want idea", entries[0].Type)
+	}
+	if got := strings.Join(entries[0].Sections.OpenQuestions, "|"); got != "What is slow?|Can we measure it?" {
+		t.Errorf("questions = %q", got)
 	}
 	if len(entries[1].Areas) != 1 || entries[1].Areas[0] != model.IdeaType {
 		t.Errorf("areas = %v, want the stored idea area kept for the checkpoint pass", entries[1].Areas)

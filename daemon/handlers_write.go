@@ -76,6 +76,7 @@ type editIn struct {
 	Type        *string  `json:"type"`
 	Title       *string  `json:"title"`
 	Body        *string  `json:"body"`
+	Outcome     *string  `json:"outcome"`
 	AddAreas    []string `json:"addAreas"`
 	RemoveAreas []string `json:"removeAreas"`
 	Parent      *int     `json:"parent"`
@@ -86,7 +87,7 @@ type editIn struct {
 func (s *Server) edit(q *request[editIn]) (reply, error) {
 	in := q.in
 	res, err := q.tr.Edit(q.ctx, tracker.EditRequest{
-		Issue: q.n, Priority: in.Priority, Type: in.Type, Title: in.Title, Body: in.Body,
+		Issue: q.n, Priority: in.Priority, Type: in.Type, Title: in.Title, Body: in.Body, Outcome: in.Outcome,
 		AddAreas: in.AddAreas, RemoveAreas: in.RemoveAreas, Parent: in.Parent,
 		NoParent: in.NoParent, AllowClosed: in.AllowClosed,
 	})

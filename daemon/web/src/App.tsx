@@ -97,7 +97,10 @@ export function App() {
           // Keyed by page and actor, so leaving a page that failed to render
           // clears the error instead of keeping it on screen.
           <ErrorBoundary key={`${actorVersion}:${JSON.stringify(route)}`}>
-            <View route={route} />
+            <View
+              route={route}
+              actor={(config?.actorEditable && actor) || config?.identity || ''}
+            />
           </ErrorBoundary>
         )}
       </main>
@@ -105,12 +108,12 @@ export function App() {
   );
 }
 
-function View({ route }: { route: ReturnType<typeof useRoute> }) {
+function View({ route, actor }: { route: ReturnType<typeof useRoute>; actor: string }) {
   switch (route.name) {
     case 'ideas':
       return <Ideas state={route.state} />;
     case 'issue':
-      return <IssueView key={route.n} n={route.n} />;
+      return <IssueView key={route.n} n={route.n} actor={actor} />;
     case 'new':
       return <NewForm type={route.type} />;
     case 'search':

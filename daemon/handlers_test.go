@@ -805,3 +805,30 @@ func TestListRoutesCarryNoIssueBodies(t *testing.T) {
 		t.Errorf("detail issue body = %v, want the composed body", body)
 	}
 }
+
+func TestRecordIdeaOutcome(t *testing.T) {
+	e := newEnv(t, false)
+	n := e.create("Consider caching", map[string]any{"type": "idea"})
+	path := fmt.Sprintf("/api/issues/%d", n)
+	const original = "### Problem\n\nReads are slow.\n\n### Open questions\n\n- How slow?\n\n### Outcome\n\nFirst decision.\n\n### Notes\n\nLeave me here."
+	if code, res := e.call("PATCH", path, "", map[string]any{"body": original}); code != 200 {
+		t.Fatalf("seed body: %d %v", code, res)
+	}
+	for _, input := range []map[string]any{
+		{"outcome": "  ", "title": "must not change"},
+		{"outcome": "See #2.", "body": "replacement"},
+	} {
+		if code, res := e.call("PATCH", path, "", input); code != 400 {
+			t.Errorf("bad edit = %d %v", code, res)
+		}
+	}
+	if code, res := e.call("PATCH", path, "", map[string]any{"outcome": "Pursued as #2."}); code != 200 {
+		t.Errorf("record outcome = %d %v", code, res)
+	}
+	_, d := e.call("GET", path, "", nil)
+	got := d["issue"].(map[string]any)
+	want := strings.Replace(original, "First decision.", "First decision.\n\nPursued as #2.", 1)
+	if got["body"] != want || got["title"] != "Consider caching" {
+		t.Errorf("issue = %v, want body %q and original title", got, want)
+	}
+}

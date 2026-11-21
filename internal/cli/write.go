@@ -456,6 +456,7 @@ type SetOpts struct {
 	// TitleSet records that --title was passed, so an explicitly empty one is
 	// an error rather than the same thing as leaving the title alone.
 	TitleSet    bool
+	Outcome     *string
 	BodyFile    string
 	AllowClosed bool
 }
@@ -465,6 +466,9 @@ type SetOpts struct {
 // report; what stays here is reading the body file, the flag spelling of a
 // refusal and the exit codes.
 func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
+	if opts.Outcome != nil && opts.BodyFile != "" {
+		return usageErr("--outcome and --body-file are mutually exclusive")
+	}
 	if opts.Parent > 0 && opts.NoParent {
 		return usageErr("--parent and --no-parent are mutually exclusive")
 	}
@@ -473,6 +477,7 @@ func (a *App) Set(ctx context.Context, number int, opts SetOpts) error {
 		AddAreas:    opts.AddAreas,
 		RemoveAreas: opts.RemoveAreas,
 		NoParent:    opts.NoParent,
+		Outcome:     opts.Outcome,
 		AllowClosed: opts.AllowClosed,
 	}
 	if opts.Priority != "" {
@@ -518,8 +523,8 @@ func setError(err error) error {
 	if errors.As(err, &invalid) {
 		switch invalid.Field {
 		case "edit":
-			return usageErr("nothing to change; pass --priority, --type, --add-area, --remove-area, --parent, --no-parent, --title, or --body-file")
-		case "priority", "type", "title":
+			return usageErr("nothing to change; pass --priority, --type, --add-area, --remove-area, --parent, --no-parent, --title, --body-file, or --outcome")
+		case "priority", "type", "title", "outcome":
 			return usageErr("--%s %s", invalid.Field, invalid.Reason)
 		case "addAreas":
 			return usageErr("--add-area %s", invalid.Reason)

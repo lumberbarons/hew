@@ -39,7 +39,7 @@ show <n> | config (read-only: backend, repo or path/id) | search <terms> [--stat
 create --type T --title "..." --goal|--problem "..." --approach|--fix "..." --open-questions "..." --done-when "..." (repeatable)
   [--where X --priority Pn --area X --blocked-by N --parent N --discovered-from N] (--body-file F for long bodies) |
 draft [same section flags] --out F | --check F (compose/validate a body locally, no GitHub; then create --body-file F) |
-start <n> [--priority Pn --show --for-discovery] (--show or --json includes the body, so skip show <n>; an idea is refused without --for-discovery) | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F] |`
+start <n> [--priority Pn --show --for-discovery] (--show or --json includes the body, so skip show <n>; an idea is refused without --for-discovery) | set <n> [--priority Pn --type T --add-area X --remove-area X --parent N --no-parent --title "..." --body-file F | --outcome "..."] |`
 
 	primerPR = `pr [--for N --testing "..." --what "..." --why "..." --risk "..." --title "..." --ready] (draft PR for the claimed issue;
   body: What/Why from the issue, Testing = Before:/After: lines + checks run (section flags repeat → bullets), Risk = Reversibility:/Blast radius: lines; exactly one "Fixes #n";
@@ -48,7 +48,7 @@ start <n> [--priority Pn --show --for-discovery] (--show or --json includes the 
 	primerTail = `release <n> [--force] (give up a claim; --force releases any owner) |
 close <n> --reason "..." [--completed | --duplicate-of M] [--force: close an epic with open sub-issues] | reopen <n> --reason "..." |
 block <n> --on <m> | unblock <n> --from <m> |
-epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F] | epic status [<n> | --state open/closed/all] |
+epic create --title "..." [--children N,N --goal "..." --done-when "..." --body-file F | --outcome "..."] | epic status [<n> | --state open/closed/all] |
 apply <plan.jsonl> [--dry-run] (batch create from a JSONL plan; schema: hew apply --help). All take --json.`
 )
 
