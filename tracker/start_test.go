@@ -202,6 +202,98 @@ func TestStartRefusesClosedAndEpicTargets(t *testing.T) {
 	}
 }
 
+// An idea is a discovery candidate, not implementation work: the claim read
+// refuses it before any write unless the caller declares discovery intent, and
+// force changes neither the refusal nor the untouched issue. The refusal is its
+// own type, so a consumer can tell "this is an idea" from "somebody holds it".
+func TestStartRequiresDiscoveryIntentForAnIdea(t *testing.T) {
+	ctx, store, issue := startFixture(t, "P2", model.IdeaType)
+	tr := WrapAs(store, BackendLocal, "actor-a")
+	before := storeIssue(t, ctx, store, issue.Number)
+
+	for _, opts := range []StartOptions{{}, {Force: true}} {
+		var refusal *DiscoveryIntentError
+		if _, err := tr.Start(ctx, issue.Number, opts); !errors.As(err, &refusal) {
+			t.Fatalf("start %+v = %v, want a DiscoveryIntentError", opts, err)
+		}
+		if refusal.Issue != issue.Number {
+			t.Errorf("DiscoveryIntentError = %+v, want issue #%d", refusal, issue.Number)
+		}
+		if !contains(refusal, "discovery intent") {
+			t.Errorf("refusal = %q, want it to name discovery intent", refusal)
+		}
+		assertUnchanged(t, before, storeIssue(t, ctx, store, issue.Number))
+	}
+
+	got, err := tr.Start(ctx, issue.Number, StartOptions{ForDiscovery: true})
+	if err != nil {
+		t.Fatalf("discovery start: %v", err)
+	}
+	if got.Claimant != "actor-a" || !slices.Equal(got.Issue.Assignees, []string{"actor-a"}) || !got.Issue.InProgress {
+		t.Errorf("discovery claim = %+v, want actor-a with in-progress", got.Issue)
+	}
+	if got.Issue.Type == nil || *got.Issue.Type != model.IdeaType {
+		t.Errorf("type = %v, want the idea kept", got.Issue.Type)
+	}
+}
+
+// Discovery intent changes the type gate only: a blocked or already-claimed
+// idea still answers with the ordinary claim outcomes, and force overrides them
+// exactly as it does for any other issue.
+func TestDiscoveryStartUsesTheOrdinaryClaimOutcomes(t *testing.T) {
+	ctx, store, issue := startFixture(t, "P2", model.IdeaType)
+	blocker, err := store.CreateIssue(ctx, "Blocker", "", []string{"P2", "task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddBlockedBy(ctx, issue.Number, blocker.Number); err != nil {
+		t.Fatal(err)
+	}
+	tr := WrapAs(store, BackendLocal, "actor-a")
+
+	var blocked *BlockedError
+	if _, err := tr.Start(ctx, issue.Number, StartOptions{ForDiscovery: true}); !errors.As(err, &blocked) {
+		t.Fatalf("blocked discovery start = %v, want a BlockedError", err)
+	}
+	if _, err := tr.Start(ctx, issue.Number, StartOptions{ForDiscovery: true, Force: true}); err != nil {
+		t.Fatalf("forced discovery start: %v", err)
+	}
+
+	var claimed *ClaimedError
+	if _, err := tr.Start(ctx, issue.Number, StartOptions{ForDiscovery: true}); !errors.As(err, &claimed) {
+		t.Fatalf("repeat discovery start = %v, want a ClaimedError", err)
+	}
+	if !claimed.ByActor || claimed.Actor != "actor-a" {
+		t.Errorf("own claim = %+v, want it reported as the acting identity's", claimed)
+	}
+	claimed = nil
+	if _, err := tr.As("actor-b").Start(ctx, issue.Number, StartOptions{ForDiscovery: true}); !errors.As(err, &claimed) {
+		t.Fatalf("rival discovery start = %v, want a ClaimedError", err)
+	}
+	if claimed.ByActor || !slices.Equal(claimed.Assignees, []string{"actor-a"}) {
+		t.Errorf("rival claim = %+v, want actor-a's claim", claimed)
+	}
+}
+
+// Normalization decides whether the gate applies: a task a repository already
+// labelled both task and idea reads as a task, and stays an ordinary claim.
+func TestStartDoesNotGateALegacyMixedTaskAsAnIdea(t *testing.T) {
+	ctx, store, issue := startFixture(t, "P2", "task", model.IdeaType)
+	if _, err := WrapAs(store, BackendLocal, "actor-a").Start(ctx, issue.Number, StartOptions{}); err != nil {
+		t.Fatalf("mixed task start = %v, want an ordinary claim", err)
+	}
+}
+
+// An issue that qualifies as both an idea and an epic is handled as an epic:
+// discovery intent does not turn a container into work.
+func TestDiscoveryStartStillRefusesAnEpicIdea(t *testing.T) {
+	ctx, store, issue := startFixture(t, "P2", model.IdeaType, model.EpicLabel)
+	var epic *EpicError
+	if _, err := WrapAs(store, BackendLocal, "actor-a").Start(ctx, issue.Number, StartOptions{ForDiscovery: true}); !errors.As(err, &epic) {
+		t.Fatalf("epic idea start = %v, want an EpicError", err)
+	}
+}
+
 func TestStartRefusesOpenBlockersAndForceClaims(t *testing.T) {
 	ctx, store, issue := startFixture(t)
 	blocker, err := store.CreateIssue(ctx, "Blocker", "", []string{"P2", "task"})

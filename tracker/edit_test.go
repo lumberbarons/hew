@@ -146,6 +146,54 @@ func TestEditSwapsToIdeaAndBack(t *testing.T) {
 	}
 }
 
+// A type edit is a classification change, not a claim change: retyping a
+// claimed task to an idea and a claimed idea to a task both leave the assignee
+// and the in-progress label exactly where they were. Selection follows the new
+// type under the usual rule for claimed work — it stays out of ready either
+// way because the claim, not the type, excludes it.
+func TestEditRetypesAClaimedIssueWithoutMovingTheClaim(t *testing.T) {
+	for _, tc := range []struct{ from, to string }{
+		{"task", model.IdeaType},
+		{model.IdeaType, "task"},
+	} {
+		t.Run(tc.from+"->"+tc.to, func(t *testing.T) {
+			ctx, store, issue := startFixture(t, "P2", tc.from)
+			tr := WrapAs(store, BackendLocal, "actor-a")
+			if _, err := tr.Start(ctx, issue.Number, StartOptions{ForDiscovery: tc.from == model.IdeaType}); err != nil {
+				t.Fatalf("claim before retype: %v", err)
+			}
+
+			typ := tc.to
+			if _, err := tr.Edit(ctx, EditRequest{Issue: issue.Number, Type: &typ}); err != nil {
+				t.Fatalf("Edit to %s: %v", tc.to, err)
+			}
+			got := storeIssue(t, ctx, store, issue.Number)
+			if read, multi := got.Type(); read != tc.to || multi {
+				t.Errorf("type = %q (multi %v), want one %s", read, multi, tc.to)
+			}
+			if !got.HasLabel(tc.to) || got.HasLabel(tc.from) {
+				t.Errorf("labels = %v, want %s alone as the type", got.Labels, tc.to)
+			}
+			if !slices.Equal(got.Assignees, []string{"actor-a"}) {
+				t.Errorf("assignees = %v, want the claim preserved", got.Assignees)
+			}
+			if !got.InProgress() {
+				t.Errorf("labels = %v, want in-progress preserved", got.Labels)
+			}
+
+			snapshot, err := tr.Snapshot(ctx, SnapshotOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, ready := range snapshot.Ready() {
+				if ready.Number == issue.Number {
+					t.Errorf("#%d is in ready while claimed", issue.Number)
+				}
+			}
+		})
+	}
+}
+
 // An omitted request field is not a request to clear it: only the title moves.
 func TestEditLeavesOmittedFieldsAlone(t *testing.T) {
 	ctx, store, issue := startFixture(t, "P3", "bug", "area")

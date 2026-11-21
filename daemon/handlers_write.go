@@ -97,12 +97,15 @@ func (s *Server) edit(q *request[editIn]) (reply, error) {
 }
 
 type startIn struct {
-	Priority string `json:"priority"`
-	Force    bool   `json:"force"`
+	Priority     string `json:"priority"`
+	Force        bool   `json:"force"`
+	ForDiscovery bool   `json:"forDiscovery"`
 }
 
 func (s *Server) start(q *request[startIn]) (reply, error) {
-	res, err := q.tr.Start(q.ctx, q.n, tracker.StartOptions{Priority: q.in.Priority, Force: q.in.Force})
+	res, err := q.tr.Start(q.ctx, q.n, tracker.StartOptions{
+		Priority: q.in.Priority, Force: q.in.Force, ForDiscovery: q.in.ForDiscovery,
+	})
 	if err != nil {
 		return reply{}, err
 	}

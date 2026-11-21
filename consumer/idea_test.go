@@ -5,6 +5,7 @@ package consumer_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -142,6 +143,58 @@ func TestExternalConsumerRecognizesIdeaAsATypeOnGitHub(t *testing.T) {
 	}
 	if !warned {
 		t.Errorf("warnings = %v, want the multiple-type warning for #700", primer.Warnings)
+	}
+}
+
+// TestExternalConsumerClaimsAnIdeaOnlyForDiscovery is the claim half from
+// outside the module: the refusal is a public type with the issue number on it,
+// a refused idea keeps its labels and claim state, discovery intent claims it,
+// and creating an idea with an assignee fails before writing anything.
+func TestExternalConsumerClaimsAnIdeaOnlyForDiscovery(t *testing.T) {
+	tr := externalTracker(t)
+	ctx := context.Background()
+
+	created, err := tr.Create(ctx, tracker.CreateRequest{Title: "Consider a cache", Type: "idea"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	number := created.Issue.Number
+
+	var refusal *tracker.DiscoveryIntentError
+	if _, err := tr.Start(ctx, number, tracker.StartOptions{}); !errors.As(err, &refusal) {
+		t.Fatalf("start idea = %T (%v), want *tracker.DiscoveryIntentError", err, err)
+	}
+	if refusal.Issue != number {
+		t.Errorf("DiscoveryIntentError.Issue = %d, want %d", refusal.Issue, number)
+	}
+	read, err := tr.Get(ctx, number)
+	if err != nil {
+		t.Fatalf("Get after refusal: %v", err)
+	}
+	if len(read.Assignees) != 0 || !slices.Equal(read.Labels(), []string{"P2", "idea"}) {
+		t.Errorf("refused start left labels %v assignees %v, want the idea untouched", read.Labels(), read.Assignees)
+	}
+
+	claimed, err := tr.Start(ctx, number, tracker.StartOptions{ForDiscovery: true})
+	if err != nil {
+		t.Fatalf("discovery start: %v", err)
+	}
+	if claimed.Claimant == "" || !slices.Contains(claimed.Issue.Assignees, claimed.Claimant) {
+		t.Errorf("claim = %+v, want the claimant assigned", claimed)
+	}
+
+	var invalid *tracker.InvalidInputError
+	if _, err := tr.Create(ctx, tracker.CreateRequest{
+		Title: "Already claimed", Type: "idea", Assignees: []string{"octocat"},
+	}); !errors.As(err, &invalid) || invalid.Field != "assignees" {
+		t.Fatalf("idea create with an assignee = %v, want an assignees InvalidInputError", err)
+	}
+	snapshot, err := tr.Snapshot(ctx, tracker.SnapshotOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(snapshot.Issues()); got != 1 {
+		t.Errorf("refused create left %d issues, want only the original idea", got)
 	}
 }
 
