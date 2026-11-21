@@ -58,6 +58,7 @@ type rawEntry struct {
 	Goal           string   `json:"goal"`
 	Fix            string   `json:"fix"`
 	Approach       string   `json:"approach"`
+	OpenQuestions  []string `json:"open-questions"`
 	DoneWhen       []string `json:"done-when"`
 	Parent         *rawRef  `json:"parent"`
 	BlockedBy      []rawRef `json:"blocked-by"`
@@ -147,7 +148,7 @@ func parseLine(raw []byte) (Entry, error) {
 		Body:     re.Body,
 		Sections: tracker.Sections{
 			Where: re.Where, Problem: re.Problem, Goal: re.Goal,
-			Fix: re.Fix, Approach: re.Approach, DoneWhen: re.DoneWhen,
+			Fix: re.Fix, Approach: re.Approach, OpenQuestions: re.OpenQuestions, DoneWhen: re.DoneWhen,
 		},
 		DiscoveredFrom: re.DiscoveredFrom,
 	}

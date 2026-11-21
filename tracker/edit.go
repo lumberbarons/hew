@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/lumberbarons/hew/internal/conventions"
 	"github.com/lumberbarons/hew/internal/gh"
 	"github.com/lumberbarons/hew/internal/model"
 )
@@ -23,7 +24,7 @@ type EditResult struct {
 
 // Edit applies a partial edit to one issue. Fields the request leaves unset
 // are left alone; the optional pointer fields carry presence, so an explicitly
-// empty title, body, priority or type is a refusal rather than an omission.
+// empty title, body, outcome, priority or type is a refusal rather than an omission.
 //
 // Every requested change is validated before the first write — the field
 // values, the area names, the parent target, and the closed-target guard — so
@@ -68,6 +69,14 @@ func (t *Tracker) Edit(ctx context.Context, req EditRequest) (EditResult, error)
 	if req.Body != nil && strings.TrimSpace(*req.Body) == "" {
 		return EditResult{}, &InvalidInputError{Field: "body", Reason: "must not be empty"}
 	}
+	if req.Outcome != nil {
+		if req.Body != nil {
+			return EditResult{}, &InvalidInputError{Field: "outcome", Reason: "cannot be combined with body replacement"}
+		}
+		if strings.TrimSpace(*req.Outcome) == "" {
+			return EditResult{}, &InvalidInputError{Field: "outcome", Reason: "must not be empty"}
+		}
+	}
 	addAreas, err := NormalizeAreas(req.AddAreas)
 	if err != nil {
 		return EditResult{}, fieldError(err, "addAreas")
@@ -101,6 +110,16 @@ func (t *Tracker) Edit(ctx context.Context, req EditRequest) (EditResult, error)
 	resultingType, _ := issue.Type()
 	if req.Type != nil {
 		resultingType = *req.Type
+	}
+	var outcomeBody string
+	if req.Outcome != nil {
+		if resultingType != model.IdeaType || issue.IsEpic() {
+			return EditResult{}, &InvalidInputError{Field: "outcome", Reason: "can only be recorded on an idea"}
+		}
+		outcomeBody, err = conventions.AppendOutcome(issue.Body, strings.Trim(*req.Outcome, "\r\n"))
+		if err != nil {
+			return EditResult{}, &InvalidInputError{Field: "outcome", Reason: err.Error()}
+		}
 	}
 	if req.Type != nil && *req.Type == model.IdeaType {
 		retained := issue
@@ -175,6 +194,11 @@ func (t *Tracker) Edit(ctx context.Context, req EditRequest) (EditResult, error)
 			return EditResult{}, err
 		}
 	}
+	if req.Outcome != nil {
+		if err := step("outcome", t.editOutcomeBody(ctx, issue, outcomeBody)); err != nil {
+			return EditResult{}, err
+		}
+	}
 	if req.Parent != nil {
 		// AddSubIssue with replace moves the issue when it already has one.
 		if err := step("parent", t.store.AddSubIssue(ctx, *req.Parent, req.Issue, true)); err != nil {
@@ -191,10 +215,25 @@ func (t *Tracker) Edit(ctx context.Context, req EditRequest) (EditResult, error)
 	return result, nil
 }
 
+// A local store can guard a read-modify-write under its write lock. The
+// GitHub backend exposes only whole-body updates.
+func (t *Tracker) editOutcomeBody(ctx context.Context, issue model.Issue, body string) error {
+	if store, ok := t.store.(interface {
+		EditBodyIfCurrent(context.Context, int, string, string) (bool, error)
+	}); ok {
+		matched, err := store.EditBodyIfCurrent(ctx, issue.Number, issue.Body, body)
+		if err == nil && !matched {
+			return &InvalidInputError{Field: "outcome", Reason: "the body changed while recording the outcome; try again"}
+		}
+		return err
+	}
+	return t.store.EditBody(ctx, issue.Number, body)
+}
+
 // empty reports a request that names no change. AllowClosed is a modifier, not
 // a change, so it does not count.
 func (r EditRequest) empty() bool {
-	return r.Priority == nil && r.Type == nil && r.Title == nil && r.Body == nil &&
+	return r.Priority == nil && r.Type == nil && r.Title == nil && r.Body == nil && r.Outcome == nil &&
 		len(r.AddAreas) == 0 && len(r.RemoveAreas) == 0 && r.Parent == nil && !r.NoParent
 }
 

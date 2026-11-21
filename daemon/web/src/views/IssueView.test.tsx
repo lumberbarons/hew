@@ -447,3 +447,49 @@ async function userEventOpen() {
   const { default: userEvent } = await import('@testing-library/user-event');
   await userEvent.click(await screen.findByText('Edit details'));
 }
+
+describe('idea investigation state', () => {
+  it('does not offer to start a claimed idea again', async () => {
+    mockApi(reads(withIssue(fx.claimed, { type: 'idea' })));
+    renderView(<IssueView n={2} />);
+    expect(await screen.findByText('Investigating · @alice')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start investigation' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Release' })).toBeNull();
+  });
+
+  it('offers release to the current investigator', async () => {
+    mockApi(reads(withIssue(fx.claimed, { type: 'idea' })));
+    renderView(<IssueView n={2} actor="alice" />);
+    expect(await screen.findByRole('button', { name: 'Release' })).toBeInTheDocument();
+  });
+
+  it('shows a retained assignment as history for a closed idea', async () => {
+    mockApi(reads(withIssue(fx.claimed, { type: 'idea', state: 'closed' })));
+    renderView(<IssueView n={2} />);
+    expect(await screen.findByText('Last assigned to @alice')).toBeInTheDocument();
+    expect(screen.queryByText(/in progress|Investigating/)).toBeNull();
+  });
+});
+
+it('keeps an outcome draft when the tracker refuses the edit', async () => {
+  const { calls } = mockApi({
+    ...reads(withIssue(fx.claimed, { type: 'idea', state: 'closed' })),
+    'PATCH /api/issues/2': status(400, {
+      error: 'invalid_input',
+      fields: { field: 'outcome', reason: 'the body changed; try again' },
+    }),
+  });
+  const { user } = renderView(<IssueView n={2} />);
+  await user.click(await screen.findByText('Record outcome'));
+  const save = screen.getByRole('button', { name: 'Save outcome' });
+  expect(save).toBeDisabled();
+  const note = screen.getByLabelText('Outcome note');
+  await user.type(note, 'Decided in #9.');
+  await user.click(save);
+  expect(await screen.findByText('outcome: the body changed; try again')).toBeInTheDocument();
+  expect(note).toHaveValue('Decided in #9.');
+  expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({
+    outcome: 'Decided in #9.',
+    allowClosed: true,
+  });
+});

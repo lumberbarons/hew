@@ -135,6 +135,7 @@ test('files an idea from its page, then investigates and closes it deliberately'
 
   await page.getByLabel('Title').fill(title);
   await page.getByLabel('Problem or opportunity').fill('Repeated reads are slow');
+  await page.getByLabel('Open questions').fill('How stale can the data be?');
   await expect(page.getByText('Ready to create.')).toBeVisible();
   await page.getByRole('button', { name: 'Create' }).click();
   await expect(page.getByRole('heading', { level: 1 })).toContainText(title);
@@ -152,6 +153,7 @@ test('files an idea from its page, then investigates and closes it deliberately'
   await expect(page.getByText('Ready to create.')).toBeVisible();
   await page.getByRole('button', { name: 'Create' }).click();
   await expect(page.getByRole('heading', { level: 1 })).toContainText(task);
+  const taskNumber = Number(new URL(page.url()).hash.split('/').pop());
   await page.goto('/#/ideas');
   await expect(page.getByRole('link', { name: title })).toBeVisible();
   await expect(page.getByRole('link', { name: task })).toHaveCount(0);
@@ -160,9 +162,23 @@ test('files an idea from its page, then investigates and closes it deliberately'
   await page.goto(`/#/issue/${n}`);
   await page.getByRole('button', { name: 'Start investigation' }).click();
   await expect(page.getByText(`Investigating #${n}`)).toBeVisible();
+  await expect(page.getByText(/Investigating · @/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start investigation' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Release' })).toBeVisible();
+
+  await page.getByText('Record outcome', { exact: true }).click();
+  await page.getByLabel('Outcome note').fill(`Discussed in #${taskNumber}. Keep measuring first.`);
+  await page.getByRole('button', { name: 'Save outcome' }).click();
+  await expect(page.getByRole('heading', { name: 'Outcome' })).toBeVisible();
+  await expect(page.getByRole('link', { name: `#${taskNumber}`, exact: true })).toBeVisible();
+  await expect(page.getByText('Repeated reads are slow', { exact: true })).toBeVisible();
+  await expect(page.getByText('How stale can the data be?', { exact: true })).toBeVisible();
+
   await page.getByLabel('Reason').fill('decided against it');
   await page.getByRole('button', { name: 'Close issue' }).click();
   await expect(page.getByText(`Closed #${n}`)).toBeVisible();
+  await expect(page.getByText(/Last assigned to @/)).toBeVisible();
+  await expect(page.getByText(/Investigating · @|in progress @/)).toHaveCount(0);
 
   await page.goto('/#/ideas');
   await expect(page.getByRole('link', { name: title })).toHaveCount(0);

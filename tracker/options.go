@@ -64,14 +64,14 @@ type BlockOptions struct {
 // EditRequest names the changes to make to one issue. Every field is optional:
 // a nil pointer, an empty slice or a false flag leaves that part of the issue
 // alone. The pointer fields carry presence rather than value, so an explicitly
-// empty title, body, priority or type is refused instead of being read as an
+// empty title, body, outcome, priority or type is refused instead of being read as an
 // omitted field.
 type EditRequest struct {
 	// Issue is the issue to edit.
 	Issue int
 	// Priority is P0..P4; the old priority label is swapped, never stacked.
 	Priority *string
-	// Type is bug|enhancement|task; the old type label is swapped, never
+	// Type is bug|enhancement|task|idea; the old type label is swapped, never
 	// stacked.
 	Type *string
 	// Title replaces the issue's title.
@@ -79,6 +79,9 @@ type EditRequest struct {
 	// Body replaces the whole issue body. An empty body is refused: an edit
 	// does not blank an issue.
 	Body *string
+	// Outcome appends a Markdown note to an idea's Outcome section. It
+	// cannot be combined with Body.
+	Outcome *string
 	// AddAreas and RemoveAreas change the issue's area labels. Added names
 	// are trimmed and de-duplicated; neither list may name a convention
 	// label.

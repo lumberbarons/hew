@@ -71,8 +71,10 @@ never hidden, never auto-"repaired". `prime` *teaches* the conventions.
   implementation is handed off as separate work issues (`--discovered-from <n>`),
   since the idea's own scope is a question rather than a diff. An idea associates
   with an epic through an issue reference, not as a sub-issue, so it stays out of
-  that epic's progress and next-child sequence. An idea child attached outside
-  hew remains visible in epic detail — reads preserve existing relationships —
+  that epic's progress and next-child sequence. `set --outcome` and hewd's
+  Record outcome action append Markdown under `### Outcome` through the shared
+  edit operation, which preserves the rest of the issue body. An idea child
+  attached outside hew remains visible in epic detail — reads preserve existing relationships —
   but is never selected as the epic's next child.
 - **Discovered work** links back: `Discovered while working on #123` in the body,
   via `--discovered-from 123`.
@@ -884,7 +886,7 @@ warnings in [Warnings and findings](#warnings-and-findings).
 | `start <n>` | `(*tracker.Tracker).Start(ctx, n, tracker.StartOptions) (tracker.StartResult, error)` | `--show` rendering, wording and exit 3/5/6 for each `tracker.StartOutcome` |
 | `release <n>` | `(*tracker.Tracker).Release(ctx, n, tracker.ReleaseOptions) error` | rendering and exit mapping |
 | `triage` | `(*tracker.Tracker).Triage(ctx, tracker.TriageRequest) (tracker.TriageResult, error)` | `--search` flag and rendering; this is the deliberate untriaged-list API |
-| `set <n>` | `(*tracker.Tracker).Edit(ctx, tracker.EditRequest) (tracker.EditResult, error)` | `--body-file` input, `--closed` flag mapping, rendering |
+| `set <n>` | `(*tracker.Tracker).Edit(ctx, tracker.EditRequest) (tracker.EditResult, error)` | `--body-file` input, `--outcome` and `--closed` flag mapping, rendering |
 | `pr` | `pr.Open(ctx, pr.Config)` then `(*pr.Client).Create(ctx, pr.CreateRequest) (pr.CreateResult, error)` or `(*pr.Client).Amend(ctx, pr.AmendRequest) (pr.AmendResult, error)` | section flags to `pr.Sections`, `--body-file`, `--title`/`--base`/`--ready` mapping, rendering |
 | `close <n>` | `(*tracker.Tracker).Close(ctx, n, tracker.CloseOptions) (tracker.CloseResult, error)` | wording and exit mapping |
 | `reopen <n>` | `(*tracker.Tracker).Reopen(ctx, n, tracker.ReopenOptions) (tracker.ReopenResult, error)` | wording and exit mapping |

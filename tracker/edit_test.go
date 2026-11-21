@@ -831,3 +831,84 @@ func TestEditToTheSameParent(t *testing.T) {
 		t.Errorf("title = %q, want %q", got.Title, title)
 	}
 }
+
+func TestEditAppendsIdeaOutcomeWithoutReformattingBody(t *testing.T) {
+	const marker = "<!-- hew:apply key=idea digest=test -->"
+	cases := []struct {
+		name, body, note, want string
+	}{
+		{"empty", "", "Pursued as #9.", "### Outcome\n\nPursued as #9."},
+		{"new section", "### Problem\n\nSlow.\n\n### Open questions\n\n- Why?\n", "Pursued as #9.", "### Problem\n\nSlow.\n\n### Open questions\n\n- Why?\n\n### Outcome\n\nPursued as #9.\n"},
+		{"existing section", "### Outcome\n\nFirst.\n\n### Notes\n\nNext.", "Second.", "### Outcome\n\nFirst.\n\nSecond.\n\n### Notes\n\nNext."},
+		{"provenance", "### Outcome\n\nFirst.\n\n" + marker, "Second.", "### Outcome\n\nFirst.\n\nSecond.\n\n" + marker},
+		{"code example", "~~~md\n### Outcome\n~~~\n    ### Outcome", "Actual.", "~~~md\n### Outcome\n~~~\n    ### Outcome\n\n### Outcome\n\nActual."},
+		{"comment", "<!--\n### Outcome\n-->\n### Problem\n\nSlow.", "Actual.", "<!--\n### Outcome\n-->\n### Problem\n\nSlow.\n\n### Outcome\n\nActual."},
+		{"CRLF", "### Outcome\r\n\r\nFirst.\r\n", "Second.\nContinued.", "### Outcome\r\n\r\nFirst.\r\n\r\nSecond.\r\nContinued.\r\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, store, issue := startFixture(t, "P2", "idea")
+			if err := store.EditBody(ctx, issue.Number, tc.body); err != nil {
+				t.Fatal(err)
+			}
+			result, err := WrapAs(store, BackendLocal, "").Edit(ctx, EditRequest{Issue: issue.Number, Outcome: &tc.note})
+			if err != nil || !slices.Equal(result.Applied, []string{"outcome"}) {
+				t.Fatalf("edit = %+v, %v", result, err)
+			}
+			if got := storeIssue(t, ctx, store, issue.Number).Body; got != tc.want {
+				t.Errorf("body = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEditRefusesInvalidIdeaOutcomesBeforeChangingOtherFields(t *testing.T) {
+	cases := []struct {
+		name, typ, body   string
+		note, replacement *string
+	}{
+		{name: "empty note", typ: "idea", note: point(" \n ")},
+		{name: "body replacement", typ: "idea", note: point("Note."), replacement: point("Replacement.")},
+		{name: "task", typ: "task", note: point("Note.")},
+		{name: "unfinished fence", typ: "idea", body: "~~~md\nUntitled", note: point("Note.")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, store, issue := startFixture(t, "P2", tc.typ)
+			if err := store.EditBody(ctx, issue.Number, tc.body); err != nil {
+				t.Fatal(err)
+			}
+			before := storeIssue(t, ctx, store, issue.Number)
+			_, err := WrapAs(store, BackendLocal, "").Edit(ctx, EditRequest{
+				Issue: issue.Number, Title: point("Must not land"), Outcome: tc.note, Body: tc.replacement,
+			})
+			var invalid *InvalidInputError
+			if !errors.As(err, &invalid) || invalid.Field != "outcome" {
+				t.Fatalf("edit = %v, want invalid outcome", err)
+			}
+			assertUnchanged(t, before, storeIssue(t, ctx, store, issue.Number))
+		})
+	}
+}
+
+type concurrentBodyEdit struct{ *local.Store }
+
+func (s concurrentBodyEdit) EditBodyIfCurrent(ctx context.Context, number int, before, after string) (bool, error) {
+	if err := s.EditBody(ctx, number, "A concurrent body update."); err != nil {
+		return false, err
+	}
+	return s.Store.EditBodyIfCurrent(ctx, number, before, after)
+}
+
+func TestEditOutcomeDoesNotOverwriteAConcurrentLocalBodyEdit(t *testing.T) {
+	ctx, store, issue := startFixture(t, "P2", "idea")
+	tr := WrapAs(concurrentBodyEdit{store}, BackendLocal, "")
+	_, err := tr.Edit(ctx, EditRequest{Issue: issue.Number, Outcome: point("First decision.")})
+	var invalid *InvalidInputError
+	if !errors.As(err, &invalid) || invalid.Field != "outcome" {
+		t.Fatalf("edit = %v, want a concurrent outcome error", err)
+	}
+	if got := storeIssue(t, ctx, store, issue.Number).Body; got != "A concurrent body update." {
+		t.Errorf("body = %q, want the concurrent edit", got)
+	}
+}

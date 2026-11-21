@@ -128,6 +128,20 @@ func (s *Store) EditBody(ctx context.Context, number int, body string) error {
 	return s.edit(ctx, number, func(_ *data, r *issueRec) error { r.Body = body; return nil })
 }
 
+// EditBodyIfCurrent replaces a body under the write lock only if it still
+// matches the caller's snapshot.
+func (s *Store) EditBodyIfCurrent(ctx context.Context, number int, before, after string) (bool, error) {
+	var matched bool
+	err := s.edit(ctx, number, func(_ *data, r *issueRec) error {
+		matched = r.Body == before
+		if matched {
+			r.Body = after
+		}
+		return nil
+	})
+	return matched, err
+}
+
 func (s *Store) AddLabels(ctx context.Context, number int, labels []string) error {
 	return s.edit(ctx, number, func(d *data, r *issueRec) error {
 		for _, l := range labels {

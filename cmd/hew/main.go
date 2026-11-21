@@ -623,6 +623,7 @@ func setCmd() *ucli.Command {
 			&ucli.BoolFlag{Name: "no-parent", Usage: "detach from its epic"},
 			&ucli.StringFlag{Name: "title", Usage: "new title"},
 			&ucli.StringFlag{Name: "body-file", Usage: "replace the body with the contents of `FILE`"},
+			&ucli.StringFlag{Name: "outcome", Usage: "append a Markdown note to an idea's Outcome section"},
 			closedOverrideFlag(),
 		},
 		Before: fixedArgs(1, 1),
@@ -635,7 +636,13 @@ func setCmd() *ucli.Command {
 			if err != nil {
 				return err
 			}
+			var outcome *string
+			if cmd.IsSet("outcome") {
+				note := cmd.String("outcome")
+				outcome = &note
+			}
 			return app.Set(ctx, n, appcli.SetOpts{
+				Outcome:     outcome,
 				Priority:    cmd.String("priority"),
 				Type:        cmd.String("type"),
 				AddAreas:    cmd.StringSlice("add-area"),
@@ -975,6 +982,7 @@ Fields and their shapes:
   where, problem, goal, fix, approach
                    strings, composed into the body template (problem or goal,
                    fix or approach, not both)
+  open-questions   optional list of strings, one discovery question each
   done-when        list of strings, one checklist item each
   body             string of raw long-form text, instead of the section fields
 

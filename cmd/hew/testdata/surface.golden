@@ -125,6 +125,7 @@ flag hew set --add-area string repeatable
 flag hew set --body-file string
 flag hew set --closed bool
 flag hew set --no-parent bool
+flag hew set --outcome string
 flag hew set --parent int
 flag hew set --priority string
 flag hew set --remove-area string repeatable

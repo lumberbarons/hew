@@ -4,14 +4,16 @@ import { Markdown } from '../Markdown';
 import { api } from '../api';
 import { useAct, useToast } from '../toast';
 import { IDEA_TYPE, ISSUE_TYPES, type Detail } from '../types';
-import { Chip, Field, num, prioClass, Section, TextFindings } from '../ui';
+import { Chip, ClaimChip, Field, num, prioClass, Section, TextFindings } from '../ui';
 import { useLoad } from '../useLoad';
 
 const PRIORITIES = ['P0', 'P1', 'P2', 'P3', 'P4'];
 
-export function IssueView({ n }: { n: number }) {
+export function IssueView({ n, actor = '' }: { n: number; actor?: string }) {
   const state = useLoad(() => api<Detail>('GET', `/api/issues/${n}`));
-  return <Await state={state}>{(d, reload) => <IssueBody d={d} reload={reload} />}</Await>;
+  return (
+    <Await state={state}>{(d, reload) => <IssueBody d={d} reload={reload} actor={actor} />}</Await>
+  );
 }
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -23,11 +25,10 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function IssueBody({ d, reload }: { d: Detail; reload: () => void }) {
+function IssueBody({ d, reload, actor }: { d: Detail; reload: () => void; actor: string }) {
   const i = d.issue;
   const n = i.number;
   const open = i.state === 'open';
-  const claimed = i.inProgress || i.assignees.length > 0;
 
   return (
     <>
@@ -45,7 +46,7 @@ function IssueBody({ d, reload }: { d: Detail; reload: () => void }) {
         {i.areas.map((a) => (
           <Chip key={a}>{a}</Chip>
         ))}
-        {claimed && <Chip cls="claim">in progress @{i.assignees.join(', @')}</Chip>}
+        <ClaimChip issue={i} />
         {i.parent && (
           <span className="muted">
             in epic <a href={`#/issue/${i.parent}`}>{num(i.parent)}</a>
@@ -54,12 +55,13 @@ function IssueBody({ d, reload }: { d: Detail; reload: () => void }) {
       </div>
       <TextFindings findings={d.textFindings} />
       <div className="card prows">
-        {open && <Work d={d} reload={reload} claimed={claimed} />}
+        {open && <Work d={d} reload={reload} actor={actor} />}
         <Closer key={open ? 'close' : 'reopen'} d={d} reload={reload} open={open} />
         <Dependencies d={d} reload={reload} />
       </div>
       <EditPanel key={`${i.title}|${i.priority}|${i.type}`} d={d} reload={reload} open={open} />
       <h2>Body</h2>
+      {i.type === IDEA_TYPE && !i.epic && <OutcomeEditor d={d} reload={reload} />}
       {i.body ? <Markdown>{i.body}</Markdown> : <p className="muted">(empty)</p>}
       {d.children.length > 0 && (
         <Section
@@ -87,7 +89,7 @@ function IssueBody({ d, reload }: { d: Detail; reload: () => void }) {
   );
 }
 
-function Work({ d, reload, claimed }: { d: Detail; reload: () => void; claimed: boolean }) {
+function Work({ d, reload, actor }: { d: Detail; reload: () => void; actor: string }) {
   const act = useAct();
   const i = d.issue;
   const [priority, setPriority] = useState('');
@@ -95,6 +97,9 @@ function Work({ d, reload, claimed }: { d: Detail; reload: () => void; claimed: 
   // An idea is claimed only to investigate it, so the same claim path takes
   // explicit discovery intent: without it the daemon refuses the write.
   const idea = i.type === IDEA_TYPE;
+  const claimed = i.inProgress || i.assignees.length > 0;
+  const canStart = !idea || !claimed;
+  const canRelease = claimed && (!idea || (i.assignees.length === 1 && i.assignees[0] === actor));
 
   if (i.epic) {
     return (
@@ -105,16 +110,17 @@ function Work({ d, reload, claimed }: { d: Detail; reload: () => void; claimed: 
       </Row>
     );
   }
+  if (!canStart && !canRelease) return null;
   return (
     <Row label={idea ? 'Investigation' : 'Work'}>
       <div className="toolbar">
-        {idea && (
+        {idea && canStart && (
           <span className="muted">
             Claims this idea for research, an ADR or a spec. Approved implementation is filed
             separately.
           </span>
         )}
-        {needsPriority && (
+        {canStart && needsPriority && (
           <select
             aria-label="Priority"
             style={{ width: 'auto' }}
@@ -127,26 +133,28 @@ function Work({ d, reload, claimed }: { d: Detail; reload: () => void; claimed: 
             ))}
           </select>
         )}
-        <button
-          className="primary"
-          onClick={async () => {
-            if (
-              await act(
-                () =>
-                  api(
-                    'POST',
-                    `/api/issues/${i.number}/start`,
-                    idea ? { priority, forDiscovery: true } : { priority },
-                  ),
-                idea ? `Investigating ${num(i.number)}` : `Started ${num(i.number)}`,
+        {canStart && (
+          <button
+            className="primary"
+            onClick={async () => {
+              if (
+                await act(
+                  () =>
+                    api(
+                      'POST',
+                      `/api/issues/${i.number}/start`,
+                      idea ? { priority, forDiscovery: true } : { priority },
+                    ),
+                  idea ? `Investigating ${num(i.number)}` : `Started ${num(i.number)}`,
+                )
               )
-            )
-              reload();
-          }}
-        >
-          {idea ? 'Start investigation' : 'Start'}
-        </button>
-        {claimed && (
+                reload();
+            }}
+          >
+            {idea ? 'Start investigation' : 'Start'}
+          </button>
+        )}
+        {canRelease && (
           <button
             onClick={async () => {
               if (
@@ -163,6 +171,47 @@ function Work({ d, reload, claimed }: { d: Detail; reload: () => void; claimed: 
         )}
       </div>
     </Row>
+  );
+}
+
+function OutcomeEditor({ d, reload }: { d: Detail; reload: () => void }) {
+  const act = useAct();
+  const [outcome, setOutcome] = useState('');
+  const [saving, setSaving] = useState(false);
+  const i = d.issue;
+
+  const save = async () => {
+    setSaving(true);
+    const saved = await act(
+      () => api('PATCH', `/api/issues/${i.number}`, { outcome, allowClosed: i.state === 'closed' }),
+      'Outcome recorded',
+    );
+    setSaving(false);
+    if (saved) {
+      setOutcome('');
+      reload();
+    }
+  };
+
+  return (
+    <details className="card panel">
+      <summary>Record outcome</summary>
+      <Field
+        label="Outcome note"
+        hint="Markdown is supported. Use # followed by an issue number to link follow-up work."
+      >
+        <textarea rows={4} value={outcome} onChange={(e) => setOutcome(e.target.value)} />
+      </Field>
+      <div className="toolbar">
+        <button
+          className="primary"
+          disabled={saving || !outcome.trim()}
+          onClick={() => void save()}
+        >
+          Save outcome
+        </button>
+      </div>
+    </details>
   );
 }
 

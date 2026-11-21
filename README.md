@@ -194,7 +194,7 @@ hew triage [--search <terms>]  # issues missing priority/type labels; --search r
                                    # (open+closed) — the untriaged half of dedup
 hew set <n> [--priority ..] [--type ..] [--add-area X] [--remove-area X]
            [--parent N | --no-parent] [--title "..."]  # an empty --title is refused
-           [--body-file F]        # replace the body (an empty file is refused)
+           [--body-file F | --outcome "..."]  # replace the body or append an idea outcome
            [--closed]             # set/block/unblock refuse a closed target — an
                                   # edit landing on one is almost always stale
                                   # state; this is the override
@@ -305,7 +305,7 @@ agent working the queue never starts on one by accident:
 
 ```sh
 hew create --type idea --title "Consider caching repeated reads" --problem "..."
-hew list --label idea               # browse what is captured
+hew list --type idea                # browse what is captured
 hew start 42 --for-discovery --show # the explicit claim, once you decide to investigate
 ```
 
@@ -446,11 +446,11 @@ not an issue). Every existing issue a plan names — `parent`, `blocked-by` and
 `discovered-from` — is looked up first: `apply` refuses a plan with a missing
 one before any write, naming the line and number, `--dry-run` included. Bodies come from the same
 section fields the create flags use — `where`, `problem` or `goal`, `fix` or
-`approach`, `done-when` (a list, one checklist item each) — composed into the
+`approach`, `open-questions`, and `done-when` — composed into the
 body template; `body` carries raw
 long-form text instead (mutually exclusive with the section fields). Shapes:
-`blocked-by`, `areas` and `done-when` are lists; `parent` and `discovered-from`
-are a single value (a local `id` or an issue number for `parent`, an issue number
+`blocked-by`, `areas`, `open-questions`, and `done-when` are lists. `parent` and `discovered-from`
+each take a single value (a local `id` or an issue number for `parent`, an issue number
 for `discovered-from`); `hew apply --help` lists every field.
 
 Creation and dependency wiring are both checkpointed to the `--checkpoint` file as
@@ -473,24 +473,14 @@ again. The same rules apply to `migrate beads` and its snapshot, and to `migrate
 
 ### Recording an idea's outcome
 
-An idea is an ordinary issue with the `idea` type, so its outcome stays on the same issue: keep the
-original `### Problem` (or `### Goal`) and append an `### Outcome` section with the decision,
-document paths, and references to the work that followed. `hew set <n> --body-file` replaces the
-whole body, so the file carries both:
+Use **Record outcome** in hewd, or append a Markdown note from the CLI:
 
 ```sh
-cat > idea.md <<'EOF'
-### Problem
-
-The tracker speaks GitHub only.
-
-### Outcome
-
-Pursued as epic #57. The design is in `docs/adr/0002-another-backend.md`; the spec is in
-`specs/002-another-backend/spec.md`.
-EOF
-hew set 42 --body-file idea.md
+hew set 42 --outcome 'Pursued as epic #57. See `docs/adr/0002-another-backend.md` for the decision.'
 ```
+
+Hew adds the note under `### Outcome` and preserves the original problem, open questions,
+and other sections. To add a note to a closed idea from the CLI, pass `--closed`.
 
 Point the implementation issue back at the idea with an ordinary `#n` reference. An epic for the
 follow-on work can carry it in its body from the start; an existing epic gets it the same way, by

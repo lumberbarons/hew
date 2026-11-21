@@ -1,5 +1,5 @@
 import { cloneElement, useId, type ReactElement, type ReactNode } from 'react';
-import type { Issue, TextFinding, Warning } from './types';
+import { IDEA_TYPE, type Issue, type TextFinding, type Warning } from './types';
 
 export const num = (n: number) => `#${n}`;
 
@@ -10,8 +10,20 @@ export function Chip({ cls, children }: { cls?: string; children: ReactNode }) {
   return <span className={cls ? `chip ${cls}` : 'chip'}>{children}</span>;
 }
 
+export function ClaimChip({ issue }: { issue: Issue }) {
+  const owners = issue.assignees.map((name) => `@${name}`).join(', ');
+  if (issue.type === IDEA_TYPE && !issue.epic) {
+    if (issue.state === 'closed') {
+      return owners ? <Chip>Last assigned to {owners}</Chip> : null;
+    }
+    if (!issue.inProgress && !owners) return null;
+    return <Chip cls="claim">Investigating{owners ? ` · ${owners}` : ''}</Chip>;
+  }
+  if (!issue.inProgress && !owners) return null;
+  return <Chip cls="claim">in progress{owners ? ` ${owners}` : ''}</Chip>;
+}
+
 export function IssueRow({ issue: i }: { issue: Issue }) {
-  const claimed = i.inProgress || i.assignees.length > 0;
   const pct = i.subIssuesTotal ? Math.round((100 * i.subIssuesCompleted) / i.subIssuesTotal) : 0;
   const meta: ReactNode[] = [];
   if (i.epic) meta.push(<Chip key="epic">epic</Chip>);
@@ -34,12 +46,8 @@ export function IssueRow({ issue: i }: { issue: Issue }) {
       </span>,
     );
   }
-  if (claimed) {
-    meta.push(
-      <Chip key="claim" cls="claim">
-        in progress{i.assignees.length > 0 ? ` @${i.assignees.join(', @')}` : ''}
-      </Chip>,
-    );
+  if (i.inProgress || i.assignees.length > 0) {
+    meta.push(<ClaimChip key="claim" issue={i} />);
   }
   return (
     <div className="row">
