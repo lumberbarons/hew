@@ -93,6 +93,12 @@ func TestLinkedIssuesSettlesTheClaimAndBranch(t *testing.T) {
 		"a branch naming an epic does not block the claim": {
 			branch: "feat/33-the-tree", issues: []model.Issue{epic, claimed(30, "the claim")}, want: []int{30},
 		},
+		"a branch naming an idea does not veto the claim": {
+			branch: "docs/31-an-idea", issues: []model.Issue{
+				claimed(30, "the claim"), fixture(31, "an idea", "P2", model.IdeaType),
+			},
+			want: []int{30},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, err := inferenceCase(t, tc.branch, tc.issues...)
@@ -139,6 +145,18 @@ func TestLinkedIssuesRefusesAmbiguity(t *testing.T) {
 		},
 		"an epic claim is not a target": {
 			branch: "feat/x", issues: []model.Issue{claimedEpic(33, "Epic: the tree")},
+			want: InferenceMissing,
+		},
+		"a claimed idea is not a target": {
+			branch: "docs/idea-outcome", issues: []model.Issue{claimed(30, "an idea", "P2", model.IdeaType)},
+			want: InferenceMissing,
+		},
+		"an idea named in the branch is not a target": {
+			branch: "docs/31-an-idea", issues: []model.Issue{fixture(31, "an idea", "P2", model.IdeaType)},
+			want: InferenceMissing,
+		},
+		"a claimed idea the branch names is still no target": {
+			branch: "docs/30-an-idea", issues: []model.Issue{claimed(30, "an idea", "P2", model.IdeaType)},
 			want: InferenceMissing,
 		},
 	} {

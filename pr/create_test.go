@@ -59,6 +59,34 @@ func TestCreateInfersTheClaim(t *testing.T) {
 	}
 }
 
+// An idea is discovery work, so inference never picks one: the outcome lives
+// outside the tracker and a documentation pull request names it explicitly.
+func TestCreateClosesAnExplicitlyNamedIdea(t *testing.T) {
+	client, _, prs := wrapped(claimed(30, "an idea", "P2", model.IdeaType))
+
+	_, err := client.Create(t.Context(), CreateRequest{Body: Body{Sections: sections("w", "y", "t")}})
+	var inference *IssueInferenceError
+	if !errors.As(err, &inference) || inference.Failure != InferenceMissing {
+		t.Fatalf("err = %T (%v), want the no-signal inference refusal", err, err)
+	}
+	if len(prs.created) != 0 {
+		t.Fatal("a pull request closed an idea without naming it")
+	}
+
+	created, err := client.Create(t.Context(), CreateRequest{
+		For: []int{30}, Body: Body{Sections: sections("w", "y", "t")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Fixes != 30 || !slices.Equal(created.FixedIssues, []int{30}) {
+		t.Errorf("Fixes = %d, FixedIssues = %v, want the declared idea", created.Fixes, created.FixedIssues)
+	}
+	if body := prs.created[0].Body; !strings.HasSuffix(body, "Fixes #30") {
+		t.Errorf("body = %q", body)
+	}
+}
+
 // GitHub knows the branch by its upstream name only, so a pull request opened
 // from the worktree's local name is rejected. Both the create and the
 // existing-pull-request lookup go out under the resolved name.
