@@ -457,6 +457,8 @@ func TestCreateSectionValidation(t *testing.T) {
 		Sections: sections, Edit: true}), "section flags")
 	usageError(t, app.Create(ctx, CreateOpts{Title: "T", Type: "task",
 		Sections: conventions.Sections{DoneWhen: []string{" "}}}), "--done-when items cannot be empty")
+	usageError(t, app.Create(ctx, CreateOpts{Title: "T", Type: "idea",
+		Sections: conventions.Sections{Problem: "P", OpenQuestions: []string{"Why?", " "}}}), "--open-questions items cannot be empty")
 	if len(f.calls) != 0 {
 		t.Errorf("refused creates still called the API: %v", f.calls)
 	}
