@@ -154,11 +154,14 @@ func TestCreateFilesAnIdea(t *testing.T) {
 // The new type is a reserved area name on every write, so a create cannot
 // manufacture a second type out of its areas.
 func TestCreateRefusesIdeaAsAnArea(t *testing.T) {
-	ctx, tr, _ := createTracker(t)
+	ctx, tr, store := createTracker(t)
 	_, err := tr.Create(ctx, CreateRequest{Title: "T", Type: "task", Areas: []string{model.IdeaType}})
 	var invalid *InvalidInputError
 	if !errors.As(err, &invalid) || invalid.Field != "areas" || !strings.Contains(invalid.Reason, "type label") {
 		t.Fatalf("err = %v, want an areas refusal naming the type label", err)
+	}
+	if got := allIssues(t, store); len(got) != 0 {
+		t.Errorf("refused create wrote %d issue(s)", len(got))
 	}
 }
 
