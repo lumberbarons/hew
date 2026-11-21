@@ -172,7 +172,7 @@ hew show <n>                   # body, deps, parent, children, recent comments
 hew search <terms> [--state open|closed] [--limit N]
                                # text search over vetted issues, open+closed by default,
                                    # best-match order — check for an existing issue before filing one
-hew create --type bug|enhancement|task --title "..."
+hew create --type bug|enhancement|task|idea --title "..."
               [--where X] [--problem|--goal "..."] [--fix|--approach "..."]
               [--done-when "..."]...   # section flags compose the body template
               [--priority P0..P4] [--area X] [--blocked-by N] [--parent N]
@@ -446,6 +446,56 @@ verdict as the real one. Editing the plan between runs invalidates the
 checkpoint by design; if you need to change it mid-flight, start a fresh run
 with a new `--checkpoint` path and expect the entries already created to be created
 again. The same rules apply to `migrate beads` and its snapshot, and to `migrate local` and `.hew/issues.jsonl`.
+
+### Recording an idea's outcome
+
+An idea is an ordinary issue with the `idea` type, so its outcome stays on the same issue: keep the
+original `### Problem` (or `### Goal`) and append an `### Outcome` section with the decision,
+document paths, and references to the work that followed. `hew set <n> --body-file` replaces the
+whole body, so the file carries both:
+
+```sh
+cat > idea.md <<'EOF'
+### Problem
+
+The tracker speaks GitHub only.
+
+### Outcome
+
+Pursued as epic #57. The design is in `docs/adr/0002-another-backend.md`; the spec is in
+`specs/002-another-backend/spec.md`.
+EOF
+hew set 42 --body-file idea.md
+```
+
+Point the implementation issue back at the idea with an ordinary `#n` reference. An epic for the
+follow-on work can carry it in its body from the start; an existing epic gets it the same way, by
+revising the body with `hew set <n> --body-file`:
+
+```sh
+hew epic create --title "Another backend" --goal "Track the implementation of idea #42."
+```
+
+A reference, not a parent relationship: `#42` links the two while the idea keeps its own number and
+stays outside the epic's child list and progress.
+
+Park or decline an idea with `hew close`; the reason is kept as a comment on the issue. Close as
+completed when the investigation reached a decision and handed the work off, and use the default
+when the idea is not being pursued:
+
+```sh
+hew close 42 --completed --reason "Pursued as #57; decision and artifacts are in the body."
+hew close 42 --reason "Parked: not this year; the backend work is deferred."
+```
+
+`hew show 42` reads the body and comments together, so the decision, the artifact paths, and the
+close reason are all on the closed issue, and `hew list --state closed` finds it once it leaves the
+open queue. Reopening restores the same issue — number, body, and history — and adds its own
+comment:
+
+```sh
+hew reopen 42 --reason "Revisiting: the backend is needed again."
+```
 
 ## Auto-triage in CI
 
