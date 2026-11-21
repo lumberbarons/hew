@@ -19,8 +19,8 @@ behind it gets re-litigated by the next agent who wonders why.
 
 Research is the **upstream** document: ADRs and specs cite it, and it does not depend on
 them. The links still run both ways where both ends are stable. An ADR cites the research
-that informed it, and `create-adr` then adds that ADR's id to the research document's
-`related`, so a reader of either can find the other. Specs are different: they get
+that informed it, and `approve-adr` adds that ADR's id to the research document's
+`related` once the ADR is accepted, so a reader of either can find the other. Specs are different: they get
 renamed, split and archived, so a spec cites research from its own side and research never
 links to one. Do not guess at a consumer when you write — an ADR id appears in `related`
 once that ADR exists.

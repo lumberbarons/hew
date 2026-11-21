@@ -50,7 +50,7 @@ FRONTMATTER_KEYS = (
     "tags",
 )
 LIST_KEYS = ("authors", "supersedes", "superseded-by", "related", "tags")
-# `related` also takes ADR ids: create-adr back-links the ADRs that cite a document.
+# `related` also takes ADR ids: approve-adr back-links the ADRs that cite a document once they are accepted.
 ID_LIST_KEYS = ("supersedes", "superseded-by", "related")
 
 # Research is a snapshot of what was known on a date. The status says whether
@@ -175,7 +175,7 @@ def skeleton(title: str, number: int, today: str, findings: int, sources: int) -
         "",
         "<FILL: 2-5 sentences. What prompted the question and what turns on the"
         " answer. Do not forecast the ADRs or specs that will build on this -"
-        " they cite it, and create-adr adds the ADR ids to `related` afterwards.>",
+        " they cite it, and approve-adr adds the ADR ids to `related` once they are accepted.>",
         "",
         "## Scope",
         "",

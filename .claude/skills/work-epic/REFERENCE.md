@@ -588,24 +588,44 @@ The budgets are constants at the top of `pump.py`.
 
 ## Orca shapes the driver relies on
 
-Captured from a live Orca 1.4.x and pinned by the repository's tests. Every command answers
+Captured from a live Orca 1.4.267 and pinned by the repository's tests. The wrapper accepts the
+earlier 1.4.x shapes too, so a host that has not been upgraded keeps working. Every command answers
 `{"ok", "result"}` or `{"ok": false, "error": {"code", "message", "data"}}`; `OrcaError` carries the
 code, the data, and the partial receipt.
 
-- `worker-start` → `result.{taskId, dispatchId, state: "ready", effects[{kind: "worktree", action,
-  id}], residualResources}`. The worktree id Orca created is the `worktree` effect's `id`; an older
-  host that omits it is found by the unique comment marker. Exit 0 only for `ready`.
-- `worker-list --run` → `result.{workers[], page{hasMore, nextCursor}}`; each row has `dispatchId`,
-  `workerState`, `dispatchStatus`, `terminalState`, and `projection.{liveness, attention,
-  nextAction}`. A Dispatch is over when `workerState` is `succeeded` or `failed`.
-- `check --wait --run --types` → `result.{deliveryId, messages[], count, timedOut}`; a message's
-  `payload` is a JSON string (`dispatchId`, `outcome`, `reportPath`).
+- `run-create`, `run-current`, and `run-use` → `result.{runId, objective}` on 1.4.267; older hosts
+  answer `{run: {id, objective}}`. `orca_api.run_id` accepts either, and `run-current` with no
+  binding is `{runId: null}`.
+- `worker-start` → `result.{taskId, dispatchId, state: "ready"}`. On 1.4.267 the created worktree is
+  the top-level `workspace` id and there is no `effects` array; older hosts report it as the
+  `worktree` effect's `id`. The driver reads either, and a host that omits both is found by the
+  unique comment marker. Exit 0 only for `ready`.
+- `worker-list --run` → `result.{workers[], nextCursor?}` on 1.4.267; older hosts nest the cursor in
+  `page{hasMore, nextCursor}`. A 1.4.267 row has `dispatchId`, `state`, `liveness`, `terminalState`,
+  `workspace`, and optional `attention` (category strings) and `outcome`; older rows carry
+  `workerState`, `dispatchStatus`, and `projection.{workspace.id, liveness.verdict, attention}`.
+  `orca_api.normalise_worker` presents the nested shape to the pump, so a Dispatch is over when
+  `workerState` is `succeeded` or `failed` whichever host answered. The flat `stopped` and
+  `abandoned` states are settled in 1.4.267 and normalise to a failed Dispatch, which is how the
+  nested rows expressed them.
+- `worker-show` → 1.4.267's `waitingOnHuman`: a string names a worker parked on a dialog only a human
+  can answer, `"unknown"` means Orca could not look (an older host, an unverifiable worker, or a
+  probe that timed out), and absence means the worker is free. Older hosts answer
+  `observation.agentWait`; the driver normalises both to `observation.agentWait` and raises the flag
+  only for a non-empty value.
+- `check --wait --run --types` → `result.{messages[], deliveryId?}`; a message's `payload` is a JSON
+  string or object (`dispatchId`, `outcome`, `reportPath`).
 - `worktree list` rows: `id`, `path`, `branch` (`refs/heads/…`), `comment`, `workspaceStatus`,
-  `isUnread`, `linkedIssue` (a number), `linkedPR`.
-- `worktree rm` is asynchronous (`removing: true`); the driver polls the list for the worktree to
-  disappear before deleting branches.
-- `worker-show` → `observation.agentWait`: non-null names a worker parked on a dialog only a human can
-  answer. Null means Orca never looked, not that the worker is free.
+  `isUnread`, `linkedIssue` (a number), `linkedPR`. `worktree set` answers `{worktree}`.
+- `worktree rm` answers `{removed}` or, while it runs in the background, `{removing: true}`; the
+  driver polls the list for the worktree to disappear before deleting branches.
+- `worker-release` → `result.{dispatchId, state, processAction, archive?}`; the driver ignores the
+  body and records a non-zero exit in the report's notes.
+
+Verified against a live 1.4.267 on 2026-11-20: `run-create`/`run-current`/`run-use`, the
+`worker-start` receipt (top-level `workspace`, no `effects`), `worker-list` with top-level
+`nextCursor`, `worker-show` with `waitingOnHuman` absent and `"unknown"`, an empty `check`, and
+`worktree list`/`set`/`rm` and `worker-release`.
 
 Not used yet: `--retry-request` on mutations (idempotent replay) and `request-show`. Adding them is
 the next hardening step, once the request-id format is confirmed on a live run.
