@@ -267,35 +267,42 @@ func (t *Tracker) validatePendingPlanParents(ctx context.Context, entries []Plan
 		types[e.Key()] = typ
 		return typ, nil
 	}
+	numbered := map[int]string{} // existing parents, each read once
+	numberedType := func(line, n int) (string, error) {
+		if typ, ok := numbered[n]; ok {
+			return typ, nil
+		}
+		parent, err := t.store.GetIssue(ctx, n)
+		if err != nil {
+			return "", fmt.Errorf("line %d: parent: %w", line, asReadError(err))
+		}
+		typ, _ := parent.Type()
+		numbered[n] = typ
+		return typ, nil
+	}
 	for i, e := range entries {
 		if e.Parent == nil {
 			continue
 		}
+		// Settle whether the edge is still pending before reading either end:
+		// a recorded edge must not cost a read, or fail the resume when its
+		// parent can no longer be read (requirePlanRefs skips created entries
+		// for the same reason).
 		var parentNum int
-		var parentType string
-		var parentRef string // how the refusal names the parent
+		var parentEntry PlanEntry
+		parentRef := fmt.Sprintf("#%d", e.Parent.Number) // how the refusal names the parent
 		if e.Parent.ID != "" {
-			parentEntry, ok := byKey[e.Parent.ID]
-			if !ok {
+			var ok bool
+			if parentEntry, ok = byKey[e.Parent.ID]; !ok {
 				continue // ValidatePlan already refused an unknown id
 			}
-			parentNum, _ = checkpoint.Created(parentEntry.Key())
-			parentRef = fmt.Sprintf("#%d", parentNum)
-			if parentNum == 0 {
+			if parentNum, _ = checkpoint.Created(parentEntry.Key()); parentNum == 0 {
 				parentRef = fmt.Sprintf("%q", e.Parent.ID) // not created yet: no number to name
-			}
-			var err error
-			if parentType, err = entryType(parentEntry); err != nil {
-				return err
+			} else {
+				parentRef = fmt.Sprintf("#%d", parentNum)
 			}
 		} else {
 			parentNum = e.Parent.Number
-			parentRef = fmt.Sprintf("#%d", parentNum)
-			parent, err := t.store.GetIssue(ctx, parentNum)
-			if err != nil {
-				return fmt.Errorf("line %d: parent: %w", e.Line, asReadError(err))
-			}
-			parentType, _ = parent.Type()
 		}
 		childNum, childCreated := checkpoint.Created(e.Key())
 		if childCreated && checkpoint.Wired(ParentEdge, childNum, parentNum) {
@@ -307,6 +314,15 @@ func (t *Tracker) validatePendingPlanParents(ctx context.Context, entries []Plan
 		}
 		if childType == model.IdeaType {
 			return &InvalidInputError{Field: "plan", Reason: entryError(e, i, "parent: %s", ideaChildRefusal).Error()}
+		}
+		var parentType string
+		if e.Parent.ID != "" {
+			parentType, err = entryType(parentEntry)
+		} else {
+			parentType, err = numberedType(e.Line, parentNum)
+		}
+		if err != nil {
+			return err
 		}
 		if parentType == model.IdeaType {
 			return &InvalidInputError{Field: "plan", Reason: entryError(e, i, "parent: %s is an idea; %s", parentRef, ideaParentRefusal).Error()}

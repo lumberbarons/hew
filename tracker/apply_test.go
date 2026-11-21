@@ -866,6 +866,33 @@ func TestApplyPlanResumesAWiredIdeaChild(t *testing.T) {
 	}
 }
 
+// A recorded edge costs no read: a resume must not fail over an existing
+// parent that can no longer be read, the way requirePlanRefs skips entries it
+// already created.
+func TestApplyPlanResumeSkipsReadingAWiredParent(t *testing.T) {
+	entries := normalizePlan([]PlanEntry{
+		{ID: "work", Title: "Add a cache", Type: "task", Parent: &PlanRef{Number: 12}},
+	})
+	digest, err := planDigest(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := fixture(55, "Add a cache", "P2", "task")
+	work.Body = PlanBodyWithProvenance(entries[0], digest)
+	store := newApplyStore(work) // #12 is gone
+
+	checkpoint := NewMemoryCheckpoint()
+	if err := checkpoint.RecordCreated("work", 55); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkpoint.RecordWired(ParentEdge, 55, 12); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WrapAs(store, BackendGitHub, "").ApplyPlan(testCtx, entries, ApplyOptions{Checkpoint: checkpoint}); err != nil {
+		t.Fatalf("resume over a wired edge to an unreadable parent: %v", err)
+	}
+}
+
 // On resume only pending parent relationships are validated, using each
 // endpoint's stored normalized type. An attachment still pending that touches
 // an idea fails before the run creates anything.
