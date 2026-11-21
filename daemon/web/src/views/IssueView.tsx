@@ -3,12 +3,11 @@ import { Await } from '../Await';
 import { Markdown } from '../Markdown';
 import { api } from '../api';
 import { useAct, useToast } from '../toast';
-import type { Detail } from '../types';
+import { IDEA_TYPE, ISSUE_TYPES, type Detail } from '../types';
 import { Chip, Field, num, prioClass, Section, TextFindings } from '../ui';
 import { useLoad } from '../useLoad';
 
 const PRIORITIES = ['P0', 'P1', 'P2', 'P3', 'P4'];
-const TYPES = ['bug', 'enhancement', 'task'];
 
 export function IssueView({ n }: { n: number }) {
   const state = useLoad(() => api<Detail>('GET', `/api/issues/${n}`));
@@ -93,6 +92,9 @@ function Work({ d, reload, claimed }: { d: Detail; reload: () => void; claimed: 
   const i = d.issue;
   const [priority, setPriority] = useState('');
   const needsPriority = i.untriaged || !i.priority;
+  // An idea is claimed only to investigate it, so the same claim path takes
+  // explicit discovery intent: without it the daemon refuses the write.
+  const idea = i.type === IDEA_TYPE;
 
   if (i.epic) {
     return (
@@ -104,8 +106,14 @@ function Work({ d, reload, claimed }: { d: Detail; reload: () => void; claimed: 
     );
   }
   return (
-    <Row label="Work">
+    <Row label={idea ? 'Investigation' : 'Work'}>
       <div className="toolbar">
+        {idea && (
+          <span className="muted">
+            Claims this idea for research, an ADR or a spec. Approved implementation is filed
+            separately.
+          </span>
+        )}
         {needsPriority && (
           <select
             aria-label="Priority"
@@ -124,14 +132,19 @@ function Work({ d, reload, claimed }: { d: Detail; reload: () => void; claimed: 
           onClick={async () => {
             if (
               await act(
-                () => api('POST', `/api/issues/${i.number}/start`, { priority }),
-                `Started ${num(i.number)}`,
+                () =>
+                  api(
+                    'POST',
+                    `/api/issues/${i.number}/start`,
+                    idea ? { priority, forDiscovery: true } : { priority },
+                  ),
+                idea ? `Investigating ${num(i.number)}` : `Started ${num(i.number)}`,
               )
             )
               reload();
           }}
         >
-          Start
+          {idea ? 'Start investigation' : 'Start'}
         </button>
         {claimed && (
           <button
@@ -294,7 +307,7 @@ function EditPanel({ d, reload, open }: { d: Detail; reload: () => void; open: b
         <Field label="Type">
           <select value={type} onChange={(e) => setType(e.target.value)}>
             {!i.type && <option value="">Not set</option>}
-            {TYPES.map((t) => (
+            {ISSUE_TYPES.map((t) => (
               <option key={t}>{t}</option>
             ))}
           </select>

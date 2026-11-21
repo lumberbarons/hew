@@ -122,6 +122,54 @@ test('issue text is rendered as text, never run', async ({ page, request }) => {
   ).toBeUndefined();
 });
 
+test('files an idea from its page, then investigates and closes it deliberately', async ({
+  page,
+}) => {
+  const title = unique('Consider a cache');
+
+  await page.goto('/#/ideas');
+  await expect(page.getByRole('heading', { level: 1, name: 'Ideas' })).toBeVisible();
+  await page.getByRole('link', { name: 'New idea' }).click();
+  await expect(page).toHaveURL(/#\/new\?type=idea$/);
+  await expect(page.getByLabel('Type')).toHaveValue('idea');
+
+  await page.getByLabel('Title').fill(title);
+  await page.getByLabel('Problem or opportunity').fill('Repeated reads are slow');
+  await expect(page.getByText('Ready to create.')).toBeVisible();
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toContainText(title);
+  const n = Number(new URL(page.url()).hash.split('/').pop());
+
+  // Reading the detail leaves the idea unassigned; investigating is a button.
+  await expect(page.getByText(/in progress @/)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Start investigation' })).toBeVisible();
+
+  // The page shows ideas only: a task filed through the same form stays out.
+  const task = unique('Implementation task');
+  await page.goto('/#/new');
+  await page.getByLabel('Title').fill(task);
+  await page.getByLabel('Goal').fill('Do it');
+  await expect(page.getByText('Ready to create.')).toBeVisible();
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toContainText(task);
+  await page.goto('/#/ideas');
+  await expect(page.getByRole('link', { name: title })).toBeVisible();
+  await expect(page.getByRole('link', { name: task })).toHaveCount(0);
+
+  // Investigating claims it; closing moves it from Open to Closed.
+  await page.goto(`/#/issue/${n}`);
+  await page.getByRole('button', { name: 'Start investigation' }).click();
+  await expect(page.getByText(`Investigating #${n}`)).toBeVisible();
+  await page.getByLabel('Reason').fill('decided against it');
+  await page.getByRole('button', { name: 'Close issue' }).click();
+  await expect(page.getByText(`Closed #${n}`)).toBeVisible();
+
+  await page.goto('/#/ideas');
+  await expect(page.getByRole('link', { name: title })).toHaveCount(0);
+  await page.goto('/#/ideas?state=closed');
+  await expect(page.getByRole('link', { name: title })).toBeVisible();
+});
+
 test('the daemon refuses a cross-site write', async ({ request }) => {
   const res = await request.post('/api/issues', {
     headers: { Origin: 'https://evil.example' },

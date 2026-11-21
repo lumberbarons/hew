@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 
+export type IdeaState = 'open' | 'closed';
+
 export type Route =
   | { name: 'board' }
+  | { name: 'ideas'; state: IdeaState }
   | { name: 'issue'; n: number }
-  | { name: 'new' }
+  | { name: 'new'; type?: string }
   | { name: 'search'; q: string }
   | { name: 'triage' }
   | { name: 'apply' }
@@ -13,15 +16,20 @@ export type Route =
 export function parseHash(hash: string): Route {
   const [path = '', query = ''] = hash.replace(/^#/, '').split('?');
   const [, view = '', arg = ''] = path.split('/');
+  const params = new URLSearchParams(query);
   switch (view) {
     case 'issue': {
       const n = Number.parseInt(arg, 10);
       return Number.isInteger(n) && n > 0 ? { name: 'issue', n } : { name: 'board' };
     }
-    case 'new':
-      return { name: 'new' };
+    case 'ideas':
+      return { name: 'ideas', state: params.get('state') === 'closed' ? 'closed' : 'open' };
+    case 'new': {
+      const type = params.get('type');
+      return type ? { name: 'new', type } : { name: 'new' };
+    }
     case 'search':
-      return { name: 'search', q: new URLSearchParams(query).get('q') ?? '' };
+      return { name: 'search', q: params.get('q') ?? '' };
     case 'triage':
     case 'apply':
     case 'primer':

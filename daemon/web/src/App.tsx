@@ -6,6 +6,7 @@ import { useToast } from './toast';
 import type { Config } from './types';
 import { Apply } from './views/Apply';
 import { Board } from './views/Board';
+import { Ideas } from './views/Ideas';
 import { IssueView } from './views/IssueView';
 import { NewForm } from './views/NewForm';
 import { Primer } from './views/Primer';
@@ -14,6 +15,7 @@ import { Triage } from './views/Triage';
 
 const NAV = [
   ['#/', 'Board'],
+  ['#/ideas', 'Ideas'],
   ['#/new', 'New'],
   ['#/search', 'Search'],
   ['#/triage', 'Triage'],
@@ -105,10 +107,12 @@ export function App() {
 
 function View({ route }: { route: ReturnType<typeof useRoute> }) {
   switch (route.name) {
+    case 'ideas':
+      return <Ideas state={route.state} />;
     case 'issue':
       return <IssueView key={route.n} n={route.n} />;
     case 'new':
-      return <NewForm />;
+      return <NewForm type={route.type} />;
     case 'search':
       return <Search key={route.q} initial={route.q} />;
     case 'triage':

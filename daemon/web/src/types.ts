@@ -4,6 +4,12 @@
 // from the real Go responses by the daemon's tests, and the UI tests consume
 // them, so a change to a Go response shape fails a test instead of the UI.
 
+/** The type vocabulary the write path accepts, in form order. */
+export const ISSUE_TYPES = ['task', 'bug', 'enhancement', 'idea'] as const;
+
+/** Ideas are discovery work: captured unclaimed, claimed only for investigation. */
+export const IDEA_TYPE = 'idea';
+
 export interface Comment {
   author: string;
   createdAt: string;
