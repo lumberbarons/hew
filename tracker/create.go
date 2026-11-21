@@ -41,7 +41,9 @@ type CreateRequest struct {
 	// Assignees claims the new issue for these logins, preserving a source
 	// claim when a migration files it. A non-empty list adds the in-progress
 	// label too, so the result is a claim the claim guard recognises rather
-	// than a bare assignment.
+	// than a bare assignment. An idea refuses assignees: capture never claims
+	// the issue it files — an investigation claim is a separate, explicit
+	// start.
 	Assignees []string
 }
 
@@ -232,6 +234,14 @@ func (t *Tracker) prepareCreate(ctx context.Context, req CreateRequest) (createP
 	assignees, err := normalizeAssignees(req.Assignees)
 	if err != nil {
 		return createPlan{}, err
+	}
+	if req.Type == model.IdeaType && len(assignees) > 0 {
+		// Capture records a possible improvement for later; a claim is that
+		// later decision, made through Start with explicit discovery intent.
+		return createPlan{}, &InvalidInputError{
+			Field:  "assignees",
+			Reason: "an idea is captured unclaimed; claim it with discovery intent",
+		}
 	}
 	blockedBy, err := issueNumbers("blockedBy", req.BlockedBy)
 	if err != nil {

@@ -26,7 +26,8 @@ type StartResult struct {
 // existing claim or open blockers.
 //
 // The refusals are typed: ClosedError and EpicError for a target that cannot
-// be worked, ClaimedError carrying the claimants and whether the acting
+// be worked, DiscoveryIntentError for an idea claimed without declaring
+// investigation, ClaimedError carrying the claimants and whether the acting
 // identity is one of them, BlockedError carrying the open blockers, and
 // UntriagedError when a claim would need a priority the caller did not give
 // (claiming an untriaged issue is triage). Start claims atomically on a
@@ -40,8 +41,17 @@ func (t *Tracker) Start(ctx context.Context, number int, opts StartOptions) (Sta
 	if !issue.IsOpen() {
 		return StartResult{}, &ClosedError{Issue: number, Reason: issue.StateReason}
 	}
+	// Epic classification wins over the type: an issue that qualifies as both
+	// stays a container even for an explicit discovery claim.
 	if issue.IsEpic() {
 		return StartResult{}, &EpicError{Issue: number}
+	}
+	// An idea is captured for later investigation, so claiming it is a
+	// deliberate act. The gate sits before the claim and priority writes and
+	// ignores Force: stealing an idea is no less a decision to investigate, and
+	// a forced start must not be a way around the intent.
+	if typ, _ := issue.Type(); typ == model.IdeaType && !opts.ForDiscovery {
+		return StartResult{}, &DiscoveryIntentError{Issue: number}
 	}
 	if (len(issue.Assignees) > 0 || issue.InProgress()) && !opts.Force {
 		return StartResult{}, claimError(ctx, t.store, issue, t.actor)

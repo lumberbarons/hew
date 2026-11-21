@@ -33,6 +33,7 @@ func TestClassifyMapsEveryTypedError(t *testing.T) {
 		{"not found", &tracker.NotFoundError{Issue: 9}, 404, "not_found"},
 		{"closed", &tracker.ClosedError{Issue: 1, Reason: "completed"}, 409, "closed"},
 		{"epic", &tracker.EpicError{Issue: 4}, 409, "epic"},
+		{"idea without discovery intent", &tracker.DiscoveryIntentError{Issue: 5}, 409, "discovery_intent"},
 		{"not claimed", &tracker.NotClaimedError{Issue: 1}, 409, "not_claimed"},
 		{"not owner", &tracker.NotOwnerError{Issue: 1, Assignees: []string{"bob"}, Actor: "alice"}, 409, "not_owner"},
 		{"open children", &tracker.OpenChildrenError{Issue: 4, Open: 2}, 409, "open_children"},

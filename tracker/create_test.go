@@ -151,6 +151,35 @@ func TestCreateFilesAnIdea(t *testing.T) {
 	}
 }
 
+// Capture cannot claim the issue it files: an idea create carrying an assignee
+// is refused before the first write, through both the create path and the
+// no-write pre-flight, so no issue exists to release.
+func TestCreateRefusesAnAssigneeOnAnIdea(t *testing.T) {
+	ctx, tr, store := createTracker(t)
+	req := CreateRequest{Title: "Consider a cache", Type: model.IdeaType, Assignees: []string{"octocat"}}
+
+	var invalid *InvalidInputError
+	if _, err := tr.Create(ctx, req); !errors.As(err, &invalid) {
+		t.Fatalf("create = %v, want an InvalidInputError", err)
+	}
+	if invalid.Field != "assignees" || !strings.Contains(invalid.Reason, "idea") {
+		t.Errorf("InvalidInputError = %+v, want the assignees field refused for an idea", invalid)
+	}
+	if got := allIssues(t, store); len(got) != 0 {
+		t.Errorf("refused create wrote %d issue(s)", len(got))
+	}
+
+	invalid = nil
+	if err := tr.CheckCreate(ctx, req); !errors.As(err, &invalid) || invalid.Field != "assignees" {
+		t.Errorf("CheckCreate = %v, want the same assignees refusal", err)
+	}
+
+	// The same assignee on a task is an ordinary claim at creation.
+	if _, err := tr.Create(ctx, CreateRequest{Title: "Do the thing", Type: "task", Assignees: []string{"octocat"}}); err != nil {
+		t.Errorf("task create with an assignee = %v, want it accepted", err)
+	}
+}
+
 // The new type is a reserved area name on every write, so a create cannot
 // manufacture a second type out of its areas.
 func TestCreateRefusesIdeaAsAnArea(t *testing.T) {
