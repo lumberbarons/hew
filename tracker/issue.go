@@ -16,6 +16,10 @@ import (
 // by unmarshaling the schema carries the exported fields only, so the
 // accessors below report that extra data as absent; use a Reader or Tracker
 // read when it matters.
+//
+// Epic is the hierarchy classification rather than the type: sub-issues or the
+// epic marker outrank idea, so an issue a repository attached outside hew
+// still reads as an epic with its relationships visible.
 type Issue struct {
 	Number             int       `json:"number"`
 	Title              string    `json:"title"`
